@@ -1,0 +1,23 @@
+{
+  "name": "lynkdrive",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,mobile -c cyan,magenta \"npm run dev:api\" \"npm run dev:mobile\"",
+    "dev:api": "npm run start:dev -w @lynkdrive/api",
+    "dev:mobile": "npm run start -w @lynkdrive/mobile",
+    "build": "npm run build -ws",
+    "lint": "npm run lint -ws",
+    "test": "npm run test -ws"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

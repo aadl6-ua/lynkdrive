@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: lynkdrive-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fyf_dev
+      POSTGRES_USER: postgres
+    ports:
+      - '5432:5432'
+    volumes:
+      - lynkdrive_pg_data:/var/lib/postgresql/data
+
+volumes:
+  lynkdrive_pg_data:
