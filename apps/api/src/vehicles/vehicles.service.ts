@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from '../users/entities/user.entity';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
+import { GetVehiclesFiltersDto } from './dto/get-vehicles-filters.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { VehicleResponseDto } from './dto/vehicle-response.dto';
 import { VehicleEntity } from './entities/vehicle.entity';
@@ -35,8 +36,57 @@ export class VehiclesService {
     private readonly usersRepository: Repository<UserEntity>
   ) {}
 
-  async findAll(): Promise<VehicleResponseDto[]> {
-    const rows = await this.vehiclesRepository.query(`
+  async findAll(filters: GetVehiclesFiltersDto = {}): Promise<VehicleResponseDto[]> {
+    const whereParts: string[] = ['deleted_at IS NULL'];
+    const params: Array<string | number> = [];
+
+    if (typeof filters.maxPrice === 'number' && !Number.isNaN(filters.maxPrice)) {
+      params.push(filters.maxPrice);
+      whereParts.push(`price_per_day <= $${params.length}`);
+    }
+
+    if (filters.fuelType) {
+      params.push(filters.fuelType);
+      whereParts.push(`fuel_type = $${params.length}`);
+    }
+
+    if (filters.transmission) {
+      params.push(filters.transmission);
+      whereParts.push(`transmission = $${params.length}`);
+    }
+
+    if (typeof filters.seats === 'number' && !Number.isNaN(filters.seats)) {
+      params.push(filters.seats);
+      whereParts.push(`seats >= $${params.length}`);
+    }
+
+    if (filters.status) {
+      params.push(filters.status);
+      whereParts.push(`status = $${params.length}`);
+    }
+
+    const hasGeoFilter =
+      typeof filters.lat === 'number' &&
+      typeof filters.lng === 'number' &&
+      typeof filters.radiusKm === 'number' &&
+      !Number.isNaN(filters.lat) &&
+      !Number.isNaN(filters.lng) &&
+      !Number.isNaN(filters.radiusKm);
+
+    if (hasGeoFilter) {
+      params.push(filters.lng as number);
+      const lngParamIndex = params.length;
+      params.push(filters.lat as number);
+      const latParamIndex = params.length;
+      params.push((filters.radiusKm as number) * 1000);
+      const radiusParamIndex = params.length;
+
+      whereParts.push(
+        `ST_DWithin(location::geography, ST_SetSRID(ST_MakePoint($${lngParamIndex}, $${latParamIndex}), 4326)::geography, $${radiusParamIndex})`
+      );
+    }
+
+    const query = `
       SELECT
         id,
         owner_id,
@@ -55,9 +105,11 @@ export class VehiclesService {
         status,
         created_at
       FROM vehicles
-      WHERE deleted_at IS NULL
+      WHERE ${whereParts.join(' AND ')}
       ORDER BY created_at DESC
-    `);
+    `;
+
+    const rows = await this.vehiclesRepository.query(query, params);
 
     return rows.map((row: VehicleRow) => this.toResponseDto(row));
   }

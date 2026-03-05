@@ -102,6 +102,8 @@ export class UsersService {
       lastName: user.lastName,
       phoneNumber: user.phoneNumber,
       avatarUrl: user.avatarUrl,
+      idDocumentUrl: user.idDocumentUrl,
+      driverLicenseUrl: user.driverLicenseUrl,
       isVerified: user.isVerified,
       createdAt: user.createdAt
     };
