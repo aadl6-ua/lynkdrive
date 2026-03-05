@@ -5,6 +5,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
+import { VehicleAvailabilityWindowsModule } from './vehicle-availability-windows/vehicle-availability-windows.module';
+import { VehicleImagesModule } from './vehicle-images/vehicle-images.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 
 @Module({
@@ -33,6 +35,8 @@ import { VehiclesModule } from './vehicles/vehicles.module';
       }
     }),
     UsersModule,
+    VehicleAvailabilityWindowsModule,
+    VehicleImagesModule,
     VehiclesModule
   ],
   controllers: [AppController],

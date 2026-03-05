@@ -4,6 +4,8 @@ export class UserResponseDto {
   lastName!: string;
   phoneNumber!: string | null;
   avatarUrl!: string | null;
+  idDocumentUrl!: string | null;
+  driverLicenseUrl!: string | null;
   isVerified!: boolean;
   createdAt!: Date;
 }
