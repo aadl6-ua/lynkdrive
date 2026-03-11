@@ -1,8 +1,10 @@
 import { StatusBar } from 'expo-status-bar';
+import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Button,
+  Image,
   Platform,
   Pressable,
   SafeAreaView,
@@ -17,6 +19,9 @@ import { useUserProfileStore } from './src/store/useUserProfileStore';
 import { useVehicleAvailabilityWindowsStore } from './src/store/useVehicleAvailabilityWindowsStore';
 import { useVehicleImagesStore } from './src/store/useVehicleImagesStore';
 import { useVehiclesStore } from './src/store/useVehiclesStore';
+import { UploadTarget, uploadImageToApi } from './src/api/uploads';
+import { resolveStoredImageUrl } from './src/api/storage';
+import { prepareUploadImage } from './src/api/prepareUploadImage';
 
 type TabKey = 'explore' | 'trips' | 'myVehicles' | 'profile';
 type MyVehiclesScreen = 'list' | 'edit' | 'images' | 'availability';
@@ -79,6 +84,9 @@ export default function App() {
   const [availabilityStartInput, setAvailabilityStartInput] = useState('');
   const [availabilityEndInput, setAvailabilityEndInput] = useState('');
   const [editingAvailabilityWindowId, setEditingAvailabilityWindowId] = useState<string | null>(null);
+  const [profileUploadingField, setProfileUploadingField] = useState<UploadTarget | null>(null);
+  const [profileUploadMessage, setProfileUploadMessage] = useState<string | null>(null);
+  const [vehicleImageUploading, setVehicleImageUploading] = useState(false);
   const { width } = useWindowDimensions();
   const isDesktopLike = Platform.OS === 'web' || width >= 768;
 
@@ -150,6 +158,11 @@ export default function App() {
     [vehicles, selectedUserId]
   );
 
+  const resolvedProfileAvatarUrl = useMemo(
+    () => resolveStoredImageUrl(profile?.avatarUrl ?? null),
+    [profile?.avatarUrl]
+  );
+
   const editingVehicle = useMemo(
     () => myVehicles.find((vehicle) => vehicle.id === editingVehicleId) ?? null,
     [myVehicles, editingVehicleId]
@@ -181,6 +194,78 @@ export default function App() {
   const handleDeleteUser = async () => {
     await deleteProfile();
     await fetchVehicles();
+  };
+
+  const pickSingleImage = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permissionResult.granted) {
+      throw new Error('Permiso de galeria denegado');
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 0.8
+    });
+
+    if (result.canceled || !result.assets[0]) {
+      return null;
+    }
+
+    return result.assets[0];
+  };
+
+  const uploadPickedImage = async (target: UploadTarget, ownerId?: string) => {
+    const asset = await pickSingleImage();
+
+    if (!asset) {
+      return null;
+    }
+
+    const prepared = await prepareUploadImage(asset, target);
+
+    const uploaded = await uploadImageToApi({
+      target,
+      ownerId,
+      fileUri: prepared.fileUri,
+      fileName: prepared.fileName,
+      mimeType: prepared.mimeType,
+      webFile: prepared.webFile
+    });
+
+    return uploaded.persistedValue;
+  };
+
+  const handleUploadUserImage = async (target: 'avatar' | 'id_document' | 'driver_license') => {
+    try {
+      setProfileUploadingField(target);
+      setProfileUploadMessage(null);
+
+      const uploadedUrl = await uploadPickedImage(target, selectedUserId);
+
+      if (!uploadedUrl) {
+        return;
+      }
+
+      if (target === 'avatar') {
+        setAvatarInput(uploadedUrl);
+      }
+
+      if (target === 'id_document') {
+        setIdDocumentInput(uploadedUrl);
+      }
+
+      if (target === 'driver_license') {
+        setDriverLicenseInput(uploadedUrl);
+      }
+
+      setProfileUploadMessage('Imagen subida. Pulsa Guardar para persistir la URL en el perfil.');
+    } catch {
+      setProfileUploadMessage('No se pudo comprimir o subir la imagen. Revisa permisos, tamano y configuracion de buckets.');
+    } finally {
+      setProfileUploadingField(null);
+    }
   };
 
   const handleCreateVehicle = async () => {
@@ -395,6 +480,34 @@ export default function App() {
     }
   };
 
+  const handlePickUploadAndCreateVehicleImage = async () => {
+    if (!editingVehicleId) {
+      return;
+    }
+
+    const normalizedPrimary = vehicleImageIsPrimaryInput.trim().toLowerCase();
+    const isPrimary =
+      normalizedPrimary === 'true' ||
+      normalizedPrimary === '1' ||
+      normalizedPrimary === 'si' ||
+      normalizedPrimary === 'sí';
+
+    try {
+      setVehicleImageUploading(true);
+      const uploadedUrl = await uploadPickedImage('vehicle_image', editingVehicleId);
+
+      if (!uploadedUrl) {
+        return;
+      }
+
+      await createVehicleImageForVehicle(editingVehicleId, uploadedUrl, isPrimary);
+      setVehicleImageUrlInput('');
+      setVehicleImageIsPrimaryInput('false');
+    } finally {
+      setVehicleImageUploading(false);
+    }
+  };
+
   const handleDeleteVehicleImage = async (imageId: string) => {
     if (!editingVehicleId) {
       return;
@@ -600,12 +713,20 @@ export default function App() {
                 <Button
                   title="Crear imagen"
                   onPress={handleCreateVehicleImage}
-                  disabled={vehicleImagesSaving}
+                  disabled={vehicleImagesSaving || vehicleImageUploading}
+                />
+              </View>
+
+              <View style={styles.buttonContainer}>
+                <Button
+                  title={vehicleImageUploading ? 'Subiendo imagen...' : 'Seleccionar, subir y crear'}
+                  onPress={handlePickUploadAndCreateVehicleImage}
+                  disabled={vehicleImagesSaving || vehicleImageUploading}
                 />
               </View>
             </View>
 
-            {vehicleImagesLoading || vehicleImagesSaving ? <ActivityIndicator size="small" /> : null}
+            {vehicleImagesLoading || vehicleImagesSaving || vehicleImageUploading ? <ActivityIndicator size="small" /> : null}
             {vehicleImagesError ? <Text style={styles.error}>{vehicleImagesError}</Text> : null}
             {vehicleImagesMutationMessage ? <Text style={styles.info}>{vehicleImagesMutationMessage}</Text> : null}
 
@@ -613,6 +734,15 @@ export default function App() {
               <View key={image.id} style={styles.card}>
                 <Text style={styles.row}><Text style={styles.label}>ID:</Text> {image.id}</Text>
                 <Text style={styles.row}><Text style={styles.label}>URL:</Text> {image.imageUrl}</Text>
+                {resolveStoredImageUrl(image.imageUrl) ? (
+                  <Image
+                    source={{ uri: resolveStoredImageUrl(image.imageUrl) ?? '' }}
+                    style={styles.vehicleImagePreview}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Text style={styles.subtitle}>No se puede previsualizar (bucket privado o URL invalida).</Text>
+                )}
                 <Text style={styles.row}><Text style={styles.label}>Principal:</Text> {image.isPrimary ? 'Sí' : 'No'}</Text>
                 <Text style={styles.row}><Text style={styles.label}>Alta:</Text> {new Date(image.createdAt).toLocaleString('es-ES')}</Text>
                 <View style={styles.buttonContainer}>
@@ -899,12 +1029,16 @@ export default function App() {
         <Text style={styles.subtitle}>Datos personales, documentación y acciones CRUD.</Text>
 
         <View style={styles.profileHeaderCard}>
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarInitials}>
-              {(firstNameInput[0] ?? '?').toUpperCase()}
-              {(lastNameInput[0] ?? '').toUpperCase()}
-            </Text>
-          </View>
+          {resolvedProfileAvatarUrl ? (
+            <Image source={{ uri: resolvedProfileAvatarUrl }} style={styles.avatarCircleImage} resizeMode="cover" />
+          ) : (
+            <View style={styles.avatarCircle}>
+              <Text style={styles.avatarInitials}>
+                {(firstNameInput[0] ?? '?').toUpperCase()}
+                {(lastNameInput[0] ?? '').toUpperCase()}
+              </Text>
+            </View>
+          )}
           <View style={styles.profileHeaderInfo}>
             <Text style={styles.profileName}>{firstNameInput || 'Nombre'} {lastNameInput || 'Apellido'}</Text>
             <Text style={styles.profileMeta}>ID: {selectedUserId}</Text>
@@ -955,6 +1089,32 @@ export default function App() {
           />
         </View>
 
+        <View style={styles.formGrid}>
+          <Button
+            title={profileUploadingField === 'avatar' ? 'Subiendo avatar...' : 'Seleccionar y subir avatar'}
+            onPress={() => handleUploadUserImage('avatar')}
+            disabled={profileUploadingField !== null}
+          />
+          <Button
+            title={
+              profileUploadingField === 'id_document'
+                ? 'Subiendo DNI...'
+                : 'Seleccionar y subir DNI'
+            }
+            onPress={() => handleUploadUserImage('id_document')}
+            disabled={profileUploadingField !== null}
+          />
+          <Button
+            title={
+              profileUploadingField === 'driver_license'
+                ? 'Subiendo carnet...'
+                : 'Seleccionar y subir carnet'
+            }
+            onPress={() => handleUploadUserImage('driver_license')}
+            disabled={profileUploadingField !== null}
+          />
+        </View>
+
         <View style={styles.actionsRow}>
           <View style={styles.actionButtonWrapper}>
             <Button title="Crear" onPress={handleCreateUser} disabled={saving} />
@@ -969,6 +1129,7 @@ export default function App() {
 
         {saving ? <ActivityIndicator size="small" /> : null}
         {mutationMessage ? <Text style={styles.info}>{mutationMessage}</Text> : null}
+        {profileUploadMessage ? <Text style={styles.info}>{profileUploadMessage}</Text> : null}
 
         {profile ? (
           <View style={styles.card}>
@@ -977,6 +1138,9 @@ export default function App() {
             <Text style={styles.row}><Text style={styles.label}>Teléfono:</Text> {profile.phoneNumber ?? 'No definido'}</Text>
             <Text style={styles.row}><Text style={styles.label}>Verificado:</Text> {profile.isVerified ? 'Sí' : 'No'}</Text>
             <Text style={styles.row}><Text style={styles.label}>Avatar:</Text> {profile.avatarUrl ?? 'No definido'}</Text>
+            {resolvedProfileAvatarUrl ? (
+              <Image source={{ uri: resolvedProfileAvatarUrl }} style={styles.profileImagePreview} resizeMode="cover" />
+            ) : null}
             <Text style={styles.row}><Text style={styles.label}>DNI:</Text> {profile.idDocumentUrl ?? 'No definido'}</Text>
             <Text style={styles.row}><Text style={styles.label}>Carnet:</Text> {profile.driverLicenseUrl ?? 'No definido'}</Text>
             <Text style={styles.row}><Text style={styles.label}>Alta:</Text> {new Date(profile.createdAt).toLocaleString('es-ES')}</Text>
@@ -1126,6 +1290,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center'
   },
+  avatarCircleImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#f0f0f0'
+  },
   avatarInitials: {
     fontSize: 18,
     fontWeight: '700'
@@ -1155,6 +1325,18 @@ const styles = StyleSheet.create({
   linkHint: {
     fontSize: 12,
     color: '#666'
+  },
+  profileImagePreview: {
+    width: 96,
+    height: 96,
+    borderRadius: 8,
+    backgroundColor: '#eee'
+  },
+  vehicleImagePreview: {
+    width: '100%',
+    height: 180,
+    borderRadius: 8,
+    backgroundColor: '#eee'
   },
   topNav: {
     flexDirection: 'row',
