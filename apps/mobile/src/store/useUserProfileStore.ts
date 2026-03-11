@@ -31,8 +31,10 @@ interface UserProfileState {
   mutationMessage: string | null;
   setSelectedUserId: (id: string) => void;
   fetchProfile: () => Promise<void>;
+  fetchMyProfile: () => Promise<void>;
   createProfile: (payload: UserProfileMutation) => Promise<void>;
   updateProfile: (payload: UserProfileMutation) => Promise<void>;
+  updateMyProfile: (payload: UserProfileMutation) => Promise<void>;
   deleteProfile: () => Promise<void>;
 }
 
@@ -68,6 +70,25 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
         loading: false,
         profile: null,
         error: 'No se pudo cargar el perfil. Revisa API URL, backend y UUID.'
+      });
+    }
+  },
+  fetchMyProfile: async () => {
+    set({ loading: true, error: null, mutationMessage: null });
+
+    try {
+      const response = await httpClient.get<UserProfile>('/users/me');
+
+      set({
+        profile: response.data,
+        selectedUserId: response.data.id,
+        loading: false
+      });
+    } catch {
+      set({
+        loading: false,
+        profile: null,
+        error: 'No se pudo cargar /users/me. Revisa token de autenticacion.'
       });
     }
   },
@@ -115,6 +136,20 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
       set({
         saving: false,
         mutationMessage: 'No se pudo actualizar el perfil.'
+      });
+    }
+  },
+  updateMyProfile: async (payload) => {
+    set({ saving: true, mutationMessage: null, error: null });
+
+    try {
+      await httpClient.put('/users/me', payload);
+      await get().fetchMyProfile();
+      set({ saving: false, mutationMessage: 'Perfil autenticado actualizado correctamente.' });
+    } catch {
+      set({
+        saving: false,
+        mutationMessage: 'No se pudo actualizar /users/me.'
       });
     }
   },

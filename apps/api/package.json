@@ -17,6 +17,7 @@
     "@nestjs/platform-express": "^10.4.8",
     "@nestjs/typeorm": "^11.0.0",
     "@supabase/supabase-js": "^2.99.1",
+    "jose": "^6.2.1",
     "multer": "^2.0.2",
     "pg": "^8.19.0",
     "reflect-metadata": "^0.2.2",

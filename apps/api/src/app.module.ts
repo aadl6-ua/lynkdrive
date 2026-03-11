@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { VehicleAvailabilityWindowsModule } from './vehicle-availability-windows/vehicle-availability-windows.module';
 import { VehicleImagesModule } from './vehicle-images/vehicle-images.module';
@@ -36,6 +37,7 @@ import { UploadsModule } from './uploads/uploads.module';
       }
     }),
     UsersModule,
+    AuthModule,
     VehicleAvailabilityWindowsModule,
     VehicleImagesModule,
     VehiclesModule,

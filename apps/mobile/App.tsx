@@ -22,6 +22,7 @@ import { useVehiclesStore } from './src/store/useVehiclesStore';
 import { UploadTarget, uploadImageToApi } from './src/api/uploads';
 import { resolveStoredImageUrl } from './src/api/storage';
 import { prepareUploadImage } from './src/api/prepareUploadImage';
+import { useAuthStore } from './src/store/useAuthStore';
 
 type TabKey = 'explore' | 'trips' | 'myVehicles' | 'profile';
 type MyVehiclesScreen = 'list' | 'edit' | 'images' | 'availability';
@@ -99,10 +100,28 @@ export default function App() {
     mutationMessage,
     setSelectedUserId,
     fetchProfile,
+    fetchMyProfile,
     createProfile,
     updateProfile,
+    updateMyProfile,
     deleteProfile
   } = useUserProfileStore();
+
+  const {
+    userId: authUserId,
+    email: authEmail,
+    loading: authLoading,
+    error: authError,
+    message: authMessage,
+    emailInput,
+    passwordInput,
+    setEmailInput,
+    setPasswordInput,
+    hydrateSession,
+    signIn,
+    signUp,
+    signOut
+  } = useAuthStore();
 
   const {
     items: vehicles,
@@ -143,6 +162,20 @@ export default function App() {
     fetchVehicles();
     fetchProfile();
   }, [fetchVehicles, fetchProfile]);
+
+  useEffect(() => {
+    hydrateSession();
+  }, [hydrateSession]);
+
+  useEffect(() => {
+    if (!authUserId) {
+      return;
+    }
+
+    setSelectedUserId(authUserId);
+    fetchMyProfile();
+    fetchVehicles();
+  }, [authUserId, fetchMyProfile, fetchVehicles, setSelectedUserId]);
 
   useEffect(() => {
     setFirstNameInput(profile?.firstName ?? '');
@@ -187,7 +220,12 @@ export default function App() {
   };
 
   const handleUpdateUser = async () => {
-    await updateProfile(buildPayload());
+    if (authUserId) {
+      await updateMyProfile(buildPayload());
+    } else {
+      await updateProfile(buildPayload());
+    }
+
     await fetchVehicles();
   };
 
@@ -1043,6 +1081,50 @@ export default function App() {
             <Text style={styles.profileName}>{firstNameInput || 'Nombre'} {lastNameInput || 'Apellido'}</Text>
             <Text style={styles.profileMeta}>ID: {selectedUserId}</Text>
             <Text style={styles.profileMeta}>Estado verificación: {profile?.isVerified ? 'Verificado' : 'Pendiente'}</Text>
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.switcherTitle}>Autenticacion Supabase</Text>
+          <TextInput
+            value={emailInput}
+            onChangeText={setEmailInput}
+            style={styles.input}
+            placeholder="Email"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <TextInput
+            value={passwordInput}
+            onChangeText={setPasswordInput}
+            style={styles.input}
+            placeholder="Password"
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          <View style={styles.actionsRow}>
+            <View style={styles.actionButtonWrapper}>
+              <Button title="Login" onPress={signIn} disabled={authLoading} />
+            </View>
+            <View style={styles.actionButtonWrapper}>
+              <Button title="Registro" onPress={signUp} disabled={authLoading} />
+            </View>
+            <View style={styles.actionButtonWrapper}>
+              <Button title="Logout" onPress={signOut} disabled={authLoading || !authUserId} />
+            </View>
+          </View>
+
+          {authLoading ? <ActivityIndicator size="small" /> : null}
+          {authError ? <Text style={styles.error}>{authError}</Text> : null}
+          {authMessage ? <Text style={styles.info}>{authMessage}</Text> : null}
+          <Text style={styles.row}><Text style={styles.label}>Sesion:</Text> {authUserId ? 'Autenticada' : 'No autenticada'}</Text>
+          <Text style={styles.row}><Text style={styles.label}>Auth user:</Text> {authUserId ?? 'N/A'}</Text>
+          <Text style={styles.row}><Text style={styles.label}>Email:</Text> {authEmail ?? 'N/A'}</Text>
+
+          <View style={styles.buttonContainer}>
+            <Button title="Cargar /users/me" onPress={fetchMyProfile} disabled={!authUserId || authLoading} />
           </View>
         </View>
 
