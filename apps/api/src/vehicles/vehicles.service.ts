@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from '../users/entities/user.entity';
@@ -114,6 +114,36 @@ export class VehiclesService {
     return rows.map((row: VehicleRow) => this.toResponseDto(row));
   }
 
+  async findMine(ownerId: string): Promise<VehicleResponseDto[]> {
+    const rows = await this.vehiclesRepository.query(
+      `
+        SELECT
+          id,
+          owner_id,
+          brand,
+          model,
+          year,
+          license_plate,
+          description,
+          price_per_day,
+          ST_Y(location)::text AS location_lat,
+          ST_X(location)::text AS location_lng,
+          location_address,
+          fuel_type,
+          transmission,
+          seats,
+          status,
+          created_at
+        FROM vehicles
+        WHERE owner_id = $1 AND deleted_at IS NULL
+        ORDER BY created_at DESC
+      `,
+      [ownerId]
+    );
+
+    return rows.map((row: VehicleRow) => this.toResponseDto(row));
+  }
+
   async findById(id: string): Promise<VehicleResponseDto> {
     const rows = await this.vehiclesRepository.query(
       `
@@ -215,6 +245,13 @@ export class VehiclesService {
     return this.findById(createdId);
   }
 
+  async createForOwner(ownerId: string, createVehicleDto: CreateVehicleDto): Promise<VehicleResponseDto> {
+    return this.create({
+      ...createVehicleDto,
+      ownerId
+    });
+  }
+
   async update(id: string, updateVehicleDto: UpdateVehicleDto): Promise<VehicleResponseDto> {
     const current = await this.findById(id);
 
@@ -282,6 +319,25 @@ export class VehiclesService {
     return this.findById(id);
   }
 
+  async updateForOwner(
+    id: string,
+    ownerId: string,
+    updateVehicleDto: UpdateVehicleDto
+  ): Promise<VehicleResponseDto> {
+    const current = await this.findById(id);
+
+    if (current.ownerId !== ownerId) {
+      throw new ForbiddenException('You do not own this vehicle');
+    }
+
+    const sanitizedUpdate = {
+      ...updateVehicleDto,
+      ownerId
+    };
+
+    return this.update(id, sanitizedUpdate);
+  }
+
   async softDelete(id: string): Promise<void> {
     const existingVehicle = await this.vehiclesRepository.findOne({
       where: { id }
@@ -292,6 +348,16 @@ export class VehiclesService {
     }
 
     await this.vehiclesRepository.softDelete({ id });
+  }
+
+  async softDeleteForOwner(id: string, ownerId: string): Promise<void> {
+    const existingVehicle = await this.findById(id);
+
+    if (existingVehicle.ownerId !== ownerId) {
+      throw new ForbiddenException('You do not own this vehicle');
+    }
+
+    await this.softDelete(id);
   }
 
   private async ensureOwnerExists(ownerId: string): Promise<void> {

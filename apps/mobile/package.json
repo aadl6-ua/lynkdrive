@@ -14,8 +14,11 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
+    "@supabase/supabase-js": "^2.99.1",
     "axios": "^1.8.4",
     "expo": "^54.0.0",
+    "expo-image-manipulator": "^55.0.10",
+    "expo-image-picker": "^55.0.12",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -25,6 +28,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
+    "expo-module-scripts": "^55.0.2",
     "typescript": "^5.7.3"
   }
 }

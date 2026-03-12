@@ -8,8 +8,12 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
-  Query
+  Query,
+  UseGuards
 } from '@nestjs/common';
+import { AuthUser } from 'src/auth/auth-user.type';
+import { CurrentUser } from 'src/auth/current-user.decorator';
+import { SupabaseJwtAuthGuard } from 'src/auth/supabase-jwt-auth.guard';
 import { CreateVehicleImageDto } from './dto/create-vehicle-image.dto';
 import { UpdateVehicleImageDto } from './dto/update-vehicle-image.dto';
 import { VehicleImagesService } from './vehicle-images.service';
@@ -28,22 +32,26 @@ export class VehicleImagesController {
     return this.vehicleImagesService.findById(id);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Post()
-  async create(@Body() createVehicleImageDto: CreateVehicleImageDto) {
-    return this.vehicleImagesService.create(createVehicleImageDto);
+  async create(@CurrentUser() user: AuthUser, @Body() createVehicleImageDto: CreateVehicleImageDto) {
+    return this.vehicleImagesService.createForOwner(user.sub, createVehicleImageDto);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Put(':id')
   async update(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() updateVehicleImageDto: UpdateVehicleImageDto
   ) {
-    return this.vehicleImagesService.update(id, updateVehicleImageDto);
+    return this.vehicleImagesService.updateForOwner(id, user.sub, updateVehicleImageDto);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Delete(':id')
   @HttpCode(204)
-  async delete(@Param('id', new ParseUUIDPipe()) id: string) {
-    await this.vehicleImagesService.delete(id);
+  async softDelete(@CurrentUser() user: AuthUser, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.vehicleImagesService.softDeleteForOwner(id, user.sub);
   }
 }

@@ -10,6 +10,7 @@
     "dev": "concurrently -n api,mobile -c cyan,magenta \"npm run dev:api\" \"npm run dev:mobile\"",
     "dev:api": "npm run start:dev -w @lynkdrive/api",
     "dev:mobile": "npm run start -w @lynkdrive/mobile",
+    "db:migrate:remote": "node scripts/db-migrate-remote.js",
     "build": "npm run build -ws",
     "lint": "npm run lint -ws",
     "test": "npm run test -ws"

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
@@ -15,6 +15,21 @@ export class VehicleAvailabilityWindowsService {
     @InjectRepository(VehicleEntity)
     private readonly vehiclesRepository: Repository<VehicleEntity>
   ) {}
+
+  private async ensureVehicleOwnership(vehicleId: string, ownerId: string): Promise<void> {
+    const vehicle = await this.vehiclesRepository.findOne({
+      where: { id: vehicleId, deletedAt: IsNull() },
+      select: { id: true, ownerId: true }
+    });
+
+    if (!vehicle) {
+      throw new NotFoundException(`Vehicle ${vehicleId} not found`);
+    }
+
+    if (vehicle.ownerId !== ownerId) {
+      throw new ForbiddenException('You do not own this vehicle');
+    }
+  }
 
   async findAll(vehicleId?: string): Promise<VehicleAvailabilityWindowResponseDto[]> {
     const where = vehicleId ? { vehicleId } : undefined;
@@ -66,6 +81,14 @@ export class VehicleAvailabilityWindowsService {
     return this.toResponseDto(savedWindow);
   }
 
+  async createForOwner(
+    ownerId: string,
+    createVehicleAvailabilityWindowDto: CreateVehicleAvailabilityWindowDto
+  ): Promise<VehicleAvailabilityWindowResponseDto> {
+    await this.ensureVehicleOwnership(createVehicleAvailabilityWindowDto.vehicleId, ownerId);
+    return this.create(createVehicleAvailabilityWindowDto);
+  }
+
   async update(
     id: string,
     updateVehicleAvailabilityWindowDto: UpdateVehicleAvailabilityWindowDto
@@ -98,6 +121,21 @@ export class VehicleAvailabilityWindowsService {
     return this.toResponseDto(savedWindow);
   }
 
+  async updateForOwner(
+    id: string,
+    ownerId: string,
+    updateVehicleAvailabilityWindowDto: UpdateVehicleAvailabilityWindowDto
+  ): Promise<VehicleAvailabilityWindowResponseDto> {
+    const window = await this.vehicleAvailabilityWindowsRepository.findOne({ where: { id } });
+
+    if (!window) {
+      throw new NotFoundException(`Vehicle availability window ${id} not found`);
+    }
+
+    await this.ensureVehicleOwnership(window.vehicleId, ownerId);
+    return this.update(id, updateVehicleAvailabilityWindowDto);
+  }
+
   async delete(id: string): Promise<void> {
     const existingWindow = await this.vehicleAvailabilityWindowsRepository.findOne({
       where: { id }
@@ -108,6 +146,17 @@ export class VehicleAvailabilityWindowsService {
     }
 
     await this.vehicleAvailabilityWindowsRepository.delete({ id });
+  }
+
+  async softDeleteForOwner(id: string, ownerId: string): Promise<void> {
+    const window = await this.vehicleAvailabilityWindowsRepository.findOne({ where: { id } });
+
+    if (!window) {
+      throw new NotFoundException(`Vehicle availability window ${id} not found`);
+    }
+
+    await this.ensureVehicleOwnership(window.vehicleId, ownerId);
+    await this.delete(id);
   }
 
   private async ensureVehicleExists(vehicleId: string): Promise<void> {
