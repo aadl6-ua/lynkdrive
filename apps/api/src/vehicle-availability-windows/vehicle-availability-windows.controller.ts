@@ -8,8 +8,12 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
-  Query
+  Query,
+  UseGuards
 } from '@nestjs/common';
+import { AuthUser } from 'src/auth/auth-user.type';
+import { CurrentUser } from 'src/auth/current-user.decorator';
+import { SupabaseJwtAuthGuard } from 'src/auth/supabase-jwt-auth.guard';
 import { CreateVehicleAvailabilityWindowDto } from './dto/create-vehicle-availability-window.dto';
 import { UpdateVehicleAvailabilityWindowDto } from './dto/update-vehicle-availability-window.dto';
 import { VehicleAvailabilityWindowsService } from './vehicle-availability-windows.service';
@@ -30,22 +34,36 @@ export class VehicleAvailabilityWindowsController {
     return this.vehicleAvailabilityWindowsService.findById(id);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Post()
-  async create(@Body() createVehicleAvailabilityWindowDto: CreateVehicleAvailabilityWindowDto) {
-    return this.vehicleAvailabilityWindowsService.create(createVehicleAvailabilityWindowDto);
+  async create(
+    @CurrentUser() user: AuthUser,
+    @Body() createVehicleAvailabilityWindowDto: CreateVehicleAvailabilityWindowDto
+  ) {
+    return this.vehicleAvailabilityWindowsService.createForOwner(
+      user.sub,
+      createVehicleAvailabilityWindowDto
+    );
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Put(':id')
   async update(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() updateVehicleAvailabilityWindowDto: UpdateVehicleAvailabilityWindowDto
   ) {
-    return this.vehicleAvailabilityWindowsService.update(id, updateVehicleAvailabilityWindowDto);
+    return this.vehicleAvailabilityWindowsService.updateForOwner(
+      id,
+      user.sub,
+      updateVehicleAvailabilityWindowDto
+    );
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Delete(':id')
   @HttpCode(204)
-  async delete(@Param('id', new ParseUUIDPipe()) id: string) {
-    await this.vehicleAvailabilityWindowsService.delete(id);
+  async softDelete(@CurrentUser() user: AuthUser, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.vehicleAvailabilityWindowsService.softDeleteForOwner(id, user.sub);
   }
 }

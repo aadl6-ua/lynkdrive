@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
@@ -15,6 +15,21 @@ export class VehicleImagesService {
     @InjectRepository(VehicleEntity)
     private readonly vehiclesRepository: Repository<VehicleEntity>
   ) {}
+
+  private async ensureVehicleOwnership(vehicleId: string, ownerId: string): Promise<void> {
+    const vehicle = await this.vehiclesRepository.findOne({
+      where: { id: vehicleId, deletedAt: IsNull() },
+      select: { id: true, ownerId: true }
+    });
+
+    if (!vehicle) {
+      throw new NotFoundException(`Vehicle ${vehicleId} not found`);
+    }
+
+    if (vehicle.ownerId !== ownerId) {
+      throw new ForbiddenException('You do not own this vehicle');
+    }
+  }
 
   async findAll(vehicleId?: string): Promise<VehicleImageResponseDto[]> {
     const where = vehicleId ? { vehicleId } : undefined;
@@ -42,19 +57,34 @@ export class VehicleImagesService {
   async create(createVehicleImageDto: CreateVehicleImageDto): Promise<VehicleImageResponseDto> {
     await this.ensureVehicleExists(createVehicleImageDto.vehicleId);
 
-    if (createVehicleImageDto.isPrimary) {
+    const existingImagesCount = await this.vehicleImagesRepository.count({
+      where: { vehicleId: createVehicleImageDto.vehicleId }
+    });
+
+    // If this is the first image for the vehicle, make it primary by default.
+    const shouldBePrimary = existingImagesCount === 0 ? true : (createVehicleImageDto.isPrimary ?? false);
+
+    if (shouldBePrimary) {
       await this.unsetPrimaryImage(createVehicleImageDto.vehicleId);
     }
 
     const imageToSave = this.vehicleImagesRepository.create({
       vehicleId: createVehicleImageDto.vehicleId,
       imageUrl: createVehicleImageDto.imageUrl,
-      isPrimary: createVehicleImageDto.isPrimary ?? false
+      isPrimary: shouldBePrimary
     });
 
     const savedImage = await this.vehicleImagesRepository.save(imageToSave);
 
     return this.toResponseDto(savedImage);
+  }
+
+  async createForOwner(
+    ownerId: string,
+    createVehicleImageDto: CreateVehicleImageDto
+  ): Promise<VehicleImageResponseDto> {
+    await this.ensureVehicleOwnership(createVehicleImageDto.vehicleId, ownerId);
+    return this.create(createVehicleImageDto);
   }
 
   async update(id: string, updateVehicleImageDto: UpdateVehicleImageDto): Promise<VehicleImageResponseDto> {
@@ -83,6 +113,24 @@ export class VehicleImagesService {
     return this.toResponseDto(savedImage);
   }
 
+  async updateForOwner(
+    id: string,
+    ownerId: string,
+    updateVehicleImageDto: UpdateVehicleImageDto
+  ): Promise<VehicleImageResponseDto> {
+    const image = await this.vehicleImagesRepository.findOne({
+      where: { id },
+      select: { id: true, vehicleId: true }
+    });
+
+    if (!image) {
+      throw new NotFoundException(`Vehicle image ${id} not found`);
+    }
+
+    await this.ensureVehicleOwnership(image.vehicleId, ownerId);
+    return this.update(id, updateVehicleImageDto);
+  }
+
   async delete(id: string): Promise<void> {
     const existingImage = await this.vehicleImagesRepository.findOne({
       where: { id }
@@ -93,6 +141,20 @@ export class VehicleImagesService {
     }
 
     await this.vehicleImagesRepository.delete({ id });
+  }
+
+  async softDeleteForOwner(id: string, ownerId: string): Promise<void> {
+    const image = await this.vehicleImagesRepository.findOne({
+      where: { id },
+      select: { id: true, vehicleId: true }
+    });
+
+    if (!image) {
+      throw new NotFoundException(`Vehicle image ${id} not found`);
+    }
+
+    await this.ensureVehicleOwnership(image.vehicleId, ownerId);
+    await this.delete(id);
   }
 
   private async ensureVehicleExists(vehicleId: string): Promise<void> {

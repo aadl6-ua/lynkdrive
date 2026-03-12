@@ -70,7 +70,8 @@ interface VehiclesState {
   error: string | null;
   mutationMessage: string | null;
   fetchVehicles: (filters?: VehicleFilters) => Promise<void>;
-  createVehicleForOwner: (ownerId: string, payload: CreateVehicleInput) => Promise<void>;
+  fetchMyVehicles: () => Promise<void>;
+  createVehicle: (payload: CreateVehicleInput) => Promise<void>;
   updateVehicleById: (vehicleId: string, payload: UpdateVehicleInput) => Promise<void>;
   deleteVehicleById: (vehicleId: string) => Promise<void>;
 }
@@ -96,31 +97,36 @@ export const useVehiclesStore = create<VehiclesState>((set) => ({
       });
     }
   },
-  createVehicleForOwner: async (ownerId: string, payload: CreateVehicleInput) => {
-    if (!ownerId) {
-      set({ mutationMessage: 'No hay usuario activo para asociar el vehículo.' });
+  fetchMyVehicles: async () => {
+    set({ loading: true, error: null, mutationMessage: null });
 
-      return;
+    try {
+      const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
+      set({ items: response.data, loading: false });
+    } catch {
+      set({
+        loading: false,
+        error: 'No se pudieron cargar tus vehiculos. Inicia sesion para continuar.'
+      });
     }
+  },
+  createVehicle: async (payload: CreateVehicleInput) => {
 
     set({ creating: true, error: null, mutationMessage: null });
 
     try {
-      await httpClient.post('/vehicles', {
-        ownerId,
-        ...payload
-      });
+      await httpClient.post('/vehicles', payload);
 
-      const response = await httpClient.get<VehicleItem[]>('/vehicles');
+      const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
       set({
         items: response.data,
         creating: false,
-        mutationMessage: 'Vehículo creado correctamente para el usuario activo.'
+        mutationMessage: 'Vehiculo creado correctamente.'
       });
     } catch {
       set({
         creating: false,
-        mutationMessage: 'No se pudo crear el vehículo (revisa owner y matrícula).'
+        mutationMessage: 'No se pudo crear el vehiculo.'
       });
     }
   },
@@ -136,11 +142,11 @@ export const useVehiclesStore = create<VehiclesState>((set) => ({
     try {
       await httpClient.put(`/vehicles/${vehicleId}`, payload);
 
-      const response = await httpClient.get<VehicleItem[]>('/vehicles');
+      const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
       set({
         items: response.data,
         creating: false,
-        mutationMessage: 'Vehículo actualizado correctamente.'
+        mutationMessage: 'Vehiculo actualizado correctamente.'
       });
     } catch {
       set({
@@ -161,11 +167,11 @@ export const useVehiclesStore = create<VehiclesState>((set) => ({
     try {
       await httpClient.delete(`/vehicles/${vehicleId}`);
 
-      const response = await httpClient.get<VehicleItem[]>('/vehicles');
+      const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
       set({
         items: response.data,
         creating: false,
-        mutationMessage: 'Vehículo eliminado (soft-delete) correctamente.'
+        mutationMessage: 'Vehiculo eliminado correctamente.'
       });
     } catch {
       set({

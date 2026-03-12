@@ -8,8 +8,12 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
-  Put
+  Put,
+  UseGuards
 } from '@nestjs/common';
+import { AuthUser } from 'src/auth/auth-user.type';
+import { CurrentUser } from 'src/auth/current-user.decorator';
+import { SupabaseJwtAuthGuard } from 'src/auth/supabase-jwt-auth.guard';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { GetVehiclesFiltersDto } from './dto/get-vehicles-filters.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
@@ -45,27 +49,37 @@ export class VehiclesController {
     return this.vehiclesService.findAll(filters);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
+  @Get('mine/list')
+  async findMine(@CurrentUser() user: AuthUser) {
+    return this.vehiclesService.findMine(user.sub);
+  }
+
   @Get(':id')
   async findById(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.vehiclesService.findById(id);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Post()
-  async create(@Body() createVehicleDto: CreateVehicleDto) {
-    return this.vehiclesService.create(createVehicleDto);
+  async create(@CurrentUser() user: AuthUser, @Body() createVehicleDto: CreateVehicleDto) {
+    return this.vehiclesService.createForOwner(user.sub, createVehicleDto);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Put(':id')
   async update(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() updateVehicleDto: UpdateVehicleDto
   ) {
-    return this.vehiclesService.update(id, updateVehicleDto);
+    return this.vehiclesService.updateForOwner(id, user.sub, updateVehicleDto);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Delete(':id')
   @HttpCode(204)
-  async softDelete(@Param('id', new ParseUUIDPipe()) id: string) {
-    await this.vehiclesService.softDelete(id);
+  async softDelete(@CurrentUser() user: AuthUser, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.vehiclesService.softDeleteForOwner(id, user.sub);
   }
 }
