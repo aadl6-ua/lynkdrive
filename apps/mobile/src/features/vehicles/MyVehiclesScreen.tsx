@@ -4,10 +4,13 @@ import {
   ActivityIndicator,
   Button,
   Image,
+  Platform,
   Pressable,
+  StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  useWindowDimensions
 } from 'react-native';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
@@ -23,6 +26,10 @@ import { useVehiclesStore } from '../../store/useVehiclesStore';
 type MyVehiclesScreenMode = 'list' | 'edit' | 'images' | 'availability';
 
 export function MyVehiclesScreen() {
+  const { width } = useWindowDimensions();
+  const isDesktopWeb = Platform.OS === 'web' && width >= 1024;
+  const desktopCardStyle = isDesktopWeb ? localStyles.desktopCard : undefined;
+
   const [screenMode, setScreenMode] = useState<MyVehiclesScreenMode>('list');
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
   const [vehicleImageUploading, setVehicleImageUploading] = useState(false);
@@ -410,7 +417,7 @@ export function MyVehiclesScreen() {
         <Text style={styles.title}>Imagenes del Vehiculo</Text>
         <Text style={styles.subtitle}>Alta, lectura y borrado de fotos para {editingVehicle.brand} {editingVehicle.model}.</Text>
 
-        <View style={styles.card}>
+        <View style={[styles.card, desktopCardStyle]}>
           <TextInput
             value={vehicleImageUrlInput}
             onChangeText={setVehicleImageUrlInput}
@@ -450,7 +457,7 @@ export function MyVehiclesScreen() {
         {vehicleImagesMutationMessage ? <Text style={styles.info}>{vehicleImagesMutationMessage}</Text> : null}
 
         {vehicleImages.map((image) => (
-          <View key={image.id} style={styles.card}>
+          <View key={image.id} style={[styles.card, desktopCardStyle]}>
             <Text style={styles.row}><Text style={styles.label}>ID:</Text> {image.id}</Text>
             <Text style={styles.row}><Text style={styles.label}>URL:</Text> {image.imageUrl}</Text>
             {resolveStoredImageUrl(image.imageUrl) ? (
@@ -499,7 +506,7 @@ export function MyVehiclesScreen() {
         <Text style={styles.title}>Ventanas de Disponibilidad</Text>
         <Text style={styles.subtitle}>CRUD de ventanas para {editingVehicle.brand} {editingVehicle.model}.</Text>
 
-        <View style={styles.card}>
+        <View style={[styles.card, desktopCardStyle]}>
           <TextInput
             value={availabilityStartInput}
             onChangeText={setAvailabilityStartInput}
@@ -544,7 +551,7 @@ export function MyVehiclesScreen() {
         {availabilityWindowsMutationMessage ? <Text style={styles.info}>{availabilityWindowsMutationMessage}</Text> : null}
 
         {availabilityWindows.map((window) => (
-          <View key={window.id} style={styles.card}>
+          <View key={window.id} style={[styles.card, desktopCardStyle]}>
             <Text style={styles.row}><Text style={styles.label}>ID:</Text> {window.id}</Text>
             <Text style={styles.row}><Text style={styles.label}>Inicio:</Text> {new Date(window.startDatetime).toLocaleString('es-ES')}</Text>
             <Text style={styles.row}><Text style={styles.label}>Fin:</Text> {new Date(window.endDatetime).toLocaleString('es-ES')}</Text>
@@ -585,7 +592,7 @@ export function MyVehiclesScreen() {
         <Text style={styles.title}>Editar Vehiculo</Text>
         <Text style={styles.subtitle}>Edicion, borrado, imagenes y disponibilidad.</Text>
 
-        <View style={styles.card}>
+        <View style={[styles.card, desktopCardStyle]}>
           <TextInput value={editVehicleBrandInput} onChangeText={setEditVehicleBrandInput} style={styles.input} placeholder="Marca" />
           <TextInput value={editVehicleModelInput} onChangeText={setEditVehicleModelInput} style={styles.input} placeholder="Modelo" />
           <TextInput value={editVehicleYearInput} onChangeText={setEditVehicleYearInput} style={styles.input} placeholder="Ano" keyboardType="number-pad" />
@@ -631,7 +638,7 @@ export function MyVehiclesScreen() {
       <Text style={styles.title}>Mis Vehiculos</Text>
       <Text style={styles.subtitle}>Alta, edicion, fotos y disponibilidad de tus vehiculos.</Text>
 
-      <View style={styles.card}>
+      <View style={[styles.card, desktopCardStyle]}>
         <Text style={styles.switcherTitle}>Nuevo vehiculo (usuario activo)</Text>
 
         <TextInput value={vehicleBrandInput} onChangeText={setVehicleBrandInput} style={styles.input} placeholder="Marca" />
@@ -661,7 +668,7 @@ export function MyVehiclesScreen() {
       {vehiclesMutationMessage ? <Text style={styles.info}>{vehiclesMutationMessage}</Text> : null}
 
       {myVehicles.map((vehicle) => (
-        <Pressable key={vehicle.id} style={styles.card} onPress={() => handleOpenVehicleEditor(vehicle.id)}>
+        <Pressable key={vehicle.id} style={[styles.card, desktopCardStyle]} onPress={() => handleOpenVehicleEditor(vehicle.id)}>
           {resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null) ? (
             <Image
               source={{ uri: resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null) ?? '' }}
@@ -687,3 +694,11 @@ export function MyVehiclesScreen() {
     </View>
   );
 }
+
+const localStyles = StyleSheet.create({
+  desktopCard: {
+    width: '100%',
+    maxWidth: 860,
+    alignSelf: 'center'
+  }
+});

@@ -21,6 +21,11 @@ export class BookingsController {
     return this.bookingsService.findMineAsOwner(user.sub);
   }
 
+  @Get('vehicle/:vehicleId')
+  async findByVehicle(@Param('vehicleId', new ParseUUIDPipe()) vehicleId: string) {
+    return this.bookingsService.findByVehicleId(vehicleId);
+  }
+
   @Get(':id')
   async findById(@CurrentUser() user: AuthUser, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.bookingsService.findByIdForUser(id, user.sub);
