@@ -15,6 +15,8 @@ import {
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
 import { uploadImageToApi } from '../../api/uploads';
+import { EmptyState } from '../../app/components/ui/EmptyState';
+import { SectionHeader } from '../../app/components/ui/SectionHeader';
 import { styles } from '../../app/styles';
 import { parseLocaleNumber } from '../../shared/number';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
@@ -414,8 +416,10 @@ export function MyVehiclesScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Imagenes del Vehiculo</Text>
-        <Text style={styles.subtitle}>Alta, lectura y borrado de fotos para {editingVehicle.brand} {editingVehicle.model}.</Text>
+        <SectionHeader
+          title="Imagenes del Vehiculo"
+          subtitle={`Alta, lectura y borrado de fotos para ${editingVehicle.brand} ${editingVehicle.model}.`}
+        />
 
         <View style={[styles.card, desktopCardStyle]}>
           <TextInput
@@ -488,8 +492,7 @@ export function MyVehiclesScreen() {
   if (!authUserId) {
     return (
       <View style={styles.sectionCard}>
-        <Text style={styles.title}>Mis Vehiculos</Text>
-        <Text style={styles.subtitle}>Inicia sesion para gestionar tus vehiculos.</Text>
+        <SectionHeader title="Mis Vehiculos" subtitle="Inicia sesion para gestionar tus vehiculos." />
       </View>
     );
   }
@@ -503,8 +506,10 @@ export function MyVehiclesScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Ventanas de Disponibilidad</Text>
-        <Text style={styles.subtitle}>CRUD de ventanas para {editingVehicle.brand} {editingVehicle.model}.</Text>
+        <SectionHeader
+          title="Ventanas de Disponibilidad"
+          subtitle={`CRUD de ventanas para ${editingVehicle.brand} ${editingVehicle.model}.`}
+        />
 
         <View style={[styles.card, desktopCardStyle]}>
           <TextInput
@@ -589,8 +594,7 @@ export function MyVehiclesScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Editar Vehiculo</Text>
-        <Text style={styles.subtitle}>Edicion, borrado, imagenes y disponibilidad.</Text>
+        <SectionHeader title="Editar Vehiculo" subtitle="Edicion, borrado, imagenes y disponibilidad." />
 
         <View style={[styles.card, desktopCardStyle]}>
           <TextInput value={editVehicleBrandInput} onChangeText={setEditVehicleBrandInput} style={styles.input} placeholder="Marca" />
@@ -635,8 +639,7 @@ export function MyVehiclesScreen() {
 
   return (
     <View style={styles.sectionCard}>
-      <Text style={styles.title}>Mis Vehiculos</Text>
-      <Text style={styles.subtitle}>Alta, edicion, fotos y disponibilidad de tus vehiculos.</Text>
+      <SectionHeader title="Mis Vehiculos" subtitle="Alta, edicion, fotos y disponibilidad de tus vehiculos." />
 
       <View style={[styles.card, desktopCardStyle]}>
         <Text style={styles.switcherTitle}>Nuevo vehiculo (usuario activo)</Text>
@@ -689,7 +692,7 @@ export function MyVehiclesScreen() {
       ))}
 
       {!vehiclesLoading && !vehiclesError && myVehicles.length === 0 ? (
-        <Text style={styles.subtitle}>Este usuario no tiene vehiculos asociados.</Text>
+        <EmptyState title="Sin vehiculos" description="Este usuario no tiene vehiculos asociados." />
       ) : null}
     </View>
   );

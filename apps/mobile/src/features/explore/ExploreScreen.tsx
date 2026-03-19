@@ -14,10 +14,15 @@ import {
 } from 'react-native';
 import { httpClient } from '../../api/http';
 import { resolveStoredImageUrl } from '../../api/storage';
+import { EmptyState } from '../../app/components/ui/EmptyState';
+import { SectionHeader } from '../../app/components/ui/SectionHeader';
+import { StatusChip } from '../../app/components/ui/StatusChip';
 import { styles } from '../../app/styles';
 import { parseLocaleNumber } from '../../shared/number';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
+import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useUserProfileStore } from '../../store/useUserProfileStore';
 import { useVehicleAvailabilityWindowsStore } from '../../store/useVehicleAvailabilityWindowsStore';
 import { useVehicleImagesStore } from '../../store/useVehicleImagesStore';
 import { useVehiclesStore } from '../../store/useVehiclesStore';
@@ -116,6 +121,7 @@ export function ExploreScreen() {
 
   const { items: vehicles, loading: vehiclesLoading, error: vehiclesError, fetchVehicles } = useVehiclesStore();
   const { userId: authUserId } = useAuthStore();
+  const { profile } = useUserProfileStore();
   const [ownerById, setOwnerById] = useState<Record<string, UserMiniProfile>>({});
   const [ownerLookupError, setOwnerLookupError] = useState<string | null>(null);
   const exploreVehicles = vehicles.filter((vehicle) => !authUserId || vehicle.ownerId !== authUserId);
@@ -137,6 +143,8 @@ export function ExploreScreen() {
     () => exploreVehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null,
     [exploreVehicles, selectedVehicleId]
   );
+  const hasRequiredProfileData = hasMinimumProfileData(profile);
+  const canTransact = canUseTransactionalFlows(profile);
 
   const selectedVehicleImageUrls = useMemo(() => {
     return vehicleImages
@@ -310,6 +318,18 @@ export function ExploreScreen() {
       return;
     }
 
+    if (!hasRequiredProfileData) {
+      setBookingError('Completa nombre, apellidos y telefono en Perfil antes de solicitar una reserva.');
+      setBookingMessage(null);
+      return;
+    }
+
+    if (!canTransact) {
+      setBookingError('Necesitas verificacion documental para solicitar reservas. Ve a Perfil > Documentacion.');
+      setBookingMessage(null);
+      return;
+    }
+
     const start = bookingStartInput.trim();
     const end = bookingEndInput.trim();
 
@@ -353,6 +373,11 @@ export function ExploreScreen() {
 
     return (
       <View style={styles.sectionCard}>
+        <SectionHeader
+          title={`${selectedVehicle.brand} ${selectedVehicle.model}`}
+          subtitle="Ficha completa del vehiculo para decidir tu reserva."
+        />
+
         <View style={styles.actionsRow}>
           <View style={styles.actionButtonWrapper}>
             <Button title="Volver a explorar" onPress={handleBackToExploreList} />
@@ -360,9 +385,6 @@ export function ExploreScreen() {
         </View>
 
         <View style={[styles.card, desktopCardStyle]}>
-          <Text style={styles.title}>{selectedVehicle.brand} {selectedVehicle.model}</Text>
-          <Text style={styles.subtitle}>Ficha completa del vehiculo para decidir tu reserva.</Text>
-
           <View style={localStyles.personRow}>
             {selectedOwnerAvatarUrl ? (
               <Image source={{ uri: selectedOwnerAvatarUrl }} style={localStyles.personAvatar} resizeMode="cover" />
@@ -406,6 +428,10 @@ export function ExploreScreen() {
 
           <Text style={styles.switcherTitle}>Solicitar reserva</Text>
           <View style={localStyles.bookingCard}>
+            <View style={styles.actionsRow}>
+              <StatusChip label={hasRequiredProfileData ? 'Perfil minimo: OK' : 'Perfil minimo: pendiente'} />
+              <StatusChip label={canTransact ? 'Documentacion: verificada' : 'Documentacion: pendiente'} />
+            </View>
             <TextInput
               value={bookingStartInput}
               onChangeText={setBookingStartInput}
@@ -424,7 +450,7 @@ export function ExploreScreen() {
               <Button
                 title={bookingSaving ? 'Solicitando...' : 'Solicitar reserva'}
                 onPress={() => void handleCreateBooking()}
-                disabled={bookingSaving}
+                disabled={bookingSaving || !canTransact}
               />
             </View>
             {bookingError ? <Text style={styles.error}>{bookingError}</Text> : null}
@@ -467,8 +493,7 @@ export function ExploreScreen() {
 
   return (
     <View style={styles.sectionCard}>
-      <Text style={styles.title}>Explorar</Text>
-      <Text style={styles.subtitle}>Listado de vehiculos cercanos, filtros y acceso a ficha.</Text>
+      <SectionHeader title="Explorar" subtitle="Listado de vehiculos cercanos, filtros y acceso a ficha." />
 
       <View style={[styles.card, desktopCardStyle]}>
         <Text style={styles.switcherTitle}>Filtros</Text>
@@ -591,7 +616,7 @@ export function ExploreScreen() {
       ))}
 
       {!vehiclesLoading && !vehiclesError && exploreVehicles.length === 0 ? (
-        <Text style={styles.subtitle}>No hay vehiculos disponibles todavia.</Text>
+        <EmptyState title="Sin resultados" description="No hay vehiculos disponibles todavia." />
       ) : null}
     </View>
   );

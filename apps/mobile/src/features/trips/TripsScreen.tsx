@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Button, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { resolveStoredImageUrl } from '../../api/storage';
+import { EmptyState } from '../../app/components/ui/EmptyState';
+import { SectionHeader } from '../../app/components/ui/SectionHeader';
 import { styles } from '../../app/styles';
 import { httpClient } from '../../api/http';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -294,16 +296,17 @@ export function TripsScreen() {
   if (!authUserId) {
     return (
       <View style={styles.sectionCard}>
-        <Text style={styles.title}>Mis Viajes</Text>
-        <Text style={styles.subtitle}>Inicia sesion para ver reservas como conductor y propietario.</Text>
+        <SectionHeader title="Mis Viajes" subtitle="Inicia sesion para ver reservas como conductor y propietario." />
       </View>
     );
   }
 
   return (
     <View style={styles.sectionCard}>
-      <Text style={styles.title}>Mis Viajes</Text>
-      <Text style={styles.subtitle}>Consulta tus reservas como conductor o como propietario con mas detalle.</Text>
+      <SectionHeader
+        title="Mis Viajes"
+        subtitle="Consulta tus reservas como conductor o como propietario con mas detalle."
+      />
 
       <View style={[styles.card, desktopCardStyle]}>
         <Text style={styles.switcherTitle}>Vista</Text>
@@ -436,12 +439,15 @@ export function TripsScreen() {
       })}
 
       {!loading && !error && sortedBookings.length === 0 ? (
-        <View style={[styles.card, desktopCardStyle]}>
-          <Text style={styles.subtitle}>
-            {roleView === 'driver'
-              ? 'No tienes reservas como conductor todavia.'
-              : 'No tienes reservas como propietario todavia.'}
-          </Text>
+        <View style={desktopCardStyle}>
+          <EmptyState
+            title="Sin reservas"
+            description={
+              roleView === 'driver'
+                ? 'No tienes reservas como conductor todavia.'
+                : 'No tienes reservas como propietario todavia.'
+            }
+          />
         </View>
       ) : null}
     </View>

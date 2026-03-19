@@ -12,7 +12,7 @@ import { useAuthStore } from './src/store/useAuthStore';
 import { useUserProfileStore } from './src/store/useUserProfileStore';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<AppTabKey>('profile');
+  const [activeTab, setActiveTab] = useState<AppTabKey>('explore');
   const { width } = useWindowDimensions();
   const isDesktopLike = Platform.OS === 'web' || width >= 768;
 
