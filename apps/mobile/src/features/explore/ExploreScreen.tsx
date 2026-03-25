@@ -18,8 +18,10 @@ import { EmptyState } from '../../app/components/ui/EmptyState';
 import { SectionHeader } from '../../app/components/ui/SectionHeader';
 import { StatusChip } from '../../app/components/ui/StatusChip';
 import { styles } from '../../app/styles';
+import { VehicleLocationMap } from '../maps';
 import { parseLocaleNumber } from '../../shared/number';
 import { useGeocodingSuggestions } from '../../shared/useGeocodingSuggestions';
+import { useUserLocation } from '../../shared/useUserLocation';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
 import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -51,6 +53,8 @@ type ExploreVehicle = {
   model: string;
   year: number;
   pricePerDay: number;
+  locationLat: number;
+  locationLng: number;
   locationAddress: string;
   fuelType: string | null;
   transmission: string | null;
@@ -172,6 +176,16 @@ export function ExploreScreen() {
     loading: exploreAddressLoading,
     error: exploreAddressError
   } = useGeocodingSuggestions(exploreAddressInput);
+  const {
+    permissionStatus,
+    loading: userLocationLoading,
+    error: userLocationError,
+    coords: userLocationCoords,
+    refreshPermissionStatus,
+    requestPermission,
+    refreshLocation,
+    clearLocationError
+  } = useUserLocation();
 
   const selectedVehicle = useMemo(
     () => exploreVehicles.find((vehicle: ExploreVehicle) => vehicle.id === selectedVehicleId) ?? null,
@@ -204,9 +218,16 @@ export function ExploreScreen() {
 
     void Promise.all([
       fetchVehicleImagesByVehicleId(selectedVehicleId),
-      fetchAvailabilityWindowsByVehicleId(selectedVehicleId)
+      fetchAvailabilityWindowsByVehicleId(selectedVehicleId),
+      refreshPermissionStatus()
     ]);
-  }, [screenMode, selectedVehicleId, fetchVehicleImagesByVehicleId, fetchAvailabilityWindowsByVehicleId]);
+  }, [
+    screenMode,
+    selectedVehicleId,
+    fetchVehicleImagesByVehicleId,
+    fetchAvailabilityWindowsByVehicleId,
+    refreshPermissionStatus
+  ]);
 
   useEffect(() => {
     if (screenMode !== 'detail' || !selectedVehicleId) {
@@ -364,6 +385,20 @@ export function ExploreScreen() {
     setBookingMessage(null);
   };
 
+  const handleEnableUserLocation = async () => {
+    clearLocationError();
+    const nextPermission = await requestPermission();
+
+    if (nextPermission === 'granted') {
+      await refreshLocation();
+    }
+  };
+
+  const handleRefreshUserLocation = async () => {
+    clearLocationError();
+    await refreshLocation();
+  };
+
   const handleCreateBooking = async () => {
     if (!selectedVehicleId) {
       return;
@@ -482,6 +517,48 @@ export function ExploreScreen() {
           <Text style={styles.row}><Text style={styles.label}>Transmision:</Text> {selectedVehicle.transmission ?? 'No definida'}</Text>
           <Text style={styles.row}><Text style={styles.label}>Plazas:</Text> {selectedVehicle.seats ?? 'No definidas'}</Text>
           <Text style={styles.row}><Text style={styles.label}>Descripcion:</Text> {selectedVehicle.description}</Text>
+
+          <Text style={styles.switcherTitle}>Mapa</Text>
+          <VehicleLocationMap
+            vehicleLocation={{
+              latitude: selectedVehicle.locationLat,
+              longitude: selectedVehicle.locationLng
+            }}
+            userLocation={
+              userLocationCoords
+                ? {
+                    latitude: userLocationCoords.latitude,
+                    longitude: userLocationCoords.longitude
+                  }
+                : null
+            }
+            height={220}
+          />
+          <View style={styles.actionsRow}>
+            {permissionStatus !== 'granted' ? (
+              <View style={styles.actionButtonWrapper}>
+                <Button
+                  title={userLocationLoading ? 'Solicitando...' : 'Permitir mi ubicacion'}
+                  onPress={() => void handleEnableUserLocation()}
+                  disabled={userLocationLoading}
+                />
+              </View>
+            ) : (
+              <View style={styles.actionButtonWrapper}>
+                <Button
+                  title={userLocationLoading ? 'Actualizando...' : 'Actualizar mi ubicacion'}
+                  onPress={() => void handleRefreshUserLocation()}
+                  disabled={userLocationLoading}
+                />
+              </View>
+            )}
+          </View>
+          {permissionStatus !== 'granted' ? (
+            <Text style={styles.linkHint}>
+              Permite ubicacion para mostrar tu posicion respecto al vehiculo.
+            </Text>
+          ) : null}
+          {userLocationError ? <Text style={styles.error}>{userLocationError}</Text> : null}
 
           <Text style={styles.switcherTitle}>Solicitar reserva</Text>
           <View style={localStyles.bookingCard}>
