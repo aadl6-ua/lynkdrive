@@ -4,16 +4,22 @@ import {
   ActivityIndicator,
   Button,
   Image,
+  Platform,
   Pressable,
+  StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  useWindowDimensions
 } from 'react-native';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
 import { uploadImageToApi } from '../../api/uploads';
+import { EmptyState } from '../../app/components/ui/EmptyState';
+import { SectionHeader } from '../../app/components/ui/SectionHeader';
 import { styles } from '../../app/styles';
 import { parseLocaleNumber } from '../../shared/number';
+import { useGeocodingSuggestions } from '../../shared/useGeocodingSuggestions';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useVehicleAvailabilityWindowsStore } from '../../store/useVehicleAvailabilityWindowsStore';
@@ -23,6 +29,10 @@ import { useVehiclesStore } from '../../store/useVehiclesStore';
 type MyVehiclesScreenMode = 'list' | 'edit' | 'images' | 'availability';
 
 export function MyVehiclesScreen() {
+  const { width } = useWindowDimensions();
+  const isDesktopWeb = Platform.OS === 'web' && width >= 1024;
+  const desktopCardStyle = isDesktopWeb ? localStyles.desktopCard : undefined;
+
   const [screenMode, setScreenMode] = useState<MyVehiclesScreenMode>('list');
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
   const [vehicleImageUploading, setVehicleImageUploading] = useState(false);
@@ -34,9 +44,9 @@ export function MyVehiclesScreen() {
   const [vehicleLicensePlateInput, setVehicleLicensePlateInput] = useState('1234ABC');
   const [vehicleDescriptionInput, setVehicleDescriptionInput] = useState('Vehiculo de prueba para el TFG.');
   const [vehiclePricePerDayInput, setVehiclePricePerDayInput] = useState('45');
-  const [vehicleLatInput, setVehicleLatInput] = useState('40.4168');
-  const [vehicleLngInput, setVehicleLngInput] = useState('-3.7038');
-  const [vehicleAddressInput, setVehicleAddressInput] = useState('Madrid Centro');
+  const [vehicleAddressInput, setVehicleAddressInput] = useState('');
+  const [vehicleSelectedLocation, setVehicleSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [createVehicleFormError, setCreateVehicleFormError] = useState<string | null>(null);
   const [vehicleFuelTypeInput, setVehicleFuelTypeInput] = useState('hybrid');
   const [vehicleTransmissionInput, setVehicleTransmissionInput] = useState('automatic');
   const [vehicleSeatsInput, setVehicleSeatsInput] = useState('5');
@@ -47,9 +57,9 @@ export function MyVehiclesScreen() {
   const [editVehicleLicensePlateInput, setEditVehicleLicensePlateInput] = useState('');
   const [editVehicleDescriptionInput, setEditVehicleDescriptionInput] = useState('');
   const [editVehiclePricePerDayInput, setEditVehiclePricePerDayInput] = useState('');
-  const [editVehicleLatInput, setEditVehicleLatInput] = useState('');
-  const [editVehicleLngInput, setEditVehicleLngInput] = useState('');
   const [editVehicleAddressInput, setEditVehicleAddressInput] = useState('');
+  const [editVehicleSelectedLocation, setEditVehicleSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [editVehicleFormError, setEditVehicleFormError] = useState<string | null>(null);
   const [editVehicleFuelTypeInput, setEditVehicleFuelTypeInput] = useState('');
   const [editVehicleTransmissionInput, setEditVehicleTransmissionInput] = useState('');
   const [editVehicleSeatsInput, setEditVehicleSeatsInput] = useState('');
@@ -102,6 +112,16 @@ export function MyVehiclesScreen() {
     [myVehicles, editingVehicleId]
   );
   const imageByVehicleId = useVehiclePrimaryImages(myVehicles.map((vehicle) => vehicle.id));
+  const {
+    suggestions: vehicleAddressSuggestions,
+    loading: vehicleAddressLoading,
+    error: vehicleAddressError
+  } = useGeocodingSuggestions(vehicleAddressInput);
+  const {
+    suggestions: editVehicleAddressSuggestions,
+    loading: editVehicleAddressLoading,
+    error: editVehicleAddressError
+  } = useGeocodingSuggestions(editVehicleAddressInput);
 
   useEffect(() => {
     if (!authUserId) {
@@ -114,8 +134,6 @@ export function MyVehiclesScreen() {
   const handleCreateVehicle = async () => {
     const parsedYear = parseLocaleNumber(vehicleYearInput);
     const parsedPrice = parseLocaleNumber(vehiclePricePerDayInput);
-    const parsedLat = parseLocaleNumber(vehicleLatInput);
-    const parsedLng = parseLocaleNumber(vehicleLngInput);
     const parsedSeats = parseLocaleNumber(vehicleSeatsInput);
 
     if (
@@ -125,12 +143,18 @@ export function MyVehiclesScreen() {
       !vehicleDescriptionInput.trim() ||
       !vehicleAddressInput.trim() ||
       Number.isNaN(parsedYear) ||
-      Number.isNaN(parsedPrice) ||
-      Number.isNaN(parsedLat) ||
-      Number.isNaN(parsedLng)
+      Number.isNaN(parsedPrice)
     ) {
+      setCreateVehicleFormError('Completa todos los campos obligatorios antes de crear el vehiculo.');
       return;
     }
+
+    if (!vehicleSelectedLocation) {
+      setCreateVehicleFormError('Selecciona una direccion sugerida para obtener coordenadas validas.');
+      return;
+    }
+
+    setCreateVehicleFormError(null);
 
     await createVehicle({
       brand: vehicleBrandInput.trim(),
@@ -139,8 +163,8 @@ export function MyVehiclesScreen() {
       licensePlate: vehicleLicensePlateInput.trim().toUpperCase(),
       description: vehicleDescriptionInput.trim(),
       pricePerDay: parsedPrice,
-      locationLat: parsedLat,
-      locationLng: parsedLng,
+      locationLat: vehicleSelectedLocation.lat,
+      locationLng: vehicleSelectedLocation.lng,
       locationAddress: vehicleAddressInput.trim(),
       fuelType: ['gasoline', 'diesel', 'electric', 'hybrid'].includes(vehicleFuelTypeInput)
         ? (vehicleFuelTypeInput as 'gasoline' | 'diesel' | 'electric' | 'hybrid')
@@ -153,6 +177,18 @@ export function MyVehiclesScreen() {
     });
 
     await fetchMyVehicles();
+  };
+
+  const handleCreateVehicleAddressChange = (value: string) => {
+    setVehicleAddressInput(value);
+    setVehicleSelectedLocation(null);
+    setCreateVehicleFormError(null);
+  };
+
+  const handleSelectCreateVehicleAddress = (label: string, lat: number, lng: number) => {
+    setVehicleAddressInput(label);
+    setVehicleSelectedLocation({ lat, lng });
+    setCreateVehicleFormError(null);
   };
 
   const handleOpenVehicleEditor = (vehicleId: string) => {
@@ -169,9 +205,9 @@ export function MyVehiclesScreen() {
     setEditVehicleLicensePlateInput(vehicle.licensePlate);
     setEditVehicleDescriptionInput(vehicle.description);
     setEditVehiclePricePerDayInput(String(vehicle.pricePerDay));
-    setEditVehicleLatInput(String(vehicle.locationLat));
-    setEditVehicleLngInput(String(vehicle.locationLng));
     setEditVehicleAddressInput(vehicle.locationAddress);
+    setEditVehicleSelectedLocation({ lat: vehicle.locationLat, lng: vehicle.locationLng });
+    setEditVehicleFormError(null);
     setEditVehicleFuelTypeInput(vehicle.fuelType ?? '');
     setEditVehicleTransmissionInput(vehicle.transmission ?? '');
     setEditVehicleSeatsInput(vehicle.seats !== null ? String(vehicle.seats) : '');
@@ -219,8 +255,6 @@ export function MyVehiclesScreen() {
 
     const parsedYear = parseLocaleNumber(editVehicleYearInput);
     const parsedPrice = parseLocaleNumber(editVehiclePricePerDayInput);
-    const parsedLat = parseLocaleNumber(editVehicleLatInput);
-    const parsedLng = parseLocaleNumber(editVehicleLngInput);
     const parsedSeats = parseLocaleNumber(editVehicleSeatsInput);
 
     if (
@@ -230,12 +264,18 @@ export function MyVehiclesScreen() {
       !editVehicleDescriptionInput.trim() ||
       !editVehicleAddressInput.trim() ||
       Number.isNaN(parsedYear) ||
-      Number.isNaN(parsedPrice) ||
-      Number.isNaN(parsedLat) ||
-      Number.isNaN(parsedLng)
+      Number.isNaN(parsedPrice)
     ) {
+      setEditVehicleFormError('Completa todos los campos obligatorios para guardar cambios.');
       return;
     }
+
+    if (!editVehicleSelectedLocation) {
+      setEditVehicleFormError('Selecciona una direccion sugerida para obtener coordenadas validas.');
+      return;
+    }
+
+    setEditVehicleFormError(null);
 
     await updateVehicleById(editingVehicleId, {
       brand: editVehicleBrandInput.trim(),
@@ -244,8 +284,8 @@ export function MyVehiclesScreen() {
       licensePlate: editVehicleLicensePlateInput.trim().toUpperCase(),
       description: editVehicleDescriptionInput.trim(),
       pricePerDay: parsedPrice,
-      locationLat: parsedLat,
-      locationLng: parsedLng,
+      locationLat: editVehicleSelectedLocation.lat,
+      locationLng: editVehicleSelectedLocation.lng,
       locationAddress: editVehicleAddressInput.trim(),
       fuelType: ['gasoline', 'diesel', 'electric', 'hybrid'].includes(editVehicleFuelTypeInput)
         ? (editVehicleFuelTypeInput as 'gasoline' | 'diesel' | 'electric' | 'hybrid')
@@ -258,6 +298,18 @@ export function MyVehiclesScreen() {
     });
 
     await fetchMyVehicles();
+  };
+
+  const handleEditVehicleAddressChange = (value: string) => {
+    setEditVehicleAddressInput(value);
+    setEditVehicleSelectedLocation(null);
+    setEditVehicleFormError(null);
+  };
+
+  const handleSelectEditVehicleAddress = (label: string, lat: number, lng: number) => {
+    setEditVehicleAddressInput(label);
+    setEditVehicleSelectedLocation({ lat, lng });
+    setEditVehicleFormError(null);
   };
 
   const handleDeleteVehicle = async () => {
@@ -407,10 +459,12 @@ export function MyVehiclesScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Imagenes del Vehiculo</Text>
-        <Text style={styles.subtitle}>Alta, lectura y borrado de fotos para {editingVehicle.brand} {editingVehicle.model}.</Text>
+        <SectionHeader
+          title="Imagenes del Vehiculo"
+          subtitle={`Alta, lectura y borrado de fotos para ${editingVehicle.brand} ${editingVehicle.model}.`}
+        />
 
-        <View style={styles.card}>
+        <View style={[styles.card, desktopCardStyle]}>
           <TextInput
             value={vehicleImageUrlInput}
             onChangeText={setVehicleImageUrlInput}
@@ -450,7 +504,7 @@ export function MyVehiclesScreen() {
         {vehicleImagesMutationMessage ? <Text style={styles.info}>{vehicleImagesMutationMessage}</Text> : null}
 
         {vehicleImages.map((image) => (
-          <View key={image.id} style={styles.card}>
+          <View key={image.id} style={[styles.card, desktopCardStyle]}>
             <Text style={styles.row}><Text style={styles.label}>ID:</Text> {image.id}</Text>
             <Text style={styles.row}><Text style={styles.label}>URL:</Text> {image.imageUrl}</Text>
             {resolveStoredImageUrl(image.imageUrl) ? (
@@ -481,8 +535,7 @@ export function MyVehiclesScreen() {
   if (!authUserId) {
     return (
       <View style={styles.sectionCard}>
-        <Text style={styles.title}>Mis Vehiculos</Text>
-        <Text style={styles.subtitle}>Inicia sesion para gestionar tus vehiculos.</Text>
+        <SectionHeader title="Mis Vehiculos" subtitle="Inicia sesion para gestionar tus vehiculos." />
       </View>
     );
   }
@@ -496,10 +549,12 @@ export function MyVehiclesScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Ventanas de Disponibilidad</Text>
-        <Text style={styles.subtitle}>CRUD de ventanas para {editingVehicle.brand} {editingVehicle.model}.</Text>
+        <SectionHeader
+          title="Ventanas de Disponibilidad"
+          subtitle={`CRUD de ventanas para ${editingVehicle.brand} ${editingVehicle.model}.`}
+        />
 
-        <View style={styles.card}>
+        <View style={[styles.card, desktopCardStyle]}>
           <TextInput
             value={availabilityStartInput}
             onChangeText={setAvailabilityStartInput}
@@ -544,7 +599,7 @@ export function MyVehiclesScreen() {
         {availabilityWindowsMutationMessage ? <Text style={styles.info}>{availabilityWindowsMutationMessage}</Text> : null}
 
         {availabilityWindows.map((window) => (
-          <View key={window.id} style={styles.card}>
+          <View key={window.id} style={[styles.card, desktopCardStyle]}>
             <Text style={styles.row}><Text style={styles.label}>ID:</Text> {window.id}</Text>
             <Text style={styles.row}><Text style={styles.label}>Inicio:</Text> {new Date(window.startDatetime).toLocaleString('es-ES')}</Text>
             <Text style={styles.row}><Text style={styles.label}>Fin:</Text> {new Date(window.endDatetime).toLocaleString('es-ES')}</Text>
@@ -582,23 +637,41 @@ export function MyVehiclesScreen() {
           </View>
         </View>
 
-        <Text style={styles.title}>Editar Vehiculo</Text>
-        <Text style={styles.subtitle}>Edicion, borrado, imagenes y disponibilidad.</Text>
+        <SectionHeader title="Editar Vehiculo" subtitle="Edicion, borrado, imagenes y disponibilidad." />
 
-        <View style={styles.card}>
+        <View style={[styles.card, desktopCardStyle]}>
           <TextInput value={editVehicleBrandInput} onChangeText={setEditVehicleBrandInput} style={styles.input} placeholder="Marca" />
           <TextInput value={editVehicleModelInput} onChangeText={setEditVehicleModelInput} style={styles.input} placeholder="Modelo" />
           <TextInput value={editVehicleYearInput} onChangeText={setEditVehicleYearInput} style={styles.input} placeholder="Ano" keyboardType="number-pad" />
           <TextInput value={editVehicleLicensePlateInput} onChangeText={setEditVehicleLicensePlateInput} style={styles.input} placeholder="Matricula" autoCapitalize="characters" />
           <TextInput value={editVehicleDescriptionInput} onChangeText={setEditVehicleDescriptionInput} style={styles.input} placeholder="Descripcion" />
           <TextInput value={editVehiclePricePerDayInput} onChangeText={setEditVehiclePricePerDayInput} style={styles.input} placeholder="Precio por dia" keyboardType="decimal-pad" />
-          <TextInput value={editVehicleLatInput} onChangeText={setEditVehicleLatInput} style={styles.input} placeholder="Latitud" keyboardType="numbers-and-punctuation" />
-          <TextInput value={editVehicleLngInput} onChangeText={setEditVehicleLngInput} style={styles.input} placeholder="Longitud" keyboardType="numbers-and-punctuation" />
-          <TextInput value={editVehicleAddressInput} onChangeText={setEditVehicleAddressInput} style={styles.input} placeholder="Direccion" />
+          <TextInput value={editVehicleAddressInput} onChangeText={handleEditVehicleAddressChange} style={styles.input} placeholder="Direccion" />
+          {editVehicleAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
+          {editVehicleAddressError ? <Text style={styles.error}>{editVehicleAddressError}</Text> : null}
+          {editVehicleAddressSuggestions.length > 0 && !editVehicleSelectedLocation ? (
+            <View style={localStyles.suggestionsList}>
+              {editVehicleAddressSuggestions.map((suggestion) => (
+                <Pressable
+                  key={suggestion.id}
+                  style={localStyles.suggestionItem}
+                  onPress={() => handleSelectEditVehicleAddress(suggestion.label, suggestion.lat, suggestion.lng)}
+                >
+                  <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          {editVehicleSelectedLocation ? (
+            <Text style={styles.linkHint}>
+              Ubicacion seleccionada: {editVehicleSelectedLocation.lat.toFixed(5)}, {editVehicleSelectedLocation.lng.toFixed(5)}
+            </Text>
+          ) : null}
           <TextInput value={editVehicleFuelTypeInput} onChangeText={setEditVehicleFuelTypeInput} style={styles.input} placeholder="Combustible" autoCapitalize="none" />
           <TextInput value={editVehicleTransmissionInput} onChangeText={setEditVehicleTransmissionInput} style={styles.input} placeholder="Transmision" autoCapitalize="none" />
           <TextInput value={editVehicleSeatsInput} onChangeText={setEditVehicleSeatsInput} style={styles.input} placeholder="Plazas" keyboardType="number-pad" />
           <TextInput value={editVehicleStatusInput} onChangeText={(value) => setEditVehicleStatusInput(value === 'inactive' ? 'inactive' : 'active')} style={styles.input} placeholder="Estado: active|inactive" autoCapitalize="none" />
+          {editVehicleFormError ? <Text style={styles.error}>{editVehicleFormError}</Text> : null}
 
           <View style={styles.actionsRow}>
             <View style={styles.actionButtonWrapper}>
@@ -628,10 +701,9 @@ export function MyVehiclesScreen() {
 
   return (
     <View style={styles.sectionCard}>
-      <Text style={styles.title}>Mis Vehiculos</Text>
-      <Text style={styles.subtitle}>Alta, edicion, fotos y disponibilidad de tus vehiculos.</Text>
+      <SectionHeader title="Mis Vehiculos" subtitle="Alta, edicion, fotos y disponibilidad de tus vehiculos." />
 
-      <View style={styles.card}>
+      <View style={[styles.card, desktopCardStyle]}>
         <Text style={styles.switcherTitle}>Nuevo vehiculo (usuario activo)</Text>
 
         <TextInput value={vehicleBrandInput} onChangeText={setVehicleBrandInput} style={styles.input} placeholder="Marca" />
@@ -640,12 +712,31 @@ export function MyVehiclesScreen() {
         <TextInput value={vehicleLicensePlateInput} onChangeText={setVehicleLicensePlateInput} style={styles.input} placeholder="Matricula" autoCapitalize="characters" />
         <TextInput value={vehicleDescriptionInput} onChangeText={setVehicleDescriptionInput} style={styles.input} placeholder="Descripcion" />
         <TextInput value={vehiclePricePerDayInput} onChangeText={setVehiclePricePerDayInput} style={styles.input} placeholder="Precio por dia" keyboardType="decimal-pad" />
-        <TextInput value={vehicleLatInput} onChangeText={setVehicleLatInput} style={styles.input} placeholder="Latitud" keyboardType="numbers-and-punctuation" />
-        <TextInput value={vehicleLngInput} onChangeText={setVehicleLngInput} style={styles.input} placeholder="Longitud" keyboardType="numbers-and-punctuation" />
-        <TextInput value={vehicleAddressInput} onChangeText={setVehicleAddressInput} style={styles.input} placeholder="Direccion" />
+        <TextInput value={vehicleAddressInput} onChangeText={handleCreateVehicleAddressChange} style={styles.input} placeholder="Direccion" />
+        {vehicleAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
+        {vehicleAddressError ? <Text style={styles.error}>{vehicleAddressError}</Text> : null}
+        {vehicleAddressSuggestions.length > 0 && !vehicleSelectedLocation ? (
+          <View style={localStyles.suggestionsList}>
+            {vehicleAddressSuggestions.map((suggestion) => (
+              <Pressable
+                key={suggestion.id}
+                style={localStyles.suggestionItem}
+                onPress={() => handleSelectCreateVehicleAddress(suggestion.label, suggestion.lat, suggestion.lng)}
+              >
+                <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        {vehicleSelectedLocation ? (
+          <Text style={styles.linkHint}>
+            Ubicacion seleccionada: {vehicleSelectedLocation.lat.toFixed(5)}, {vehicleSelectedLocation.lng.toFixed(5)}
+          </Text>
+        ) : null}
         <TextInput value={vehicleFuelTypeInput} onChangeText={setVehicleFuelTypeInput} style={styles.input} placeholder="Combustible" autoCapitalize="none" />
         <TextInput value={vehicleTransmissionInput} onChangeText={setVehicleTransmissionInput} style={styles.input} placeholder="Transmision" autoCapitalize="none" />
         <TextInput value={vehicleSeatsInput} onChangeText={setVehicleSeatsInput} style={styles.input} placeholder="Plazas" keyboardType="number-pad" />
+        {createVehicleFormError ? <Text style={styles.error}>{createVehicleFormError}</Text> : null}
 
         <View style={styles.buttonContainer}>
           <Button title="Crear vehiculo" onPress={() => void handleCreateVehicle()} disabled={vehiclesCreating} />
@@ -661,7 +752,7 @@ export function MyVehiclesScreen() {
       {vehiclesMutationMessage ? <Text style={styles.info}>{vehiclesMutationMessage}</Text> : null}
 
       {myVehicles.map((vehicle) => (
-        <Pressable key={vehicle.id} style={styles.card} onPress={() => handleOpenVehicleEditor(vehicle.id)}>
+        <Pressable key={vehicle.id} style={[styles.card, desktopCardStyle]} onPress={() => handleOpenVehicleEditor(vehicle.id)}>
           {resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null) ? (
             <Image
               source={{ uri: resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null) ?? '' }}
@@ -682,8 +773,33 @@ export function MyVehiclesScreen() {
       ))}
 
       {!vehiclesLoading && !vehiclesError && myVehicles.length === 0 ? (
-        <Text style={styles.subtitle}>Este usuario no tiene vehiculos asociados.</Text>
+        <EmptyState title="Sin vehiculos" description="Este usuario no tiene vehiculos asociados." />
       ) : null}
     </View>
   );
 }
+
+const localStyles = StyleSheet.create({
+  desktopCard: {
+    width: '100%',
+    maxWidth: 860,
+    alignSelf: 'center'
+  },
+  suggestionsList: {
+    borderWidth: 1,
+    borderColor: '#dde3ee',
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+    overflow: 'hidden'
+  },
+  suggestionItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#edf1f7'
+  },
+  suggestionLabel: {
+    fontSize: 13,
+    color: '#1e2c4f'
+  }
+});

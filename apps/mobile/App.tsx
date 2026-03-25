@@ -12,7 +12,7 @@ import { useAuthStore } from './src/store/useAuthStore';
 import { useUserProfileStore } from './src/store/useUserProfileStore';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<AppTabKey>('profile');
+  const [activeTab, setActiveTab] = useState<AppTabKey>('explore');
   const { width } = useWindowDimensions();
   const isDesktopLike = Platform.OS === 'web' || width >= 768;
 
@@ -52,7 +52,11 @@ export default function App() {
       {isDesktopLike ? <TabBar activeTab={activeTab} onChangeTab={setActiveTab} /> : null}
 
       <ScrollView
-        contentContainerStyle={[styles.content, !isDesktopLike ? styles.contentWithBottomBar : undefined]}
+        contentContainerStyle={[
+          styles.content,
+          isDesktopLike ? { paddingTop: 104 } : undefined,
+          !isDesktopLike ? styles.contentWithBottomBar : undefined
+        ]}
       >
         {renderActiveScreen()}
       </ScrollView>

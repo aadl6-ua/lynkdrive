@@ -6,11 +6,16 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { BookingsModule } from './bookings/bookings.module';
+import { BookingChecklistsModule } from './booking-checklists/booking-checklists.module';
+import { ChecklistImagesModule } from './checklist-images/checklist-images.module';
+import { PaymentsModule } from './payments/payments.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { UsersModule } from './users/users.module';
 import { VehicleAvailabilityWindowsModule } from './vehicle-availability-windows/vehicle-availability-windows.module';
 import { VehicleImagesModule } from './vehicle-images/vehicle-images.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { GeocodingModule } from './geocoding/geocoding.module';
 
 @Module({
   imports: [
@@ -40,10 +45,15 @@ import { UploadsModule } from './uploads/uploads.module';
     UsersModule,
     AuthModule,
     BookingsModule,
+    BookingChecklistsModule,
+    ChecklistImagesModule,
+    PaymentsModule,
+    ReviewsModule,
     VehicleAvailabilityWindowsModule,
     VehicleImagesModule,
     VehiclesModule,
-    UploadsModule
+    UploadsModule,
+    GeocodingModule
   ],
   controllers: [AppController],
   providers: [AppService]

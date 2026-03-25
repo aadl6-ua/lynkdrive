@@ -1,86 +1,96 @@
 import { StyleSheet } from 'react-native';
+import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from './theme/tokens';
 
 export const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f3f5f9'
+    backgroundColor: colorTokens.bgLight
   },
   content: {
-    padding: 16
+    padding: spacingTokens.lg,
+    gap: spacingTokens.lg
   },
   contentWithBottomBar: {
     paddingBottom: 96
   },
   sectionCard: {
-    gap: 12
+    gap: spacingTokens.md
   },
   userSwitcherCard: {
-    gap: 10,
-    marginBottom: 12,
-    padding: 12,
+    gap: spacingTokens.sm,
+    marginBottom: spacingTokens.md,
+    padding: spacingTokens.md,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.white
   },
   switcherTitle: {
-    fontSize: 15,
-    fontWeight: '700'
+    color: colorTokens.primary,
+    ...typographyTokens.sectionLabel
   },
   title: {
-    fontSize: 24,
-    fontWeight: '700'
+    color: colorTokens.primary,
+    ...typographyTokens.title
   },
   subtitle: {
-    fontSize: 14,
-    color: '#555'
+    color: colorTokens.textMuted,
+    ...typographyTokens.subtitle
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.input,
+    paddingHorizontal: spacingTokens.md,
+    paddingVertical: spacingTokens.md,
+    color: colorTokens.textMain,
+    backgroundColor: colorTokens.white,
+    ...typographyTokens.body
   },
   buttonContainer: {
     alignSelf: 'flex-start'
   },
   card: {
     borderWidth: 1,
-    borderColor: '#dde3ee',
-    borderRadius: 14,
-    padding: 14,
-    gap: 8
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.card,
+    padding: spacingTokens.lg,
+    gap: spacingTokens.sm,
+    backgroundColor: colorTokens.white,
+    ...shadowTokens.card
   },
   row: {
-    fontSize: 14
+    color: colorTokens.textMain,
+    ...typographyTokens.body
   },
   label: {
-    fontWeight: '600'
+    fontWeight: '700',
+    color: colorTokens.secondary
   },
   error: {
-    color: '#b00020',
-    fontSize: 13
+    color: colorTokens.alert,
+    ...typographyTokens.caption
   },
   info: {
-    color: '#0a6c00',
-    fontSize: 13
+    color: colorTokens.success,
+    ...typographyTokens.caption
   },
   profileHeaderCard: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacingTokens.md,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#dde3ee',
-    borderRadius: 14,
-    padding: 14,
-    backgroundColor: '#ffffff'
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.card,
+    padding: spacingTokens.lg,
+    backgroundColor: colorTokens.white,
+    ...shadowTokens.card
   },
   avatarCircle: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: colorTokens.bgLight,
     alignItems: 'center',
     justifyContent: 'center'
   },
@@ -88,11 +98,12 @@ export const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: '#f0f0f0'
+    backgroundColor: colorTokens.bgLight
   },
   avatarInitials: {
     fontSize: 18,
-    fontWeight: '700'
+    fontWeight: '700',
+    color: colorTokens.primary
   },
   profileHeaderInfo: {
     flex: 1,
@@ -100,48 +111,51 @@ export const styles = StyleSheet.create({
   },
   profileName: {
     fontSize: 17,
-    fontWeight: '700'
+    lineHeight: 24,
+    fontWeight: '700',
+    color: colorTokens.primary
   },
   profileMeta: {
-    fontSize: 12,
-    color: '#666'
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
   },
   formGrid: {
-    gap: 8
+    gap: spacingTokens.sm
   },
   actionsRow: {
     flexDirection: 'row',
-    gap: 8
+    gap: spacingTokens.sm,
+    flexWrap: 'wrap'
   },
   actionButtonWrapper: {
     minWidth: 88
   },
   linkHint: {
-    fontSize: 12,
-    color: '#666'
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
   },
   profileImagePreview: {
     width: 96,
     height: 96,
-    borderRadius: 8,
-    backgroundColor: '#eee'
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.bgLight
   },
   vehicleImagePreview: {
     width: '100%',
     height: 180,
-    borderRadius: 8,
-    backgroundColor: '#eee'
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.bgLight
   },
   topNav: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 10,
+    gap: spacingTokens.sm,
+    paddingHorizontal: spacingTokens.md,
+    paddingTop: spacingTokens.md,
+    paddingBottom: spacingTokens.sm,
     borderBottomWidth: 1,
-    borderColor: '#e3e7f0',
-    backgroundColor: '#ffffff'
+    borderColor: colorTokens.border,
+    backgroundColor: colorTokens.white
   },
   hiddenNav: {
     display: 'none'
@@ -153,57 +167,68 @@ export const styles = StyleSheet.create({
     bottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginHorizontal: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    marginHorizontal: spacingTokens.md,
+    paddingHorizontal: spacingTokens.sm,
+    paddingVertical: spacingTokens.sm,
     borderWidth: 1,
-    borderColor: '#dde3ee',
-    borderRadius: 14,
-    backgroundColor: '#ffffff'
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.nav,
+    backgroundColor: colorTokens.white,
+    ...shadowTokens.card
   },
   navButton: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    borderRadius: 10
+    paddingHorizontal: spacingTokens.sm,
+    paddingVertical: spacingTokens.sm,
+    borderRadius: radiusTokens.input
   },
   navButtonActive: {
-    backgroundColor: '#1e2c4f'
+    backgroundColor: colorTokens.primary
   },
   navLabel: {
-    fontSize: 13,
-    color: '#33415f',
-    fontWeight: '600'
+    color: colorTokens.secondary,
+    ...typographyTokens.caption
   },
   navLabelActive: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#ffffff'
+    color: colorTokens.white,
+    ...typographyTokens.caption
   },
   vehicleCardMedia: {
     width: '100%',
     height: 170,
-    borderRadius: 10,
-    backgroundColor: '#e8ecf4'
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.bgLight
   },
   vehicleCardMediaPlaceholder: {
     width: '100%',
     height: 170,
-    borderRadius: 10,
-    backgroundColor: '#e8ecf4',
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.bgLight,
     alignItems: 'center',
     justifyContent: 'center'
   },
   vehicleCardMediaPlaceholderText: {
-    color: '#5d6b88',
-    fontSize: 13,
-    fontWeight: '600'
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
   },
   cardTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1e2c4f'
+    color: colorTokens.primary
+  },
+  chipBase: {
+    alignSelf: 'flex-start',
+    borderRadius: radiusTokens.pill,
+    paddingHorizontal: spacingTokens.md,
+    paddingVertical: spacingTokens.xs,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    backgroundColor: colorTokens.bgLight
+  },
+  chipText: {
+    color: colorTokens.secondary,
+    ...typographyTokens.caption
   }
 });

@@ -2,6 +2,18 @@ import { create } from 'zustand';
 import { setAccessToken } from '../api/http';
 import { supabaseClient } from '../api/supabase';
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+
+    if (typeof message === 'string' && message.trim()) {
+      return message;
+    }
+  }
+
+  return fallback;
+}
+
 type AuthState = {
   userId: string | null;
   email: string | null;
@@ -50,9 +62,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         accessToken: token,
         loading: false
       });
-    } catch {
+    } catch (error: unknown) {
       setAccessToken(null);
-      set({ loading: false, error: 'No se pudo restaurar la sesion de Supabase.' });
+      set({
+        loading: false,
+        error: getErrorMessage(error, 'No se pudo restaurar la sesion de Supabase.')
+      });
     }
   },
   signIn: async () => {
@@ -84,8 +99,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         loading: false,
         message: 'Sesion iniciada correctamente.'
       });
-    } catch {
-      set({ loading: false, error: 'No se pudo iniciar sesion.', message: null });
+    } catch (error: unknown) {
+      set({
+        loading: false,
+        error: getErrorMessage(error, 'No se pudo iniciar sesion.'),
+        message: null
+      });
     }
   },
   signUp: async () => {
@@ -113,8 +132,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         loading: false,
         message: 'Registro enviado. Revisa tu email si Supabase requiere confirmacion.'
       });
-    } catch {
-      set({ loading: false, error: 'No se pudo registrar el usuario.', message: null });
+    } catch (error: unknown) {
+      set({
+        loading: false,
+        error: getErrorMessage(error, 'No se pudo registrar el usuario.'),
+        message: null
+      });
     }
   },
   signOut: async () => {
@@ -130,8 +153,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         loading: false,
         message: 'Sesion cerrada.'
       });
-    } catch {
-      set({ loading: false, error: 'No se pudo cerrar sesion.', message: null });
+    } catch (error: unknown) {
+      set({
+        loading: false,
+        error: getErrorMessage(error, 'No se pudo cerrar sesion.'),
+        message: null
+      });
     }
   }
 }));

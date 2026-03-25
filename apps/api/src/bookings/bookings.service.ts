@@ -110,6 +110,39 @@ export class BookingsService {
     return rows.map((row: BookingRow) => this.toResponseDto(row));
   }
 
+  async findByVehicleId(vehicleId: string): Promise<BookingResponseDto[]> {
+    await this.ensureVehicleExists(vehicleId);
+
+    const rows = await this.bookingsRepository.query(
+      `
+        SELECT
+          b.id,
+          b.vehicle_id,
+          v.owner_id,
+          b.driver_id,
+          b.start_datetime,
+          b.end_datetime,
+          b.price_per_day_at_booking,
+          b.platform_fee,
+          b.total_price,
+          b.status,
+          b.payment_intent_id,
+          b.stripe_transfer_id,
+          b.payout_status,
+          b.owner_contact_method,
+          b.created_at,
+          b.updated_at
+        FROM bookings b
+        INNER JOIN vehicles v ON v.id = b.vehicle_id
+        WHERE b.vehicle_id = $1
+        ORDER BY b.start_datetime ASC
+      `,
+      [vehicleId]
+    );
+
+    return rows.map((row: BookingRow) => this.toResponseDto(row));
+  }
+
   async findByIdForUser(id: string, userId: string): Promise<BookingResponseDto> {
     const row = await this.findBookingRowById(id);
 
@@ -273,6 +306,17 @@ export class BookingsService {
     }
   }
 
+  private async ensureVehicleExists(vehicleId: string): Promise<void> {
+    const vehicle = await this.vehiclesRepository.findOne({
+      where: { id: vehicleId, deletedAt: IsNull() },
+      select: { id: true }
+    });
+
+    if (!vehicle) {
+      throw new NotFoundException(`Vehicle ${vehicleId} not found`);
+    }
+  }
+
   private async ensureInsideAvailabilityWindow(
     vehicleId: string,
     startDatetime: Date,
@@ -343,7 +387,7 @@ export class BookingsService {
   ): void {
     if (role === 'owner') {
       const allowedOwnerTransitions: Record<BookingStatus, BookingStatus[]> = {
-        pending: ['accepted', 'rejected'],
+        pending: ['accepted', 'rejected', 'cancelled'],
         accepted: ['cancelled'],
         rejected: [],
         paid_confirmed: ['in_progress', 'cancelled'],
