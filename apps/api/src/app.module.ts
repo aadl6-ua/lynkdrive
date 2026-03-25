@@ -15,6 +15,7 @@ import { VehicleAvailabilityWindowsModule } from './vehicle-availability-windows
 import { VehicleImagesModule } from './vehicle-images/vehicle-images.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { GeocodingModule } from './geocoding/geocoding.module';
 
 @Module({
   imports: [
@@ -51,7 +52,8 @@ import { UploadsModule } from './uploads/uploads.module';
     VehicleAvailabilityWindowsModule,
     VehicleImagesModule,
     VehiclesModule,
-    UploadsModule
+    UploadsModule,
+    GeocodingModule
   ],
   controllers: [AppController],
   providers: [AppService]

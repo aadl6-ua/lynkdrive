@@ -7,9 +7,17 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "LynkDrive usa tu ubicacion para mostrarte vehiculos cercanos y posicionarte en el mapa."
+      }
     },
-    "android": {},
+    "android": {
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
     "web": {
       "bundler": "metro"
     }

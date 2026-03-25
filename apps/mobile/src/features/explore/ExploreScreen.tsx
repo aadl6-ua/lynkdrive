@@ -19,6 +19,7 @@ import { SectionHeader } from '../../app/components/ui/SectionHeader';
 import { StatusChip } from '../../app/components/ui/StatusChip';
 import { styles } from '../../app/styles';
 import { parseLocaleNumber } from '../../shared/number';
+import { useGeocodingSuggestions } from '../../shared/useGeocodingSuggestions';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
 import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -41,6 +42,30 @@ type VehicleBookingItem = {
   startDatetime: string;
   endDatetime: string;
   status: 'pending' | 'accepted' | 'rejected' | 'paid_confirmed' | 'in_progress' | 'completed' | 'cancelled';
+};
+
+type ExploreVehicle = {
+  id: string;
+  ownerId: string;
+  brand: string;
+  model: string;
+  year: number;
+  pricePerDay: number;
+  locationAddress: string;
+  fuelType: string | null;
+  transmission: string | null;
+  seats: number | null;
+  description: string;
+};
+
+type AvailabilityWindowItem = {
+  id: string;
+  startDatetime: string;
+  endDatetime: string;
+};
+
+type VehicleImageItem = {
+  imageUrl: string;
 };
 
 function getBookingStatusLabel(status: VehicleBookingItem['status']): string {
@@ -107,9 +132,10 @@ export function ExploreScreen() {
   const [exploreFuelTypeInput, setExploreFuelTypeInput] = useState('');
   const [exploreTransmissionInput, setExploreTransmissionInput] = useState('');
   const [exploreSeatsInput, setExploreSeatsInput] = useState('');
-  const [exploreLatInput, setExploreLatInput] = useState('');
-  const [exploreLngInput, setExploreLngInput] = useState('');
+  const [exploreAddressInput, setExploreAddressInput] = useState('');
+  const [exploreSelectedLocation, setExploreSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [exploreRadiusInput, setExploreRadiusInput] = useState('');
+  const [exploreFiltersError, setExploreFiltersError] = useState<string | null>(null);
   const [bookingStartInput, setBookingStartInput] = useState('');
   const [bookingEndInput, setBookingEndInput] = useState('');
   const [bookingSaving, setBookingSaving] = useState(false);
@@ -124,8 +150,9 @@ export function ExploreScreen() {
   const { profile } = useUserProfileStore();
   const [ownerById, setOwnerById] = useState<Record<string, UserMiniProfile>>({});
   const [ownerLookupError, setOwnerLookupError] = useState<string | null>(null);
-  const exploreVehicles = vehicles.filter((vehicle) => !authUserId || vehicle.ownerId !== authUserId);
-  const imageByVehicleId = useVehiclePrimaryImages(exploreVehicles.map((vehicle) => vehicle.id));
+  const typedVehicles = vehicles as ExploreVehicle[];
+  const exploreVehicles = typedVehicles.filter((vehicle: ExploreVehicle) => !authUserId || vehicle.ownerId !== authUserId);
+  const imageByVehicleId = useVehiclePrimaryImages(exploreVehicles.map((vehicle: ExploreVehicle) => vehicle.id));
   const {
     items: vehicleImages,
     loading: vehicleImagesLoading,
@@ -138,22 +165,29 @@ export function ExploreScreen() {
     error: availabilityWindowsError,
     fetchByVehicleId: fetchAvailabilityWindowsByVehicleId
   } = useVehicleAvailabilityWindowsStore();
+  const typedAvailabilityWindows = availabilityWindows as AvailabilityWindowItem[];
+  const typedVehicleImages = vehicleImages as VehicleImageItem[];
+  const {
+    suggestions: exploreAddressSuggestions,
+    loading: exploreAddressLoading,
+    error: exploreAddressError
+  } = useGeocodingSuggestions(exploreAddressInput);
 
   const selectedVehicle = useMemo(
-    () => exploreVehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null,
+    () => exploreVehicles.find((vehicle: ExploreVehicle) => vehicle.id === selectedVehicleId) ?? null,
     [exploreVehicles, selectedVehicleId]
   );
   const hasRequiredProfileData = hasMinimumProfileData(profile);
   const canTransact = canUseTransactionalFlows(profile);
 
   const selectedVehicleImageUrls = useMemo(() => {
-    return vehicleImages
-      .map((image) => resolveStoredImageUrl(image.imageUrl))
-      .filter((url): url is string => Boolean(url));
-  }, [vehicleImages]);
+    return typedVehicleImages
+      .map((image: VehicleImageItem) => resolveStoredImageUrl(image.imageUrl))
+      .filter((url: string | null): url is string => Boolean(url));
+  }, [typedVehicleImages]);
 
   const ownerIds = useMemo(
-    () => Array.from(new Set(exploreVehicles.map((vehicle) => vehicle.ownerId))).sort(),
+    () => Array.from(new Set(exploreVehicles.map((vehicle: ExploreVehicle) => vehicle.ownerId))).sort(),
     [exploreVehicles]
   );
 
@@ -257,9 +291,19 @@ export function ExploreScreen() {
   const handleApplyExploreFilters = async () => {
     const parsedMaxPrice = parseLocaleNumber(exploreMaxPriceInput);
     const parsedSeats = parseLocaleNumber(exploreSeatsInput);
-    const parsedLat = parseLocaleNumber(exploreLatInput);
-    const parsedLng = parseLocaleNumber(exploreLngInput);
     const parsedRadius = parseLocaleNumber(exploreRadiusInput);
+
+    if (exploreRadiusInput.trim() && Number.isNaN(parsedRadius)) {
+      setExploreFiltersError('El radio debe ser un numero valido.');
+      return;
+    }
+
+    if (exploreAddressInput.trim() && !exploreSelectedLocation) {
+      setExploreFiltersError('Selecciona una direccion sugerida para aplicar filtro por ubicacion.');
+      return;
+    }
+
+    setExploreFiltersError(null);
 
     await fetchVehicles({
       maxPrice: exploreMaxPriceInput.trim() && !Number.isNaN(parsedMaxPrice) ? parsedMaxPrice : undefined,
@@ -270,8 +314,8 @@ export function ExploreScreen() {
         ? (exploreTransmissionInput as 'manual' | 'automatic')
         : undefined,
       seats: exploreSeatsInput.trim() && !Number.isNaN(parsedSeats) ? parsedSeats : undefined,
-      lat: exploreLatInput.trim() && !Number.isNaN(parsedLat) ? parsedLat : undefined,
-      lng: exploreLngInput.trim() && !Number.isNaN(parsedLng) ? parsedLng : undefined,
+      lat: exploreSelectedLocation?.lat,
+      lng: exploreSelectedLocation?.lng,
       radiusKm: exploreRadiusInput.trim() && !Number.isNaN(parsedRadius) ? parsedRadius : undefined
     });
   };
@@ -281,10 +325,23 @@ export function ExploreScreen() {
     setExploreFuelTypeInput('');
     setExploreTransmissionInput('');
     setExploreSeatsInput('');
-    setExploreLatInput('');
-    setExploreLngInput('');
+    setExploreAddressInput('');
+    setExploreSelectedLocation(null);
     setExploreRadiusInput('');
+    setExploreFiltersError(null);
     await fetchVehicles();
+  };
+
+  const handleExploreAddressChange = (value: string) => {
+    setExploreAddressInput(value);
+    setExploreSelectedLocation(null);
+    setExploreFiltersError(null);
+  };
+
+  const handleSelectExploreAddress = (label: string, lat: number, lng: number) => {
+    setExploreAddressInput(label);
+    setExploreSelectedLocation({ lat, lng });
+    setExploreFiltersError(null);
   };
 
   const handleOpenVehicleDetails = (vehicleId: string) => {
@@ -407,7 +464,7 @@ export function ExploreScreen() {
           <Text style={styles.switcherTitle}>Fotos</Text>
           {selectedVehicleImageUrls.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={localStyles.galleryRow}>
-              {selectedVehicleImageUrls.map((imageUrl, index) => (
+              {selectedVehicleImageUrls.map((imageUrl: string, index: number) => (
                 <Image key={`${selectedVehicle.id}-${index}`} source={{ uri: imageUrl }} style={localStyles.galleryImage} resizeMode="cover" />
               ))}
             </ScrollView>
@@ -460,7 +517,7 @@ export function ExploreScreen() {
 
           <Text style={styles.switcherTitle}>Ventanas de disponibilidad</Text>
           {availabilityWindows.length > 0 ? (
-            availabilityWindows.map((window) => (
+            typedAvailabilityWindows.map((window: AvailabilityWindowItem) => (
               <View key={window.id} style={localStyles.availabilityRow}>
                 <Text style={styles.row}><Text style={styles.label}>Inicio:</Text> {new Date(window.startDatetime).toLocaleString('es-ES')}</Text>
                 <Text style={styles.row}><Text style={styles.label}>Fin:</Text> {new Date(window.endDatetime).toLocaleString('es-ES')}</Text>
@@ -526,19 +583,31 @@ export function ExploreScreen() {
           keyboardType="number-pad"
         />
         <TextInput
-          value={exploreLatInput}
-          onChangeText={setExploreLatInput}
+          value={exploreAddressInput}
+          onChangeText={handleExploreAddressChange}
           style={styles.input}
-          placeholder="Latitud centro"
-          keyboardType="numbers-and-punctuation"
+          placeholder="Direccion para buscar por zona"
         />
-        <TextInput
-          value={exploreLngInput}
-          onChangeText={setExploreLngInput}
-          style={styles.input}
-          placeholder="Longitud centro"
-          keyboardType="numbers-and-punctuation"
-        />
+        {exploreAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
+        {exploreAddressError ? <Text style={styles.error}>{exploreAddressError}</Text> : null}
+        {exploreAddressSuggestions.length > 0 && !exploreSelectedLocation ? (
+          <View style={localStyles.suggestionsList}>
+            {exploreAddressSuggestions.map((suggestion) => (
+              <Pressable
+                key={suggestion.id}
+                style={localStyles.suggestionItem}
+                onPress={() => handleSelectExploreAddress(suggestion.label, suggestion.lat, suggestion.lng)}
+              >
+                <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        {exploreSelectedLocation ? (
+          <Text style={styles.linkHint}>
+            Ubicacion seleccionada: {exploreSelectedLocation.lat.toFixed(5)}, {exploreSelectedLocation.lng.toFixed(5)}
+          </Text>
+        ) : null}
         <TextInput
           value={exploreRadiusInput}
           onChangeText={setExploreRadiusInput}
@@ -546,6 +615,7 @@ export function ExploreScreen() {
           placeholder="Radio (km)"
           keyboardType="decimal-pad"
         />
+        {exploreFiltersError ? <Text style={styles.error}>{exploreFiltersError}</Text> : null}
 
         <View style={styles.actionsRow}>
           <View style={styles.actionButtonWrapper}>
@@ -561,7 +631,7 @@ export function ExploreScreen() {
       {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
       {ownerLookupError ? <Text style={styles.error}>{ownerLookupError}</Text> : null}
 
-      {exploreVehicles.map((vehicle) => (
+      {exploreVehicles.map((vehicle: ExploreVehicle) => (
         <Pressable key={vehicle.id} style={[styles.card, desktopCardStyle]} onPress={() => handleOpenVehicleDetails(vehicle.id)}>
           {(() => {
             const owner = ownerById[vehicle.ownerId];
@@ -728,6 +798,23 @@ const localStyles = StyleSheet.create({
   personName: {
     fontSize: 14,
     fontWeight: '700',
+    color: '#1e2c4f'
+  },
+  suggestionsList: {
+    borderWidth: 1,
+    borderColor: '#dde3ee',
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+    overflow: 'hidden'
+  },
+  suggestionItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#edf1f7'
+  },
+  suggestionLabel: {
+    fontSize: 13,
     color: '#1e2c4f'
   }
 });

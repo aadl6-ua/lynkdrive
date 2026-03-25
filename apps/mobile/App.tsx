@@ -52,7 +52,11 @@ export default function App() {
       {isDesktopLike ? <TabBar activeTab={activeTab} onChangeTab={setActiveTab} /> : null}
 
       <ScrollView
-        contentContainerStyle={[styles.content, !isDesktopLike ? styles.contentWithBottomBar : undefined]}
+        contentContainerStyle={[
+          styles.content,
+          isDesktopLike ? { paddingTop: 104 } : undefined,
+          !isDesktopLike ? styles.contentWithBottomBar : undefined
+        ]}
       >
         {renderActiveScreen()}
       </ScrollView>
