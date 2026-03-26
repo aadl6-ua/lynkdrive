@@ -30,7 +30,9 @@ import { useVehicleAvailabilityWindowsStore } from '../../store/useVehicleAvaila
 import { useVehicleImagesStore } from '../../store/useVehicleImagesStore';
 import { useVehiclesStore } from '../../store/useVehiclesStore';
 
-type ExploreScreenMode = 'list' | 'detail';
+import { ExploreVehiclesMap, VehicleMarker } from '../maps';
+
+type ExploreScreenMode = 'list' | 'detail' | 'map';
 
 type UserMiniProfile = {
   id: string;
@@ -701,6 +703,9 @@ export function ExploreScreen() {
           <View style={styles.actionButtonWrapper}>
             <Button title="Limpiar" onPress={() => void handleClearExploreFilters()} />
           </View>
+           <View style={styles.actionButtonWrapper}>
+             <Button title="Mapa" onPress={() => setScreenMode('map')} />
+           </View>
         </View>
       </View>
 
@@ -708,7 +713,40 @@ export function ExploreScreen() {
       {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
       {ownerLookupError ? <Text style={styles.error}>{ownerLookupError}</Text> : null}
 
-      {exploreVehicles.map((vehicle: ExploreVehicle) => (
+       {screenMode === 'map' ? (
+         <View style={[styles.card, desktopCardStyle]}>
+           <ExploreVehiclesMap
+             vehicles={exploreVehicles.map((vehicle: ExploreVehicle): VehicleMarker => ({
+               id: vehicle.id,
+               location: {
+                 latitude: vehicle.locationLat,
+                 longitude: vehicle.locationLng,
+               },
+               brand: vehicle.brand,
+               model: vehicle.model,
+               pricePerDay: vehicle.pricePerDay,
+               imageUrl: resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null),
+             }))}
+             userLocation={
+               permissionStatus === 'granted' && userLocationCoords
+                 ? { latitude: userLocationCoords.latitude, longitude: userLocationCoords.longitude }
+                 : null
+             }
+             onVehiclePress={(vehicleId: string) => {
+               setSelectedVehicleId(vehicleId);
+               setScreenMode('detail');
+             }}
+             height={500}
+           />
+           <View style={styles.actionsRow}>
+             <View style={styles.actionButtonWrapper}>
+               <Button title="Volver a Lista" onPress={() => setScreenMode('list')} />
+             </View>
+           </View>
+         </View>
+       ) : null}
+
+       {screenMode !== 'map' && exploreVehicles.map((vehicle: ExploreVehicle) => (
         <Pressable key={vehicle.id} style={[styles.card, desktopCardStyle]} onPress={() => handleOpenVehicleDetails(vehicle.id)}>
           {(() => {
             const owner = ownerById[vehicle.ownerId];
