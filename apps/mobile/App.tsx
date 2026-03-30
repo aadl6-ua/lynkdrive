@@ -44,7 +44,7 @@ export default function App() {
       return <MyVehiclesScreen />;
     }
 
-    return <ProfileScreen />;
+    return <ProfileScreen onNavigateToTab={setActiveTab} />;
   };
 
   return (

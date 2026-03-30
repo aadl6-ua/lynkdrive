@@ -16,7 +16,6 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
     [selectedVehicleId, vehicles]
   );
 
-  // Calcular región inicial (centro en usuario o en primer vehículo)
   const centerLocation = userLocation || (vehicles.length > 0 ? vehicles[0].location : null);
 
   if (!centerLocation) {
@@ -42,7 +41,6 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
         onPress={() => {
           const elapsedMs = Date.now() - lastMarkerPressAtRef.current;
 
-          // Ignore the map press that is emitted right after tapping a marker.
           if (elapsedMs < 250) {
             return;
           }
@@ -50,7 +48,6 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
           setSelectedVehicleId(null);
         }}
       >
-        {/* Marcador del usuario */}
         {userLocation && (
           <Marker
             coordinate={{
@@ -62,7 +59,6 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
           />
         )}
 
-        {/* Marcadores de vehículos */}
         {vehicles.map((vehicle) => (
           <Marker
             key={vehicle.id}
