@@ -17,6 +17,7 @@ interface VehicleImagesState {
   mutationMessage: string | null;
   fetchByVehicleId: (vehicleId: string) => Promise<void>;
   createForVehicle: (vehicleId: string, imageUrl: string, isPrimary: boolean) => Promise<void>;
+  updateById: (imageId: string, vehicleId: string, payload: { isPrimary?: boolean; imageUrl?: string }) => Promise<void>;
   deleteById: (imageId: string, vehicleId: string) => Promise<void>;
 }
 
@@ -77,6 +78,34 @@ export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
       set({
         saving: false,
         mutationMessage: 'No se pudo crear la imagen.'
+      });
+    }
+  },
+  updateById: async (imageId, vehicleId, payload) => {
+    if (!imageId || !vehicleId) {
+      set({ mutationMessage: 'No se pudo identificar la imagen a actualizar.' });
+
+      return;
+    }
+
+    set({ saving: true, error: null, mutationMessage: null });
+
+    try {
+      await httpClient.put(`/vehicle-images/${imageId}`, payload);
+
+      const response = await httpClient.get<VehicleImageItem[]>('/vehicle-images', {
+        params: { vehicleId }
+      });
+
+      set({
+        items: response.data,
+        saving: false,
+        mutationMessage: 'Imagen actualizada correctamente.'
+      });
+    } catch {
+      set({
+        saving: false,
+        mutationMessage: 'No se pudo actualizar la imagen.'
       });
     }
   },
