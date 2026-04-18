@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { colorTokens, spacingTokens, typographyTokens, radiusTokens } from '../../app/theme/tokens';
 
@@ -32,6 +32,7 @@ interface CalendarPickerProps {
     endDate: Date | null;
     endHour: number;
   };
+  mode?: 'explore' | 'owner';
 }
 
 type DayStatus = 'past' | 'unavailable' | 'partial' | 'available';
@@ -40,8 +41,13 @@ type PickerMode = 'start' | 'end' | null;
 function getDayStatus(
   date: Date,
   availabilityWindows: AvailabilityWindowItem[],
-  bookings: BookingItem[]
+  bookings: BookingItem[],
+  mode: 'explore' | 'owner'
 ): DayStatus {
+  if (mode === 'owner') {
+    return 'available';
+  }
+
   const now = new Date();
   const startOfDay = new Date(date);
   startOfDay.setHours(0, 0, 0, 0);
@@ -161,7 +167,7 @@ function formatMonthYear(date: Date): string {
 }
 
 export const CalendarPicker = React.memo(
-  ({ availabilityWindows, bookings, onDateRangeChange, initialDateRange }: CalendarPickerProps) => {
+  ({ availabilityWindows, bookings, onDateRangeChange, initialDateRange, mode = 'explore' }: CalendarPickerProps) => {
     const [dateRange, setDateRange] = useState<DateRange>({
       startDate: null,
       startHour: 10,
@@ -170,6 +176,8 @@ export const CalendarPicker = React.memo(
     });
     const [pickerMode, setPickerMode] = useState<PickerMode>(null);
     const [activeMonthIndex, setActiveMonthIndex] = useState(0);
+    const onDateRangeChangeRef = useRef(onDateRangeChange);
+    const lastInitialRangeSignatureRef = useRef<string | null>(null);
 
     const months = useMemo(() => {
       const result = [];
@@ -182,13 +190,30 @@ export const CalendarPicker = React.memo(
     }, []);
 
     useEffect(() => {
-      onDateRangeChange(dateRange.startDate, dateRange.startHour, dateRange.endDate, dateRange.endHour);
-    }, [dateRange, onDateRangeChange]);
+      onDateRangeChangeRef.current(dateRange.startDate, dateRange.startHour, dateRange.endDate, dateRange.endHour);
+    }, [dateRange]);
+
+    useEffect(() => {
+      onDateRangeChangeRef.current = onDateRangeChange;
+    }, [onDateRangeChange]);
 
     useEffect(() => {
       if (!initialDateRange) {
         return;
       }
+
+      const nextSignature = [
+        initialDateRange.startDate?.toISOString() ?? '',
+        initialDateRange.startHour,
+        initialDateRange.endDate?.toISOString() ?? '',
+        initialDateRange.endHour
+      ].join('|');
+
+      if (lastInitialRangeSignatureRef.current === nextSignature) {
+        return;
+      }
+
+      lastInitialRangeSignatureRef.current = nextSignature;
 
       setDateRange({
         startDate: initialDateRange.startDate,
@@ -406,7 +431,21 @@ export const CalendarPicker = React.memo(
             {Array.from({ length: daysInMonth }).map((_, dayIdx) => {
               const day = dayIdx + 1;
               const date = new Date(year, month, day);
-              const status = getDayStatus(date, availabilityWindows, bookings);
+              const status =
+                mode === 'owner'
+                  ? availabilityWindows.some((window) => {
+                      const winStart = new Date(window.startDatetime);
+                      const winEnd = new Date(window.endDatetime);
+                      const dayStart = new Date(date);
+                      dayStart.setHours(0, 0, 0, 0);
+                      const dayEnd = new Date(date);
+                      dayEnd.setHours(23, 59, 59, 999);
+
+                      return winStart <= dayEnd && winEnd >= dayStart;
+                    })
+                    ? 'unavailable'
+                    : 'available'
+                  : getDayStatus(date, availabilityWindows, bookings, mode);
               const dayColor = getDayColor(status);
               const isStart = dateRange.startDate && date.toDateString() === dateRange.startDate.toDateString();
               const isEnd = dateRange.endDate && date.toDateString() === dateRange.endDate.toDateString();
@@ -415,7 +454,7 @@ export const CalendarPicker = React.memo(
                 dateRange.endDate &&
                 date > dateRange.startDate &&
                 date < dateRange.endDate;
-              const isDisabled = status === 'past' || status === 'unavailable';
+              const isDisabled = mode === 'explore' && (status === 'past' || status === 'unavailable');
 
               return (
                 <Pressable
