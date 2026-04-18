@@ -296,7 +296,11 @@ export function TripsScreen() {
   if (!authUserId) {
     return (
       <View style={styles.sectionCard}>
-        <SectionHeader title="Mis Viajes" subtitle="Inicia sesion para ver reservas como conductor y propietario." />
+        <SectionHeader
+          title="Mis Viajes"
+          subtitle="Inicia sesion para ver reservas como conductor y propietario."
+          centered={isDesktopWeb}
+        />
       </View>
     );
   }
@@ -306,6 +310,7 @@ export function TripsScreen() {
       <SectionHeader
         title="Mis Viajes"
         subtitle="Consulta tus reservas como conductor o como propietario con mas detalle."
+        centered={isDesktopWeb}
       />
 
       <View style={[styles.card, desktopCardStyle]}>

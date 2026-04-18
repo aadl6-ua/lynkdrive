@@ -15,6 +15,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<AppTabKey>('explore');
   const { width } = useWindowDimensions();
   const isDesktopLike = Platform.OS === 'web' || width >= 768;
+  const exploreTopPadding = isDesktopLike ? 104 : Platform.OS === 'android' ? 52 : 0;
+  const exploreBottomPadding = !isDesktopLike ? 96 : 0;
 
   const { fetchMyProfile } = useUserProfileStore();
   const { userId: authUserId, hydrateSession } = useAuthStore();
@@ -33,7 +35,7 @@ export default function App() {
 
   const renderActiveScreen = () => {
     if (activeTab === 'explore') {
-      return <ExploreScreen />;
+      return <ExploreScreen topPadding={exploreTopPadding} bottomPadding={exploreBottomPadding} />;
     }
 
     if (activeTab === 'trips') {
@@ -41,25 +43,32 @@ export default function App() {
     }
 
     if (activeTab === 'myVehicles') {
-      return <MyVehiclesScreen />;
+      return <MyVehiclesScreen topPadding={exploreTopPadding} bottomPadding={exploreBottomPadding} />;
     }
 
     return <ProfileScreen onNavigateToTab={setActiveTab} />;
   };
 
+  const baseContentStyle = [
+    styles.content,
+    isDesktopLike ? { paddingTop: 104 } : undefined,
+    !isDesktopLike && Platform.OS === 'android' ? { paddingTop: 52 } : undefined,
+    !isDesktopLike ? styles.contentWithBottomBar : undefined
+  ];
+
   return (
     <SafeAreaView style={styles.container}>
       {isDesktopLike ? <TabBar activeTab={activeTab} onChangeTab={setActiveTab} /> : null}
 
-      <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          isDesktopLike ? { paddingTop: 104 } : undefined,
-          !isDesktopLike ? styles.contentWithBottomBar : undefined
-        ]}
-      >
-        {renderActiveScreen()}
-      </ScrollView>
+      {activeTab === 'explore' || activeTab === 'myVehicles' ? (
+        renderActiveScreen()
+      ) : (
+        <ScrollView
+          contentContainerStyle={baseContentStyle}
+        >
+          {renderActiveScreen()}
+        </ScrollView>
+      )}
 
       {!isDesktopLike ? <TabBar activeTab={activeTab} onChangeTab={setActiveTab} bottom /> : null}
 

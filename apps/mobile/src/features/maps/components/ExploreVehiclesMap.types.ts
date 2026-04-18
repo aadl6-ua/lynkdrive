@@ -17,4 +17,5 @@ export interface ExploreVehiclesMapProps {
   userLocation?: MapCoordinates | null;
   onVehiclePress?: (vehicleId: string) => void;
   height?: number;
+  infoBottomInset?: number;
 }

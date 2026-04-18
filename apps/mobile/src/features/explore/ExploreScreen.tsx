@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Image,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -81,6 +84,11 @@ type VehicleImageItem = {
 
 type ActionButtonVariant = 'primary' | 'ghost';
 type SelectOption<T extends string> = { label: string; value: T };
+
+type ExploreScreenProps = {
+  topPadding?: number;
+  bottomPadding?: number;
+};
 
 function getBookingStatusLabel(status: VehicleBookingItem['status']): string {
   const map: Record<VehicleBookingItem['status'], string> = {
@@ -282,11 +290,18 @@ function SelectDropdown<T extends string>({
   );
 }
 
-export function ExploreScreen() {
+export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScreenProps) {
   const { width, height } = useWindowDimensions();
   const isDesktopWeb = Platform.OS === 'web' && width >= 1024;
   const desktopCardStyle = isDesktopWeb ? localStyles.desktopCard : undefined;
-  const mapHeight = Math.max(420, height - (isDesktopWeb ? 240 : 300));
+  const mapViewportHeight = Math.max(
+    420,
+    height - topPadding - bottomPadding - (isDesktopWeb ? 200 : 190)
+  );
+  const [showStickyFilters, setShowStickyFilters] = useState(true);
+  const lastScrollYRef = useRef(0);
+  const showStickyFiltersRef = useRef(true);
+  const stickyFiltersAnim = useRef(new Animated.Value(1)).current;
 
   const [screenMode, setScreenMode] = useState<ExploreScreenMode>('list');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
@@ -486,6 +501,243 @@ export function ExploreScreen() {
     };
   }, [ownerIdsKey]);
 
+  useEffect(() => {
+    showStickyFiltersRef.current = showStickyFilters;
+  }, [showStickyFilters]);
+
+  useEffect(() => {
+    Animated.timing(stickyFiltersAnim, {
+      toValue: showStickyFilters ? 1 : 0,
+      duration: 280,
+      useNativeDriver: false
+    }).start();
+  }, [showStickyFilters, stickyFiltersAnim]);
+
+  useEffect(() => {
+    lastScrollYRef.current = 0;
+    if (screenMode === 'map' && !showStickyFiltersRef.current) {
+      setShowStickyFilters(true);
+    }
+  }, [screenMode]);
+
+  const handleExploreScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (screenMode === 'map') {
+      if (!showStickyFiltersRef.current) {
+        setShowStickyFilters(true);
+      }
+      lastScrollYRef.current = Math.max(0, event.nativeEvent.contentOffset.y);
+      return;
+    }
+
+    const currentY = Math.max(0, event.nativeEvent.contentOffset.y);
+    const delta = currentY - lastScrollYRef.current;
+
+    if (currentY < 80) {
+      if (!showStickyFiltersRef.current) {
+        setShowStickyFilters(true);
+      }
+      lastScrollYRef.current = currentY;
+      return;
+    }
+
+    if (delta > 8 && showStickyFiltersRef.current) {
+      setShowStickyFilters(false);
+    } else if (delta < -8 && !showStickyFiltersRef.current) {
+      setShowStickyFilters(true);
+    }
+
+    lastScrollYRef.current = currentY;
+  };
+
+  const stickyWebStyle =
+    Platform.OS === 'web'
+      ? ({ position: 'sticky', top: isDesktopWeb ? topPadding : 8, zIndex: 30 } as any)
+      : undefined;
+
+  const stickyMobileHiddenInset = Platform.OS !== 'web' && !showStickyFilters ? 12 : 0;
+
+  const fuelOptions: Array<SelectOption<FuelFilter>> = [
+    { label: 'Todos', value: '' },
+    { label: 'Gasolina', value: 'gasoline' },
+    { label: 'Diesel', value: 'diesel' },
+    { label: 'Eléctrico', value: 'electric' },
+    { label: 'Híbrido', value: 'hybrid' }
+  ];
+
+  const transmissionOptions: Array<SelectOption<TransmissionFilter>> = [
+    { label: 'Todas', value: '' },
+    { label: 'Manual', value: 'manual' },
+    { label: 'Automática', value: 'automatic' }
+  ];
+
+  const seatsOptions: Array<SelectOption<SeatsFilter>> = [
+    { label: 'Seleccionar plazas', value: '' },
+    { label: '2 plazas', value: '2' },
+    { label: '4 plazas', value: '4' },
+    { label: '5 plazas', value: '5' },
+    { label: '7 plazas', value: '7' }
+  ];
+
+  const handleExploreAddressChange = (value: string) => {
+    setExploreAddressInput(value);
+    setExploreSelectedLocation(null);
+    setExploreFiltersError(null);
+  };
+
+  const handleSelectExploreAddress = (label: string, lat: number, lng: number) => {
+    setExploreAddressInput(label);
+    setExploreSelectedLocation({ lat, lng });
+    setExploreFiltersError(null);
+  };
+
+  const controlsBlock = (
+    <>
+      <Animated.View
+        pointerEvents={showStickyFilters ? 'auto' : 'none'}
+        style={[
+          localStyles.filterAnimatedWrap,
+          {
+            opacity: stickyFiltersAnim,
+            maxHeight: stickyFiltersAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 560]
+            }),
+            marginBottom: stickyFiltersAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, spacingTokens.md]
+            }),
+            transform: [
+              {
+                translateY: stickyFiltersAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [-8, 0]
+                })
+              }
+            ]
+          }
+        ]}
+      >
+        <View style={[styles.card, desktopCardStyle, localStyles.filterBarCard]}>
+          <Text style={localStyles.sectionLabel}>Filtros</Text>
+          <View style={localStyles.filterBarScrollShell}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={localStyles.filterBarRow}>
+              <View style={localStyles.locationRadioGroup}>
+                <View style={localStyles.locationBarItem}>
+                  <Text style={localStyles.inputLabel}>Ubicación</Text>
+                  <View style={localStyles.locationField}>
+                    <View style={localStyles.locationIconWrap}>
+                      <View style={localStyles.locationPinDot} />
+                      <View style={localStyles.locationPinTail} />
+                    </View>
+                    <TextInput
+                      value={exploreAddressInput}
+                      onChangeText={handleExploreAddressChange}
+                      style={localStyles.locationInput}
+                      placeholder="Busca tu zona..."
+                    />
+                  </View>
+                </View>
+
+                <View style={localStyles.barInputItem}>
+                  <Text style={localStyles.inputLabel}>Radio (km)</Text>
+                  <TextInput
+                    value={exploreRadiusInput}
+                    onChangeText={setExploreRadiusInput}
+                    style={localStyles.inputField}
+                    placeholder="25"
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+
+              <View style={localStyles.barInputItem}>
+                <Text style={localStyles.inputLabel}>Precio máx (€)</Text>
+                <TextInput
+                  value={exploreMaxPriceInput}
+                  onChangeText={setExploreMaxPriceInput}
+                  style={localStyles.inputField}
+                  placeholder="500"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+
+              <View style={localStyles.barSelectItem}>
+                <SelectDropdown
+                  label="Combustible"
+                  value={exploreFuelTypeInput}
+                  options={fuelOptions}
+                  onChange={setExploreFuelTypeInput}
+                />
+              </View>
+
+              <View style={localStyles.barSelectItem}>
+                <SelectDropdown
+                  label="Transmision"
+                  value={exploreTransmissionInput}
+                  options={transmissionOptions}
+                  onChange={setExploreTransmissionInput}
+                />
+              </View>
+
+              <View style={localStyles.barSelectItem}>
+                <SelectDropdown
+                  label="Plazas"
+                  value={exploreSeatsInput}
+                  options={seatsOptions}
+                  onChange={setExploreSeatsInput}
+                />
+              </View>
+
+              <View style={localStyles.barActionsWrap}>
+                <ActionButton label="Aplicar" onPress={() => void handleApplyExploreFilters()} />
+                <ActionButton label="Limpiar" onPress={() => void handleClearExploreFilters()} variant="ghost" />
+              </View>
+            </ScrollView>
+          </View>
+
+          {exploreAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
+          {exploreAddressError ? <Text style={styles.error}>{exploreAddressError}</Text> : null}
+          {exploreAddressSuggestions.length > 0 && !exploreSelectedLocation ? (
+            <View style={localStyles.suggestionsList}>
+              {exploreAddressSuggestions.map((suggestion) => (
+                <Pressable
+                  key={suggestion.id}
+                  style={localStyles.suggestionItem}
+                  onPress={() => handleSelectExploreAddress(suggestion.label, suggestion.lat, suggestion.lng)}
+                >
+                  <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          {exploreSelectedLocation ? (
+            <Text style={styles.linkHint}>
+              Ubicacion seleccionada: {exploreSelectedLocation.lat.toFixed(5)}, {exploreSelectedLocation.lng.toFixed(5)}
+            </Text>
+          ) : null}
+
+          {exploreFiltersError ? <Text style={styles.error}>{exploreFiltersError}</Text> : null}
+        </View>
+      </Animated.View>
+
+      <View style={[styles.card, localStyles.viewModeCard]}>
+        <Pressable
+          onPress={() => setScreenMode('list')}
+          style={[localStyles.viewModePill, screenMode === 'list' ? localStyles.viewModePillActive : undefined]}
+        >
+          <Text style={[localStyles.viewModeText, screenMode === 'list' ? localStyles.viewModeTextActive : undefined]}>Lista</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setScreenMode('map')}
+          style={[localStyles.viewModePill, screenMode === 'map' ? localStyles.viewModePillActive : undefined]}
+        >
+          <Text style={[localStyles.viewModeText, screenMode === 'map' ? localStyles.viewModeTextActive : undefined]}>Mapa</Text>
+        </Pressable>
+      </View>
+    </>
+  );
+
   const handleApplyExploreFilters = async () => {
     const parsedMaxPrice = parseLocaleNumber(exploreMaxPriceInput);
     const parsedSeats = parseLocaleNumber(exploreSeatsInput);
@@ -524,40 +776,6 @@ export function ExploreScreen() {
     setExploreRadiusInput('');
     setExploreFiltersError(null);
     await fetchVehicles();
-  };
-
-  const fuelOptions: Array<SelectOption<FuelFilter>> = [
-    { label: 'Todos', value: '' },
-    { label: 'Gasolina', value: 'gasoline' },
-    { label: 'Diesel', value: 'diesel' },
-    { label: 'Eléctrico', value: 'electric' },
-    { label: 'Híbrido', value: 'hybrid' }
-  ];
-
-  const transmissionOptions: Array<SelectOption<TransmissionFilter>> = [
-    { label: 'Todas', value: '' },
-    { label: 'Manual', value: 'manual' },
-    { label: 'Automática', value: 'automatic' }
-  ];
-
-  const seatsOptions: Array<SelectOption<SeatsFilter>> = [
-    { label: 'Seleccionar plazas', value: '' },
-    { label: '2 plazas', value: '2' },
-    { label: '4 plazas', value: '4' },
-    { label: '5 plazas', value: '5' },
-    { label: '7 plazas', value: '7' }
-  ];
-
-  const handleExploreAddressChange = (value: string) => {
-    setExploreAddressInput(value);
-    setExploreSelectedLocation(null);
-    setExploreFiltersError(null);
-  };
-
-  const handleSelectExploreAddress = (label: string, lat: number, lng: number) => {
-    setExploreAddressInput(label);
-    setExploreSelectedLocation({ lat, lng });
-    setExploreFiltersError(null);
   };
 
   const handleOpenVehicleDetails = (vehicleId: string) => {
@@ -669,15 +887,29 @@ export function ExploreScreen() {
     const selectedOwnerAvatarUrl = resolveStoredImageUrl(selectedOwner?.avatarUrl ?? null);
 
     return (
-      <View style={styles.sectionCard}>
+      <ScrollView
+        style={localStyles.exploreScroll}
+        contentContainerStyle={[
+          localStyles.exploreScrollContent,
+          {
+            paddingTop: topPadding,
+            paddingBottom: bottomPadding + spacingTokens.md,
+            paddingHorizontal: spacingTokens.lg
+          }
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <SectionHeader
           title={`${selectedVehicle.brand} ${selectedVehicle.model}`}
           subtitle="Ficha completa del vehiculo para decidir tu reserva."
+          centered={isDesktopWeb}
         />
 
-        <View style={localStyles.inlineActions}>
-          <ActionButton label="Volver a explorar" onPress={handleBackToExploreList} variant="ghost" />
-        </View>
+        {!isDesktopWeb ? (
+          <View style={localStyles.inlineActions}>
+            <ActionButton label="Volver a explorar" onPress={handleBackToExploreList} variant="ghost" />
+          </View>
+        ) : null}
 
         <View style={[styles.card, desktopCardStyle]}>
           <View style={localStyles.ownerCard}>
@@ -778,42 +1010,11 @@ export function ExploreScreen() {
             {bookingMessage ? <Text style={styles.info}>{bookingMessage}</Text> : null}
           </View>
 
-          <Text style={localStyles.sectionLabel}>Ventanas de disponibilidad</Text>
-          {typedAvailabilityWindows.length > 0 ? (
-            <View style={localStyles.dataBlockList}>
-              {typedAvailabilityWindows.map((window: AvailabilityWindowItem) => (
-                <View key={window.id} style={localStyles.dataBlockItem}>
-                  <Text style={localStyles.dataBlockLabel}>Inicio</Text>
-                  <Text style={localStyles.dataBlockValue}>{formatDateTimeMadrid(window.startDatetime)}</Text>
-                  <Text style={localStyles.dataBlockLabel}>Fin</Text>
-                  <Text style={localStyles.dataBlockValue}>{formatDateTimeMadrid(window.endDatetime)}</Text>
-                </View>
-              ))}
+          {isDesktopWeb ? (
+            <View style={[localStyles.inlineActions, localStyles.inlineActionsCentered]}>
+              <ActionButton label="Volver a explorar" onPress={handleBackToExploreList} variant="ghost" />
             </View>
-          ) : (
-            <Text style={styles.subtitle}>No hay ventanas de disponibilidad publicadas todavia.</Text>
-          )}
-
-          <Text style={localStyles.sectionLabel}>Reservas del vehiculo</Text>
-          {vehicleBookingsLoading ? <ActivityIndicator size="small" /> : null}
-          {vehicleBookingsError ? <Text style={styles.error}>{vehicleBookingsError}</Text> : null}
-          {vehicleBookings.length > 0 ? (
-            <View style={localStyles.dataBlockList}>
-              {vehicleBookings.map((booking) => (
-                <View key={booking.id} style={localStyles.dataBlockItem}>
-                  <StatusChip label={getBookingStatusLabel(booking.status)} tone={getBookingStatusTone(booking.status)} compact />
-                  <Text style={localStyles.dataBlockLabel}>Inicio</Text>
-                  <Text style={localStyles.dataBlockValue}>{formatDateTimeMadrid(booking.startDatetime)}</Text>
-                  <Text style={localStyles.dataBlockLabel}>Fin</Text>
-                  <Text style={localStyles.dataBlockValue}>{formatDateTimeMadrid(booking.endDatetime)}</Text>
-                </View>
-              ))}
-            </View>
-          ) : (
-            !vehicleBookingsLoading && (
-              <Text style={styles.subtitle}>No hay reservas registradas para este vehiculo todavia.</Text>
-            )
-          )}
+          ) : null}
         </View>
 
         <Modal visible={activePhotoIndex !== null} animationType="fade" transparent>
@@ -859,140 +1060,16 @@ export function ExploreScreen() {
             </View>
           </View>
         </Modal>
-      </View>
+      </ScrollView>
     );
   }
 
-  return (
-    <View style={styles.sectionCard}>
-      <SectionHeader title="Explorar" subtitle="Descubre vehiculos cercanos y filtra en segundos." />
+  if (screenMode === 'map') {
+    const fullMapHeight = Math.max(420, height);
 
-      <View style={[styles.card, desktopCardStyle, localStyles.filterBarCard]}>
-        <Text style={localStyles.sectionLabel}>Filtros</Text>
-        <View style={localStyles.filterBarScrollShell}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={localStyles.filterBarRow}>
-            <View style={localStyles.locationRadioGroup}>
-              <View style={localStyles.locationBarItem}>
-                <Text style={localStyles.inputLabel}>Ubicación</Text>
-                <View style={localStyles.locationField}>
-                  <View style={localStyles.locationIconWrap}>
-                    <View style={localStyles.locationPinDot} />
-                    <View style={localStyles.locationPinTail} />
-                  </View>
-                  <TextInput
-                    value={exploreAddressInput}
-                    onChangeText={handleExploreAddressChange}
-                    style={localStyles.locationInput}
-                    placeholder="Busca tu zona..."
-                  />
-                </View>
-              </View>
-
-              <View style={localStyles.barInputItem}>
-                <Text style={localStyles.inputLabel}>Radio (km)</Text>
-                <TextInput
-                  value={exploreRadiusInput}
-                  onChangeText={setExploreRadiusInput}
-                  style={localStyles.inputField}
-                  placeholder="25"
-                  keyboardType="decimal-pad"
-                />
-              </View>
-            </View>
-
-            <View style={localStyles.barInputItem}>
-              <Text style={localStyles.inputLabel}>Precio máx (€)</Text>
-              <TextInput
-                value={exploreMaxPriceInput}
-                onChangeText={setExploreMaxPriceInput}
-                style={localStyles.inputField}
-                placeholder="500"
-                keyboardType="decimal-pad"
-              />
-            </View>
-
-            <View style={localStyles.barSelectItem}>
-              <SelectDropdown
-                label="Combustible"
-                value={exploreFuelTypeInput}
-                options={fuelOptions}
-                onChange={setExploreFuelTypeInput}
-              />
-            </View>
-
-            <View style={localStyles.barSelectItem}>
-              <SelectDropdown
-                label="Transmision"
-                value={exploreTransmissionInput}
-                options={transmissionOptions}
-                onChange={setExploreTransmissionInput}
-              />
-            </View>
-
-            <View style={localStyles.barSelectItem}>
-              <SelectDropdown
-                label="Plazas"
-                value={exploreSeatsInput}
-                options={seatsOptions}
-                onChange={setExploreSeatsInput}
-              />
-            </View>
-
-            <View style={localStyles.barActionsWrap}>
-              <ActionButton label="Aplicar" onPress={() => void handleApplyExploreFilters()} />
-              <ActionButton label="Limpiar" onPress={() => void handleClearExploreFilters()} variant="ghost" />
-            </View>
-          </ScrollView>
-
-
-        </View>
-
-        {exploreAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
-        {exploreAddressError ? <Text style={styles.error}>{exploreAddressError}</Text> : null}
-        {exploreAddressSuggestions.length > 0 && !exploreSelectedLocation ? (
-          <View style={localStyles.suggestionsList}>
-            {exploreAddressSuggestions.map((suggestion) => (
-              <Pressable
-                key={suggestion.id}
-                style={localStyles.suggestionItem}
-                onPress={() => handleSelectExploreAddress(suggestion.label, suggestion.lat, suggestion.lng)}
-              >
-                <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-
-        {exploreSelectedLocation ? (
-          <Text style={styles.linkHint}>
-            Ubicacion seleccionada: {exploreSelectedLocation.lat.toFixed(5)}, {exploreSelectedLocation.lng.toFixed(5)}
-          </Text>
-        ) : null}
-
-        {exploreFiltersError ? <Text style={styles.error}>{exploreFiltersError}</Text> : null}
-      </View>
-
-      <View style={[styles.card, desktopCardStyle, localStyles.viewModeCard]}>
-        <Pressable
-          onPress={() => setScreenMode('list')}
-          style={[localStyles.viewModePill, screenMode === 'list' ? localStyles.viewModePillActive : undefined]}
-        >
-          <Text style={[localStyles.viewModeText, screenMode === 'list' ? localStyles.viewModeTextActive : undefined]}>Lista</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setScreenMode('map')}
-          style={[localStyles.viewModePill, screenMode === 'map' ? localStyles.viewModePillActive : undefined]}
-        >
-          <Text style={[localStyles.viewModeText, screenMode === 'map' ? localStyles.viewModeTextActive : undefined]}>Mapa</Text>
-        </Pressable>
-      </View>
-
-      {vehiclesLoading ? <ActivityIndicator size="small" /> : null}
-      {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
-      {ownerLookupError ? <Text style={styles.error}>{ownerLookupError}</Text> : null}
-
-      {screenMode === 'map' ? (
-        <View style={[styles.card, desktopCardStyle, localStyles.mapViewportCard]}>
+    return (
+      <View style={localStyles.mapLayerRoot}>
+        <View style={localStyles.mapBackgroundLayer}>
           <ExploreVehiclesMap
             vehicles={exploreVehicles.map((vehicle: ExploreVehicle): VehicleMarker => ({
               id: vehicle.id,
@@ -1011,64 +1088,137 @@ export function ExploreScreen() {
                 : null
             }
             onVehiclePress={(vehicleId: string) => handleOpenVehicleDetails(vehicleId)}
-            height={mapHeight}
+            height={fullMapHeight}
+            infoBottomInset={bottomPadding + (Platform.OS === 'ios' ? 36 : 0)}
           />
         </View>
-      ) : null}
 
-      {screenMode === 'list' && exploreVehicles.map((vehicle: ExploreVehicle) => {
-        const owner = ownerById[vehicle.ownerId];
-        const ownerAvatarUrl = resolveStoredImageUrl(owner?.avatarUrl ?? null);
-        const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
+        <View
+          pointerEvents="box-none"
+          style={[
+            localStyles.mapOverlayLayer,
+            {
+              paddingTop: topPadding + spacingTokens.sm,
+              paddingBottom: bottomPadding + spacingTokens.sm,
+              paddingHorizontal: spacingTokens.lg
+            }
+          ]}
+        >
+          <View pointerEvents="auto" style={localStyles.mapOverlayContent}>
+            <View style={localStyles.mapControlsStack}>{controlsBlock}</View>
+            {vehiclesLoading ? <ActivityIndicator size="small" /> : null}
+            {vehiclesError ? <Text style={[styles.error, localStyles.mapStatusErrorText]}>{vehiclesError}</Text> : null}
+            {ownerLookupError ? <Text style={[styles.error, localStyles.mapStatusErrorText]}>{ownerLookupError}</Text> : null}
+          </View>
+        </View>
+      </View>
+    );
+  }
 
-        return (
-          <Pressable key={vehicle.id} style={[styles.card, desktopCardStyle]} onPress={() => handleOpenVehicleDetails(vehicle.id)}>
-            {primaryImageUrl ? (
-              <Image source={{ uri: primaryImageUrl }} style={localStyles.vehicleHeroImage} resizeMode="cover" />
-            ) : (
-              <View style={localStyles.imagePlaceholder}>
-                <Text style={localStyles.imagePlaceholderText}>Sin imagen</Text>
-              </View>
-            )}
+  return (
+    <ScrollView
+      style={localStyles.exploreScroll}
+      contentContainerStyle={[
+        localStyles.exploreScrollContent,
+        {
+          paddingTop: topPadding,
+          paddingBottom: bottomPadding + spacingTokens.md,
+          paddingHorizontal: spacingTokens.lg
+        }
+      ]}
+      onScroll={handleExploreScroll}
+      scrollEventThrottle={16}
+      stickyHeaderIndices={Platform.OS === 'web' ? undefined : [1]}
+    >
+      <SectionHeader
+        title="Explorar"
+        subtitle="Descubre vehiculos cercanos y filtra en segundos."
+        centered={isDesktopWeb}
+      />
 
-            <View style={localStyles.vehicleTitleRow}>
-              <Text style={localStyles.vehicleTitle}>{vehicle.brand} {vehicle.model}</Text>
-              <Text style={localStyles.vehiclePrice}>{formatCurrencyEUR(vehicle.pricePerDay)}</Text>
-            </View>
+      <View
+        style={[
+          localStyles.stickyControlsShell,
+          stickyWebStyle,
+          stickyMobileHiddenInset ? { paddingTop: stickyMobileHiddenInset } : undefined
+        ]}
+      >
+        {controlsBlock}
+      </View>
 
-            <Text style={localStyles.vehicleLocation}>{vehicle.locationAddress}</Text>
+      {vehiclesLoading ? <ActivityIndicator size="small" /> : null}
+      {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
+      {ownerLookupError ? <Text style={styles.error}>{ownerLookupError}</Text> : null}
 
-            <View style={localStyles.vehicleMetaChips}>
-              <StatusChip label={`Año ${vehicle.year}`} tone="neutral" compact />
-              {vehicle.fuelType ? <StatusChip label={translateFuelType(vehicle.fuelType)} tone="neutral" compact /> : null}
-              {vehicle.transmission ? <StatusChip label={translateTransmission(vehicle.transmission)} tone="neutral" compact /> : null}
-              {vehicle.seats ? <StatusChip label={`${vehicle.seats} plazas`} tone="neutral" compact /> : null}
-            </View>
+      <View style={[localStyles.vehicleGrid, isDesktopWeb ? localStyles.vehicleGridDesktop : undefined]}>
+          {exploreVehicles.map((vehicle: ExploreVehicle) => {
+            const owner = ownerById[vehicle.ownerId];
+            const ownerAvatarUrl = resolveStoredImageUrl(owner?.avatarUrl ?? null);
+            const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
 
-            <View style={localStyles.ownerInlineRow}>
-              {ownerAvatarUrl ? (
-                <Image source={{ uri: ownerAvatarUrl }} style={localStyles.ownerAvatarInline} resizeMode="cover" />
-              ) : (
-                <View style={localStyles.ownerAvatarInlineFallback}>
-                  <Text style={localStyles.ownerAvatarInlineFallbackText}>{getInitials(owner)}</Text>
+            return (
+              <Pressable
+                key={vehicle.id}
+                style={[styles.card, isDesktopWeb ? localStyles.desktopListCard : undefined]}
+                onPress={() => handleOpenVehicleDetails(vehicle.id)}
+              >
+                {primaryImageUrl ? (
+                  <Image
+                    source={{ uri: primaryImageUrl }}
+                    style={[localStyles.vehicleHeroImage, isDesktopWeb ? localStyles.vehicleHeroImageDesktop : undefined]}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={[localStyles.imagePlaceholder, isDesktopWeb ? localStyles.vehicleHeroImageDesktop : undefined]}>
+                    <Text style={localStyles.imagePlaceholderText}>Sin imagen</Text>
+                  </View>
+                )}
+
+                <View style={localStyles.vehicleTitleRow}>
+                  <Text style={localStyles.vehicleTitle}>{vehicle.brand} {vehicle.model}</Text>
+                  <Text style={localStyles.vehiclePrice}>{formatCurrencyEUR(vehicle.pricePerDay)}</Text>
                 </View>
-              )}
-              <Text style={localStyles.ownerInlineName}>{getUserFullName(owner)}</Text>
-            </View>
 
-            <Text style={styles.linkHint}>Toca para ver ficha completa, galeria y disponibilidad.</Text>
-          </Pressable>
-        );
-      })}
+                <Text style={localStyles.vehicleLocation}>{vehicle.locationAddress}</Text>
+
+                <View style={localStyles.vehicleMetaChips}>
+                  <StatusChip label={`Año ${vehicle.year}`} tone="neutral" compact />
+                  {vehicle.fuelType ? <StatusChip label={translateFuelType(vehicle.fuelType)} tone="neutral" compact /> : null}
+                  {vehicle.transmission ? <StatusChip label={translateTransmission(vehicle.transmission)} tone="neutral" compact /> : null}
+                  {vehicle.seats ? <StatusChip label={`${vehicle.seats} plazas`} tone="neutral" compact /> : null}
+                </View>
+
+                <View style={localStyles.ownerInlineRow}>
+                  {ownerAvatarUrl ? (
+                    <Image source={{ uri: ownerAvatarUrl }} style={localStyles.ownerAvatarInline} resizeMode="cover" />
+                  ) : (
+                    <View style={localStyles.ownerAvatarInlineFallback}>
+                      <Text style={localStyles.ownerAvatarInlineFallbackText}>{getInitials(owner)}</Text>
+                    </View>
+                  )}
+                  <Text style={localStyles.ownerInlineName}>{getUserFullName(owner)}</Text>
+                </View>
+
+                <Text style={styles.linkHint}>Toca para ver ficha completa, galeria y disponibilidad.</Text>
+              </Pressable>
+            );
+          })}
+      </View>
 
       {!vehiclesLoading && !vehiclesError && exploreVehicles.length === 0 ? (
         <EmptyState title="Sin resultados" description="No hay vehiculos disponibles con estos filtros." />
       ) : null}
-    </View>
+    </ScrollView>
   );
 }
 
 const localStyles = StyleSheet.create({
+  exploreScroll: {
+    flex: 1
+  },
+  exploreScrollContent: {
+    gap: spacingTokens.md
+  },
   desktopCard: {
     width: '100%',
     maxWidth: 900,
@@ -1080,7 +1230,20 @@ const localStyles = StyleSheet.create({
   },
   filterBarCard: {
     overflow: 'visible',
-    borderRadius: 18
+    borderRadius: 18,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0
+  },
+  stickyControlsShell: {
+    gap: 0,
+    backgroundColor: 'transparent',
+    paddingBottom: spacingTokens.xs,
+    zIndex: 20
+  },
+  filterAnimatedWrap: {
+    overflow: 'hidden'
   },
   filterBarScrollShell: {
     position: 'relative'
@@ -1149,7 +1312,11 @@ const localStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colorTokens.border,
     borderRadius: radiusTokens.pill,
-    backgroundColor: colorTokens.white
+    backgroundColor: colorTokens.white,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0
   },
   viewModePill: {
     borderWidth: 1,
@@ -1171,13 +1338,42 @@ const localStyles = StyleSheet.create({
     color: colorTokens.white,
     fontWeight: '700'
   },
-  mapViewportCard: {
-    padding: spacingTokens.sm
+  mapLayerRoot: {
+    flex: 1,
+    backgroundColor: colorTokens.bgLight
+  },
+  mapBackgroundLayer: {
+    ...StyleSheet.absoluteFillObject
+  },
+  mapOverlayLayer: {
+    flex: 1
+  },
+  mapOverlayContent: {
+    gap: spacingTokens.md
+  },
+  mapControlsStack: {
+    gap: spacingTokens.xs
+  },
+  mapStatusText: {
+    color: colorTokens.white,
+    textShadowColor: 'rgba(0,0,0,0.25)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2
+  },
+  mapStatusErrorText: {
+    color: colorTokens.alert,
+    backgroundColor: 'transparent',
+    textShadowColor: 'rgba(255,255,255,0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2
   },
   inlineActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacingTokens.sm
+  },
+  inlineActionsCentered: {
+    justifyContent: 'center'
   },
   actionButton: {
     minHeight: 50,
@@ -1354,13 +1550,16 @@ const localStyles = StyleSheet.create({
   },
   vehicleHeroImage: {
     width: '100%',
-    height: 190,
+    aspectRatio: 4 / 3,
     borderRadius: radiusTokens.input,
     backgroundColor: colorTokens.bgLight
   },
+  vehicleHeroImageDesktop: {
+    height: 150
+  },
   imagePlaceholder: {
     width: '100%',
-    height: 190,
+    aspectRatio: 4 / 3,
     borderRadius: radiusTokens.input,
     backgroundColor: colorTokens.bgLight,
     borderWidth: 1,
@@ -1373,6 +1572,22 @@ const localStyles = StyleSheet.create({
     color: colorTokens.textMuted,
     ...typographyTokens.caption,
     textAlign: 'center'
+  },
+  vehicleGrid: {
+    width: '100%',
+    gap: spacingTokens.md
+  },
+  vehicleGridDesktop: {
+    maxWidth: 1100,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center'
+  },
+  desktopListCard: {
+    width: '31%',
+    minWidth: 250,
+    maxWidth: 320
   },
   vehicleTitleRow: {
     flexDirection: 'row',

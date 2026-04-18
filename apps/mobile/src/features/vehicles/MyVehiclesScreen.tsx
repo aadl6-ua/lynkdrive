@@ -2,7 +2,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Button,
   Image,
   Platform,
   Pressable,
@@ -10,6 +9,7 @@ import {
   Text,
   TextInput,
   View,
+  ScrollView,
   useWindowDimensions
 } from 'react-native';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
@@ -18,6 +18,7 @@ import { uploadImageToApi } from '../../api/uploads';
 import { EmptyState } from '../../app/components/ui/EmptyState';
 import { SectionHeader } from '../../app/components/ui/SectionHeader';
 import { styles } from '../../app/styles';
+import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 import { parseLocaleNumber } from '../../shared/number';
 import { useGeocodingSuggestions } from '../../shared/useGeocodingSuggestions';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
@@ -25,31 +26,259 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { useVehicleAvailabilityWindowsStore } from '../../store/useVehicleAvailabilityWindowsStore';
 import { useVehicleImagesStore } from '../../store/useVehicleImagesStore';
 import { useVehiclesStore } from '../../store/useVehiclesStore';
+import { CalendarPicker } from '../explore/CalendarPicker';
 
-type MyVehiclesScreenMode = 'list' | 'edit' | 'images' | 'availability';
+type MyVehiclesScreenMode = 'list' | 'create' | 'edit' | 'images' | 'availability';
 
-export function MyVehiclesScreen() {
+type AvailabilityDateRange = {
+  startDate: Date | null;
+  startHour: number;
+  endDate: Date | null;
+  endHour: number;
+};
+
+type MyVehiclesScreenProps = {
+  topPadding?: number;
+  bottomPadding?: number;
+};
+
+type ButtonVariant = 'primary' | 'ghost' | 'danger';
+type SelectOption = {
+  label: string;
+  value: string;
+};
+
+const FUEL_TYPE_OPTIONS: SelectOption[] = [
+  { label: 'Gasolina', value: 'gasoline' },
+  { label: 'Diesel', value: 'diesel' },
+  { label: 'Electrico', value: 'electric' },
+  { label: 'Hibrido', value: 'hybrid' }
+];
+
+const TRANSMISSION_OPTIONS: SelectOption[] = [
+  { label: 'Manual', value: 'manual' },
+  { label: 'Automatica', value: 'automatic' }
+];
+
+const SEATS_OPTIONS: SelectOption[] = [
+  { label: 'No especificado', value: '' },
+  { label: '2 plazas', value: '2' },
+  { label: '3 plazas', value: '3' },
+  { label: '4 plazas', value: '4' },
+  { label: '5 plazas', value: '5' },
+  { label: '6 plazas', value: '6' },
+  { label: '7 plazas', value: '7' },
+  { label: '8 plazas', value: '8' },
+  { label: '9 plazas', value: '9' }
+];
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat('es-ES', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Europe/Madrid'
+  }).format(new Date(value));
+}
+
+function formatCurrencyEUR(value: number): string {
+  return new Intl.NumberFormat('es-ES', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
+function parseDateFromIso(value: string): Date | null {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function buildAvailabilitySelectionFromIso(startIso: string, endIso: string): AvailabilityDateRange {
+  const startDate = parseDateFromIso(startIso);
+  const endDate = parseDateFromIso(endIso);
+
+  return {
+    startDate,
+    startHour: startDate?.getHours() ?? 10,
+    endDate,
+    endHour: endDate?.getHours() ?? 18
+  };
+}
+
+function emptyAvailabilitySelection(): AvailabilityDateRange {
+  return {
+    startDate: null,
+    startHour: 10,
+    endDate: null,
+    endHour: 18
+  };
+}
+
+function buildIsoFromSelection(date: Date | null, hour: number): string {
+  if (!date) {
+    return '';
+  }
+
+  const nextDate = new Date(date);
+  nextDate.setHours(hour, 0, 0, 0);
+  return nextDate.toISOString();
+}
+
+function ActionButton({
+  label,
+  onPress,
+  disabled = false,
+  variant = 'primary'
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  variant?: ButtonVariant;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={[
+        localStyles.actionButton,
+        variant === 'primary'
+          ? localStyles.actionButtonPrimary
+          : variant === 'danger'
+            ? localStyles.actionButtonDanger
+            : localStyles.actionButtonGhost,
+        disabled ? localStyles.actionButtonDisabled : undefined
+      ]}
+    >
+      <Text
+        style={[
+          localStyles.actionButtonText,
+          variant === 'ghost' ? localStyles.actionButtonGhostText : undefined,
+          variant === 'danger' ? localStyles.actionButtonDangerText : undefined
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+
+function Field({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  keyboardType,
+  autoCapitalize = 'sentences',
+  multiline = false
+}: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  keyboardType?: 'default' | 'number-pad' | 'decimal-pad';
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  multiline?: boolean;
+}) {
+  return (
+    <View style={localStyles.fieldWrap}>
+      <Text style={localStyles.fieldLabel}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
+        multiline={multiline}
+        style={[styles.input, multiline ? localStyles.multilineInput : null]}
+      />
+    </View>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  placeholder,
+  options,
+  onChange
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = options.find((option) => option.value === value)?.label;
+
+  return (
+    <View style={localStyles.fieldWrap}>
+      <Text style={localStyles.fieldLabel}>{label}</Text>
+      <View>
+        <Pressable style={localStyles.selectTrigger} onPress={() => setOpen((prev) => !prev)}>
+          <Text style={selectedLabel ? localStyles.selectValueText : localStyles.selectPlaceholderText}>
+            {selectedLabel ?? placeholder}
+          </Text>
+          <Text style={localStyles.selectChevron}>{open ? '▲' : '▼'}</Text>
+        </Pressable>
+
+        {open ? (
+          <View style={localStyles.selectOptions}>
+            {options.map((option, index) => (
+              <Pressable
+                key={option.value || `option-${index}`}
+                style={[
+                  localStyles.selectOptionItem,
+                  index === options.length - 1 ? localStyles.selectOptionItemLast : undefined
+                ]}
+                onPress={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                <Text style={localStyles.suggestionLabel}>{option.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehiclesScreenProps) {
   const { width } = useWindowDimensions();
   const isDesktopWeb = Platform.OS === 'web' && width >= 1024;
   const desktopCardStyle = isDesktopWeb ? localStyles.desktopCard : undefined;
+  const fabBottomOffset =
+    Platform.OS === 'web'
+      ? spacingTokens.lg
+      : Math.max(spacingTokens.sm, bottomPadding - spacingTokens.md);
 
   const [screenMode, setScreenMode] = useState<MyVehiclesScreenMode>('list');
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
   const [vehicleImageUploading, setVehicleImageUploading] = useState(false);
   const [editingAvailabilityWindowId, setEditingAvailabilityWindowId] = useState<string | null>(null);
 
-  const [vehicleBrandInput, setVehicleBrandInput] = useState('Toyota');
-  const [vehicleModelInput, setVehicleModelInput] = useState('Corolla');
-  const [vehicleYearInput, setVehicleYearInput] = useState('2020');
-  const [vehicleLicensePlateInput, setVehicleLicensePlateInput] = useState('1234ABC');
-  const [vehicleDescriptionInput, setVehicleDescriptionInput] = useState('Vehiculo de prueba para el TFG.');
-  const [vehiclePricePerDayInput, setVehiclePricePerDayInput] = useState('45');
+  const [vehicleBrandInput, setVehicleBrandInput] = useState('');
+  const [vehicleModelInput, setVehicleModelInput] = useState('');
+  const [vehicleYearInput, setVehicleYearInput] = useState('');
+  const [vehicleLicensePlateInput, setVehicleLicensePlateInput] = useState('');
+  const [vehicleDescriptionInput, setVehicleDescriptionInput] = useState('');
+  const [vehiclePricePerDayInput, setVehiclePricePerDayInput] = useState('');
   const [vehicleAddressInput, setVehicleAddressInput] = useState('');
   const [vehicleSelectedLocation, setVehicleSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [createVehicleFormError, setCreateVehicleFormError] = useState<string | null>(null);
-  const [vehicleFuelTypeInput, setVehicleFuelTypeInput] = useState('hybrid');
-  const [vehicleTransmissionInput, setVehicleTransmissionInput] = useState('automatic');
-  const [vehicleSeatsInput, setVehicleSeatsInput] = useState('5');
+  const [vehicleFuelTypeInput, setVehicleFuelTypeInput] = useState('');
+  const [vehicleTransmissionInput, setVehicleTransmissionInput] = useState('');
+  const [vehicleSeatsInput, setVehicleSeatsInput] = useState('');
 
   const [editVehicleBrandInput, setEditVehicleBrandInput] = useState('');
   const [editVehicleModelInput, setEditVehicleModelInput] = useState('');
@@ -63,13 +292,31 @@ export function MyVehiclesScreen() {
   const [editVehicleFuelTypeInput, setEditVehicleFuelTypeInput] = useState('');
   const [editVehicleTransmissionInput, setEditVehicleTransmissionInput] = useState('');
   const [editVehicleSeatsInput, setEditVehicleSeatsInput] = useState('');
-  const [editVehicleStatusInput, setEditVehicleStatusInput] = useState<'active' | 'inactive'>('active');
 
-  const [vehicleImageUrlInput, setVehicleImageUrlInput] = useState('');
-  const [vehicleImageIsPrimaryInput, setVehicleImageIsPrimaryInput] = useState('false');
 
   const [availabilityStartInput, setAvailabilityStartInput] = useState('');
   const [availabilityEndInput, setAvailabilityEndInput] = useState('');
+
+  const resetCreateVehicleForm = () => {
+    setVehicleBrandInput('');
+    setVehicleModelInput('');
+    setVehicleYearInput('');
+    setVehicleLicensePlateInput('');
+    setVehicleDescriptionInput('');
+    setVehiclePricePerDayInput('');
+    setVehicleAddressInput('');
+    setVehicleSelectedLocation(null);
+    setCreateVehicleFormError(null);
+    setVehicleFuelTypeInput('');
+    setVehicleTransmissionInput('');
+    setVehicleSeatsInput('');
+  };
+
+  const resetAvailabilityForm = () => {
+    setEditingAvailabilityWindowId(null);
+    setAvailabilityStartInput('');
+    setAvailabilityEndInput('');
+  };
 
   const {
     items: myVehicles,
@@ -92,7 +339,8 @@ export function MyVehiclesScreen() {
     mutationMessage: vehicleImagesMutationMessage,
     fetchByVehicleId: fetchVehicleImagesByVehicleId,
     createForVehicle: createVehicleImageForVehicle,
-    deleteById: deleteVehicleImageById
+    deleteById: deleteVehicleImageById,
+    updateById: updateVehicleImageById
   } = useVehicleImagesStore();
 
   const {
@@ -177,12 +425,19 @@ export function MyVehiclesScreen() {
     });
 
     await fetchMyVehicles();
+    resetCreateVehicleForm();
+    setScreenMode('list');
   };
 
   const handleCreateVehicleAddressChange = (value: string) => {
     setVehicleAddressInput(value);
     setVehicleSelectedLocation(null);
     setCreateVehicleFormError(null);
+  };
+
+  const handleOpenCreateVehicleScreen = () => {
+    resetCreateVehicleForm();
+    setScreenMode('create');
   };
 
   const handleSelectCreateVehicleAddress = (label: string, lat: number, lng: number) => {
@@ -211,18 +466,28 @@ export function MyVehiclesScreen() {
     setEditVehicleFuelTypeInput(vehicle.fuelType ?? '');
     setEditVehicleTransmissionInput(vehicle.transmission ?? '');
     setEditVehicleSeatsInput(vehicle.seats !== null ? String(vehicle.seats) : '');
-    setEditVehicleStatusInput(vehicle.status);
     setScreenMode('edit');
   };
 
   const handleBack = () => {
+    if (screenMode === 'create') {
+      resetCreateVehicleForm();
+      setScreenMode('list');
+      return;
+    }
+
     if (screenMode === 'edit') {
       setEditingVehicleId(null);
       setScreenMode('list');
       return;
     }
 
-    setScreenMode('edit');
+    if (screenMode === 'images' || screenMode === 'availability') {
+      setScreenMode('edit');
+      return;
+    }
+
+    setScreenMode('list');
   };
 
   const handleOpenVehicleImagesScreen = async () => {
@@ -230,8 +495,6 @@ export function MyVehiclesScreen() {
       return;
     }
 
-    setVehicleImageUrlInput('');
-    setVehicleImageIsPrimaryInput('false');
     setScreenMode('images');
     await fetchVehicleImagesByVehicleId(editingVehicleId);
   };
@@ -241,9 +504,7 @@ export function MyVehiclesScreen() {
       return;
     }
 
-    setAvailabilityStartInput('');
-    setAvailabilityEndInput('');
-    setEditingAvailabilityWindowId(null);
+    resetAvailabilityForm();
     setScreenMode('availability');
     await fetchAvailabilityWindowsByVehicleId(editingVehicleId);
   };
@@ -294,7 +555,7 @@ export function MyVehiclesScreen() {
         ? (editVehicleTransmissionInput as 'manual' | 'automatic')
         : null,
       seats: Number.isNaN(parsedSeats) ? null : parsedSeats,
-      status: editVehicleStatusInput
+      status: editingVehicle?.status ?? 'active'
     });
 
     await fetchMyVehicles();
@@ -323,37 +584,10 @@ export function MyVehiclesScreen() {
     await fetchMyVehicles();
   };
 
-  const handleCreateVehicleImage = async () => {
-    if (!editingVehicleId) {
-      return;
-    }
-
-    const normalizedPrimary = vehicleImageIsPrimaryInput.trim().toLowerCase();
-    const isPrimary =
-      normalizedPrimary === 'true' ||
-      normalizedPrimary === '1' ||
-      normalizedPrimary === 'si' ||
-      normalizedPrimary === 'sí';
-
-    await createVehicleImageForVehicle(editingVehicleId, vehicleImageUrlInput, isPrimary);
-
-    if (vehicleImageUrlInput.trim()) {
-      setVehicleImageUrlInput('');
-      setVehicleImageIsPrimaryInput('false');
-    }
-  };
-
   const handlePickUploadAndCreateVehicleImage = async () => {
     if (!editingVehicleId) {
       return;
     }
-
-    const normalizedPrimary = vehicleImageIsPrimaryInput.trim().toLowerCase();
-    const isPrimary =
-      normalizedPrimary === 'true' ||
-      normalizedPrimary === '1' ||
-      normalizedPrimary === 'si' ||
-      normalizedPrimary === 'sí';
 
     try {
       setVehicleImageUploading(true);
@@ -383,12 +617,18 @@ export function MyVehiclesScreen() {
         webFile: prepared.webFile
       });
 
-      await createVehicleImageForVehicle(editingVehicleId, uploaded.persistedValue, isPrimary);
-      setVehicleImageUrlInput('');
-      setVehicleImageIsPrimaryInput('false');
+      await createVehicleImageForVehicle(editingVehicleId, uploaded.persistedValue, false);
     } finally {
       setVehicleImageUploading(false);
     }
+  };
+
+  const handleSetPrimaryVehicleImage = async (imageId: string) => {
+    if (!editingVehicleId) {
+      return;
+    }
+
+    await updateVehicleImageById(imageId, editingVehicleId, { isPrimary: true });
   };
 
   const handleDeleteVehicleImage = async (imageId: string) => {
@@ -407,6 +647,12 @@ export function MyVehiclesScreen() {
     setEditingAvailabilityWindowId(windowId);
     setAvailabilityStartInput(startDatetime);
     setAvailabilityEndInput(endDatetime);
+  };
+
+  const handleClearAvailabilityDraft = () => {
+    setEditingAvailabilityWindowId(null);
+    setAvailabilityStartInput('');
+    setAvailabilityEndInput('');
   };
 
   const handleSaveAvailabilityWindow = async () => {
@@ -452,146 +698,143 @@ export function MyVehiclesScreen() {
 
   if (editingVehicle && editingVehicleId && screenMode === 'images') {
     return (
-      <View style={styles.sectionCard}>
-        <View style={styles.actionsRow}>
-          <View style={styles.actionButtonWrapper}>
-            <Button title="Volver" onPress={handleBack} />
-          </View>
-        </View>
-
+      <ScrollView
+        style={localStyles.screenScroll}
+        contentContainerStyle={[
+          localStyles.screenContent,
+          {
+            paddingTop: topPadding,
+            paddingBottom: bottomPadding + spacingTokens.lg,
+            paddingHorizontal: spacingTokens.lg
+          }
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <SectionHeader
-          title="Imagenes del Vehiculo"
-          subtitle={`Alta, lectura y borrado de fotos para ${editingVehicle.brand} ${editingVehicle.model}.`}
+          title="Imagenes del vehiculo"
+          subtitle={`Gestiona la galeria de ${editingVehicle.brand} ${editingVehicle.model} y marca la principal con estrella.`}
+          centered={isDesktopWeb}
         />
 
         <View style={[styles.card, desktopCardStyle]}>
-          <TextInput
-            value={vehicleImageUrlInput}
-            onChangeText={setVehicleImageUrlInput}
-            style={styles.input}
-            placeholder="URL imagen"
-            autoCapitalize="none"
-          />
-          <TextInput
-            value={vehicleImageIsPrimaryInput}
-            onChangeText={setVehicleImageIsPrimaryInput}
-            style={styles.input}
-            placeholder="Principal: true|false"
-            autoCapitalize="none"
-          />
-
-          <View style={styles.buttonContainer}>
-            <Button
-              title="Crear imagen"
-              onPress={() => void handleCreateVehicleImage()}
-              disabled={vehicleImagesSaving || vehicleImageUploading}
-            />
-          </View>
-
-          <View style={styles.buttonContainer}>
-            <Button
-              title={vehicleImageUploading ? 'Subiendo imagen...' : 'Seleccionar, subir y crear'}
+          <View style={localStyles.actionRow}>
+            <ActionButton
+              label={vehicleImageUploading ? 'Subiendo...' : 'Subir desde galeria'}
               onPress={() => void handlePickUploadAndCreateVehicleImage()}
               disabled={vehicleImagesSaving || vehicleImageUploading}
             />
           </View>
         </View>
 
-        {vehicleImagesLoading || vehicleImagesSaving || vehicleImageUploading ? (
-          <ActivityIndicator size="small" />
-        ) : null}
+        {vehicleImagesLoading || vehicleImagesSaving || vehicleImageUploading ? <ActivityIndicator size="small" /> : null}
         {vehicleImagesError ? <Text style={styles.error}>{vehicleImagesError}</Text> : null}
         {vehicleImagesMutationMessage ? <Text style={styles.info}>{vehicleImagesMutationMessage}</Text> : null}
 
         {vehicleImages.map((image) => (
           <View key={image.id} style={[styles.card, desktopCardStyle]}>
-            <Text style={styles.row}><Text style={styles.label}>ID:</Text> {image.id}</Text>
-            <Text style={styles.row}><Text style={styles.label}>URL:</Text> {image.imageUrl}</Text>
             {resolveStoredImageUrl(image.imageUrl) ? (
-              <Image
-                source={{ uri: resolveStoredImageUrl(image.imageUrl) ?? '' }}
-                style={styles.vehicleImagePreview}
-                resizeMode="cover"
-              />
+              <View style={localStyles.imageCardMediaWrap}>
+                <Image
+                  source={{ uri: resolveStoredImageUrl(image.imageUrl) ?? '' }}
+                  style={styles.vehicleImagePreview}
+                  resizeMode="cover"
+                />
+                <Pressable
+                  style={[localStyles.primaryStarButton, image.isPrimary ? localStyles.primaryStarButtonActive : undefined]}
+                  onPress={() => void handleSetPrimaryVehicleImage(image.id)}
+                  disabled={vehicleImagesSaving || image.isPrimary}
+                >
+                  <Text style={[localStyles.primaryStarText, image.isPrimary ? localStyles.primaryStarTextActive : undefined]}>★</Text>
+                </Pressable>
+              </View>
             ) : (
               <Text style={styles.subtitle}>No se puede previsualizar (bucket privado o URL invalida).</Text>
             )}
-            <Text style={styles.row}><Text style={styles.label}>Principal:</Text> {image.isPrimary ? 'Si' : 'No'}</Text>
-            <Text style={styles.row}><Text style={styles.label}>Alta:</Text> {new Date(image.createdAt).toLocaleString('es-ES')}</Text>
-            <View style={styles.buttonContainer}>
-              <Button
-                title="Eliminar imagen"
-                onPress={() => void handleDeleteVehicleImage(image.id)}
-                color="#b00020"
-                disabled={vehicleImagesSaving}
-              />
-            </View>
+            <Text style={styles.linkHint}>{image.isPrimary ? 'Foto principal' : 'Toca la estrella para marcar como principal'}</Text>
+            <ActionButton
+              label="Eliminar imagen"
+              onPress={() => void handleDeleteVehicleImage(image.id)}
+              variant="danger"
+              disabled={vehicleImagesSaving}
+            />
           </View>
         ))}
-      </View>
+
+        <View style={localStyles.bottomNavRow}>
+          <ActionButton label="Volver a edición" onPress={handleBack} variant="ghost" />
+        </View>
+      </ScrollView>
     );
   }
 
   if (!authUserId) {
     return (
       <View style={styles.sectionCard}>
-        <SectionHeader title="Mis Vehiculos" subtitle="Inicia sesion para gestionar tus vehiculos." />
+        <SectionHeader
+          title="Mis Vehiculos"
+          subtitle="Inicia sesion para gestionar tus vehiculos."
+          centered={isDesktopWeb}
+        />
       </View>
     );
   }
 
   if (editingVehicle && editingVehicleId && screenMode === 'availability') {
-    return (
-      <View style={styles.sectionCard}>
-        <View style={styles.actionsRow}>
-          <View style={styles.actionButtonWrapper}>
-            <Button title="Volver" onPress={handleBack} />
-          </View>
-        </View>
+    const initialAvailabilitySelection =
+      availabilityStartInput.trim() && availabilityEndInput.trim()
+        ? buildAvailabilitySelectionFromIso(availabilityStartInput, availabilityEndInput)
+        : emptyAvailabilitySelection();
 
+    return (
+      <ScrollView
+        style={localStyles.screenScroll}
+        contentContainerStyle={[
+          localStyles.screenContent,
+          {
+            paddingTop: topPadding,
+            paddingBottom: bottomPadding + spacingTokens.lg,
+            paddingHorizontal: spacingTokens.lg
+          }
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <SectionHeader
-          title="Ventanas de Disponibilidad"
-          subtitle={`CRUD de ventanas para ${editingVehicle.brand} ${editingVehicle.model}.`}
+          title="Ventanas de disponibilidad"
+          subtitle={`Gestiona disponibilidad para ${editingVehicle.brand} ${editingVehicle.model} con calendario.`}
+          centered={isDesktopWeb}
         />
 
         <View style={[styles.card, desktopCardStyle]}>
-          <TextInput
-            value={availabilityStartInput}
-            onChangeText={setAvailabilityStartInput}
-            style={styles.input}
-            placeholder="Inicio ISO (ej: 2026-03-10T09:00:00Z)"
-            autoCapitalize="none"
-          />
-          <TextInput
-            value={availabilityEndInput}
-            onChangeText={setAvailabilityEndInput}
-            style={styles.input}
-            placeholder="Fin ISO (ej: 2026-03-20T20:00:00Z)"
-            autoCapitalize="none"
+          <CalendarPicker
+            availabilityWindows={availabilityWindows.map((window) => ({
+              id: window.id,
+              startDatetime: window.startDatetime,
+              endDatetime: window.endDatetime
+            }))}
+            bookings={[]}
+            initialDateRange={initialAvailabilitySelection}
+            onDateRangeChange={(startDate, startHour, endDate, endHour) => {
+              setAvailabilityStartInput(buildIsoFromSelection(startDate, startHour));
+              setAvailabilityEndInput(buildIsoFromSelection(endDate, endHour));
+            }}
           />
 
-          <View style={styles.actionsRow}>
-            <View style={styles.actionButtonWrapper}>
-              <Button
-                title={editingAvailabilityWindowId ? 'Actualizar ventana' : 'Crear ventana'}
-                onPress={() => void handleSaveAvailabilityWindow()}
-                disabled={availabilityWindowsSaving}
-              />
-            </View>
-            {editingAvailabilityWindowId ? (
-              <View style={styles.actionButtonWrapper}>
-                <Button
-                  title="Cancelar edicion"
-                  onPress={() => {
-                    setEditingAvailabilityWindowId(null);
-                    setAvailabilityStartInput('');
-                    setAvailabilityEndInput('');
-                  }}
-                  disabled={availabilityWindowsSaving}
-                />
-              </View>
-            ) : null}
+          <View style={localStyles.actionRow}>
+            <ActionButton
+              label={editingAvailabilityWindowId ? 'Actualizar ventana' : 'Crear ventana'}
+              onPress={() => void handleSaveAvailabilityWindow()}
+              disabled={availabilityWindowsSaving}
+            />
+            <ActionButton
+              label={editingAvailabilityWindowId ? 'Cancelar edición' : 'Nuevo intervalo'}
+              onPress={handleClearAvailabilityDraft}
+              variant="ghost"
+              disabled={availabilityWindowsSaving}
+            />
           </View>
+
+          {availabilityStartInput ? <Text style={styles.linkHint}>Inicio: {formatDateTime(availabilityStartInput)}</Text> : null}
+          {availabilityEndInput ? <Text style={styles.linkHint}>Fin: {formatDateTime(availabilityEndInput)}</Text> : null}
         </View>
 
         {availabilityWindowsLoading || availabilityWindowsSaving ? <ActivityIndicator size="small" /> : null}
@@ -600,53 +843,113 @@ export function MyVehiclesScreen() {
 
         {availabilityWindows.map((window) => (
           <View key={window.id} style={[styles.card, desktopCardStyle]}>
-            <Text style={styles.row}><Text style={styles.label}>ID:</Text> {window.id}</Text>
             <Text style={styles.row}><Text style={styles.label}>Inicio:</Text> {new Date(window.startDatetime).toLocaleString('es-ES')}</Text>
             <Text style={styles.row}><Text style={styles.label}>Fin:</Text> {new Date(window.endDatetime).toLocaleString('es-ES')}</Text>
-            <View style={styles.actionsRow}>
-              <View style={styles.actionButtonWrapper}>
-                <Button
-                  title="Editar"
-                  onPress={() =>
-                    handleSelectAvailabilityWindowForEdit(window.id, window.startDatetime, window.endDatetime)
-                  }
-                  disabled={availabilityWindowsSaving}
-                />
-              </View>
-              <View style={styles.actionButtonWrapper}>
-                <Button
-                  title="Eliminar"
-                  color="#b00020"
-                  onPress={() => void handleDeleteAvailabilityWindow(window.id)}
-                  disabled={availabilityWindowsSaving}
-                />
-              </View>
+            <View style={localStyles.actionRow}>
+              <ActionButton
+                label="Editar"
+                onPress={() => handleSelectAvailabilityWindowForEdit(window.id, window.startDatetime, window.endDatetime)}
+                disabled={availabilityWindowsSaving}
+              />
+              <ActionButton
+                label="Eliminar"
+                variant="danger"
+                onPress={() => void handleDeleteAvailabilityWindow(window.id)}
+                disabled={availabilityWindowsSaving}
+              />
             </View>
           </View>
         ))}
-      </View>
+
+        <View style={localStyles.bottomNavRow}>
+          <ActionButton label="Volver a edición" onPress={handleBack} variant="ghost" />
+        </View>
+      </ScrollView>
     );
   }
 
   if (editingVehicle && editingVehicleId) {
     return (
-      <View style={styles.sectionCard}>
-        <View style={styles.actionsRow}>
-          <View style={styles.actionButtonWrapper}>
-            <Button title="Volver" onPress={handleBack} />
-          </View>
-        </View>
-
-        <SectionHeader title="Editar Vehiculo" subtitle="Edicion, borrado, imagenes y disponibilidad." />
+      <ScrollView
+        style={localStyles.screenScroll}
+        contentContainerStyle={[
+          localStyles.screenContent,
+          {
+            paddingTop: topPadding,
+            paddingBottom: bottomPadding + spacingTokens.lg,
+            paddingHorizontal: spacingTokens.lg
+          }
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <SectionHeader
+          title="Editar vehiculo"
+          subtitle="Ajusta datos, fotos y disponibilidad desde un panel unico."
+          centered={isDesktopWeb}
+        />
 
         <View style={[styles.card, desktopCardStyle]}>
-          <TextInput value={editVehicleBrandInput} onChangeText={setEditVehicleBrandInput} style={styles.input} placeholder="Marca" />
-          <TextInput value={editVehicleModelInput} onChangeText={setEditVehicleModelInput} style={styles.input} placeholder="Modelo" />
-          <TextInput value={editVehicleYearInput} onChangeText={setEditVehicleYearInput} style={styles.input} placeholder="Ano" keyboardType="number-pad" />
-          <TextInput value={editVehicleLicensePlateInput} onChangeText={setEditVehicleLicensePlateInput} style={styles.input} placeholder="Matricula" autoCapitalize="characters" />
-          <TextInput value={editVehicleDescriptionInput} onChangeText={setEditVehicleDescriptionInput} style={styles.input} placeholder="Descripcion" />
-          <TextInput value={editVehiclePricePerDayInput} onChangeText={setEditVehiclePricePerDayInput} style={styles.input} placeholder="Precio por dia" keyboardType="decimal-pad" />
-          <TextInput value={editVehicleAddressInput} onChangeText={handleEditVehicleAddressChange} style={styles.input} placeholder="Direccion" />
+          <View style={localStyles.vehicleSummaryCard}>
+            {resolveStoredImageUrl(imageByVehicleId[editingVehicle.id] ?? null) ? (
+              <Image
+                source={{ uri: resolveStoredImageUrl(imageByVehicleId[editingVehicle.id] ?? null) ?? '' }}
+                style={localStyles.vehicleSummaryImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={localStyles.vehicleSummaryImagePlaceholder}>
+                <Text style={localStyles.vehicleSummaryImagePlaceholderText}>Sin foto principal</Text>
+              </View>
+            )}
+
+            <View style={localStyles.vehicleSummaryContent}>
+              <Text style={localStyles.vehicleSummaryTitle}>{editingVehicle.brand} {editingVehicle.model}</Text>
+              <Text style={styles.linkHint}>{editingVehicle.locationAddress}</Text>
+              <View style={localStyles.summaryMetaRow}>
+                <Text style={localStyles.summaryMetaText}>{editingVehicle.year}</Text>
+                <Text style={localStyles.summaryMetaText}>{formatCurrencyEUR(editingVehicle.pricePerDay)}</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={localStyles.formGrid}>
+            <Field label="Marca" value={editVehicleBrandInput} onChangeText={setEditVehicleBrandInput} placeholder="Marca" />
+            <Field label="Modelo" value={editVehicleModelInput} onChangeText={setEditVehicleModelInput} placeholder="Modelo" />
+            <View style={localStyles.formGridRow}>
+              <Field label="Año" value={editVehicleYearInput} onChangeText={setEditVehicleYearInput} placeholder="Año" keyboardType="number-pad" />
+              <Field label="Precio por dia" value={editVehiclePricePerDayInput} onChangeText={setEditVehiclePricePerDayInput} placeholder="Precio" keyboardType="decimal-pad" />
+            </View>
+            <View style={localStyles.readOnlyFieldWrap}>
+              <Text style={localStyles.fieldLabel}>Matricula</Text>
+              <View style={localStyles.readOnlyFieldValueWrap}>
+                <Text style={localStyles.readOnlyFieldValueText}>{editVehicleLicensePlateInput}</Text>
+              </View>
+            </View>
+            <Field label="Descripcion" value={editVehicleDescriptionInput} onChangeText={setEditVehicleDescriptionInput} placeholder="Descripcion" multiline />
+            <SelectField
+              label="Combustible"
+              value={editVehicleFuelTypeInput}
+              onChange={setEditVehicleFuelTypeInput}
+              placeholder="Selecciona combustible"
+              options={FUEL_TYPE_OPTIONS}
+            />
+            <SelectField
+              label="Transmision"
+              value={editVehicleTransmissionInput}
+              onChange={setEditVehicleTransmissionInput}
+              placeholder="Selecciona transmision"
+              options={TRANSMISSION_OPTIONS}
+            />
+            <SelectField
+              label="Plazas"
+              value={editVehicleSeatsInput}
+              onChange={setEditVehicleSeatsInput}
+              placeholder="Selecciona plazas"
+              options={SEATS_OPTIONS}
+            />
+            <Field label="Direccion" value={editVehicleAddressInput} onChangeText={handleEditVehicleAddressChange} placeholder="Escribe una direccion" />
+          </View>
+
           {editVehicleAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
           {editVehicleAddressError ? <Text style={styles.error}>{editVehicleAddressError}</Text> : null}
           {editVehicleAddressSuggestions.length > 0 && !editVehicleSelectedLocation ? (
@@ -667,139 +970,549 @@ export function MyVehiclesScreen() {
               Ubicacion seleccionada: {editVehicleSelectedLocation.lat.toFixed(5)}, {editVehicleSelectedLocation.lng.toFixed(5)}
             </Text>
           ) : null}
-          <TextInput value={editVehicleFuelTypeInput} onChangeText={setEditVehicleFuelTypeInput} style={styles.input} placeholder="Combustible" autoCapitalize="none" />
-          <TextInput value={editVehicleTransmissionInput} onChangeText={setEditVehicleTransmissionInput} style={styles.input} placeholder="Transmision" autoCapitalize="none" />
-          <TextInput value={editVehicleSeatsInput} onChangeText={setEditVehicleSeatsInput} style={styles.input} placeholder="Plazas" keyboardType="number-pad" />
-          <TextInput value={editVehicleStatusInput} onChangeText={(value) => setEditVehicleStatusInput(value === 'inactive' ? 'inactive' : 'active')} style={styles.input} placeholder="Estado: active|inactive" autoCapitalize="none" />
           {editVehicleFormError ? <Text style={styles.error}>{editVehicleFormError}</Text> : null}
 
-          <View style={styles.actionsRow}>
-            <View style={styles.actionButtonWrapper}>
-              <Button title="Guardar cambios" onPress={() => void handleUpdateVehicle()} disabled={vehiclesCreating} />
-            </View>
-            <View style={styles.actionButtonWrapper}>
-              <Button title="Eliminar" onPress={() => void handleDeleteVehicle()} color="#b00020" disabled={vehiclesCreating} />
-            </View>
+          <View style={localStyles.actionRow}>
+            <ActionButton label="Guardar cambios" onPress={() => void handleUpdateVehicle()} disabled={vehiclesCreating} />
+            <ActionButton label="Eliminar" variant="danger" onPress={() => void handleDeleteVehicle()} disabled={vehiclesCreating} />
           </View>
 
-          <View style={styles.actionsRow}>
-            <View style={styles.actionButtonWrapper}>
-              <Button title="Imagenes" onPress={() => void handleOpenVehicleImagesScreen()} disabled={vehiclesCreating} />
-            </View>
-            <View style={styles.actionButtonWrapper}>
-              <Button title="Ventanas" onPress={() => void handleOpenAvailabilityScreen()} disabled={vehiclesCreating} />
-            </View>
+          <View style={localStyles.actionRow}>
+            <ActionButton label="Imagenes" onPress={() => void handleOpenVehicleImagesScreen()} disabled={vehiclesCreating} variant="ghost" />
+            <ActionButton label="Disponibilidad" onPress={() => void handleOpenAvailabilityScreen()} disabled={vehiclesCreating} variant="ghost" />
+          </View>
+
+          <View style={localStyles.bottomNavRow}>
+            <ActionButton label="Volver a lista" onPress={handleBack} variant="ghost" />
           </View>
         </View>
 
         {vehiclesCreating ? <ActivityIndicator size="small" /> : null}
         {vehiclesMutationMessage ? <Text style={styles.info}>{vehiclesMutationMessage}</Text> : null}
         {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
-      </View>
+      </ScrollView>
+    );
+  }
+
+  if (screenMode === 'create') {
+    return (
+      <ScrollView
+        style={localStyles.screenScroll}
+        contentContainerStyle={[
+          localStyles.screenContent,
+          {
+            paddingTop: topPadding,
+            paddingBottom: bottomPadding + spacingTokens.lg,
+            paddingHorizontal: spacingTokens.lg
+          }
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <SectionHeader
+          title="Nuevo vehiculo"
+          subtitle="Crea un anuncio con una ficha limpia, realista y lista para publicar."
+          centered={isDesktopWeb}
+        />
+
+        <View style={[styles.card, desktopCardStyle]}>
+          <View style={localStyles.formGrid}>
+            <Field label="Marca" value={vehicleBrandInput} onChangeText={setVehicleBrandInput} placeholder="Marca" />
+            <Field label="Modelo" value={vehicleModelInput} onChangeText={setVehicleModelInput} placeholder="Modelo" />
+            <View style={localStyles.formGridRow}>
+              <Field label="Año" value={vehicleYearInput} onChangeText={setVehicleYearInput} placeholder="Año" keyboardType="number-pad" />
+              <Field label="Precio por dia" value={vehiclePricePerDayInput} onChangeText={setVehiclePricePerDayInput} placeholder="Precio" keyboardType="decimal-pad" />
+            </View>
+            <Field label="Matricula" value={vehicleLicensePlateInput} onChangeText={setVehicleLicensePlateInput} placeholder="Matricula" autoCapitalize="characters" />
+            <Field label="Descripcion" value={vehicleDescriptionInput} onChangeText={setVehicleDescriptionInput} placeholder="Describe el vehiculo" multiline />
+            <SelectField
+              label="Combustible"
+              value={vehicleFuelTypeInput}
+              onChange={setVehicleFuelTypeInput}
+              placeholder="Selecciona combustible"
+              options={FUEL_TYPE_OPTIONS}
+            />
+            <SelectField
+              label="Transmision"
+              value={vehicleTransmissionInput}
+              onChange={setVehicleTransmissionInput}
+              placeholder="Selecciona transmision"
+              options={TRANSMISSION_OPTIONS}
+            />
+            <SelectField
+              label="Plazas"
+              value={vehicleSeatsInput}
+              onChange={setVehicleSeatsInput}
+              placeholder="Selecciona plazas"
+              options={SEATS_OPTIONS}
+            />
+            <Field label="Direccion" value={vehicleAddressInput} onChangeText={handleCreateVehicleAddressChange} placeholder="Escribe una direccion" />
+          </View>
+
+          {vehicleAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
+          {vehicleAddressError ? <Text style={styles.error}>{vehicleAddressError}</Text> : null}
+          {vehicleAddressSuggestions.length > 0 && !vehicleSelectedLocation ? (
+            <View style={localStyles.suggestionsList}>
+              {vehicleAddressSuggestions.map((suggestion) => (
+                <Pressable
+                  key={suggestion.id}
+                  style={localStyles.suggestionItem}
+                  onPress={() => handleSelectCreateVehicleAddress(suggestion.label, suggestion.lat, suggestion.lng)}
+                >
+                  <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          {vehicleSelectedLocation ? (
+            <Text style={styles.linkHint}>
+              Ubicacion seleccionada: {vehicleSelectedLocation.lat.toFixed(5)}, {vehicleSelectedLocation.lng.toFixed(5)}
+            </Text>
+          ) : null}
+          {createVehicleFormError ? <Text style={styles.error}>{createVehicleFormError}</Text> : null}
+
+          <View style={localStyles.actionRow}>
+            <ActionButton label={vehiclesCreating ? 'Creando...' : 'Crear vehiculo'} onPress={() => void handleCreateVehicle()} disabled={vehiclesCreating} />
+            <ActionButton label="Cancelar" onPress={handleBack} variant="ghost" disabled={vehiclesCreating} />
+          </View>
+        </View>
+      </ScrollView>
     );
   }
 
   return (
-    <View style={styles.sectionCard}>
-      <SectionHeader title="Mis Vehiculos" subtitle="Alta, edicion, fotos y disponibilidad de tus vehiculos." />
+    <View style={localStyles.screenRoot}>
+      <ScrollView
+        style={localStyles.screenScroll}
+        contentContainerStyle={[
+          localStyles.screenContent,
+          {
+            paddingTop: topPadding,
+            paddingBottom: bottomPadding + spacingTokens.lg,
+            paddingHorizontal: spacingTokens.lg
+          }
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <SectionHeader
+          title="Mis vehiculos"
+          subtitle="Gestiona anuncios, fotos y disponibilidad desde un panel preparado para la app real."
+          centered={isDesktopWeb}
+        />
 
-      <View style={[styles.card, desktopCardStyle]}>
-        <Text style={styles.switcherTitle}>Nuevo vehiculo (usuario activo)</Text>
+        {vehiclesLoading || vehiclesCreating ? <ActivityIndicator size="small" /> : null}
+        {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
+        {vehiclesMutationMessage ? <Text style={styles.info}>{vehiclesMutationMessage}</Text> : null}
 
-        <TextInput value={vehicleBrandInput} onChangeText={setVehicleBrandInput} style={styles.input} placeholder="Marca" />
-        <TextInput value={vehicleModelInput} onChangeText={setVehicleModelInput} style={styles.input} placeholder="Modelo" />
-        <TextInput value={vehicleYearInput} onChangeText={setVehicleYearInput} style={styles.input} placeholder="Ano" keyboardType="number-pad" />
-        <TextInput value={vehicleLicensePlateInput} onChangeText={setVehicleLicensePlateInput} style={styles.input} placeholder="Matricula" autoCapitalize="characters" />
-        <TextInput value={vehicleDescriptionInput} onChangeText={setVehicleDescriptionInput} style={styles.input} placeholder="Descripcion" />
-        <TextInput value={vehiclePricePerDayInput} onChangeText={setVehiclePricePerDayInput} style={styles.input} placeholder="Precio por dia" keyboardType="decimal-pad" />
-        <TextInput value={vehicleAddressInput} onChangeText={handleCreateVehicleAddressChange} style={styles.input} placeholder="Direccion" />
-        {vehicleAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
-        {vehicleAddressError ? <Text style={styles.error}>{vehicleAddressError}</Text> : null}
-        {vehicleAddressSuggestions.length > 0 && !vehicleSelectedLocation ? (
-          <View style={localStyles.suggestionsList}>
-            {vehicleAddressSuggestions.map((suggestion) => (
+        <View style={[localStyles.vehicleGrid, isDesktopWeb ? localStyles.vehicleGridDesktop : undefined]}>
+          {myVehicles.map((vehicle) => {
+            const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
+
+            return (
               <Pressable
-                key={suggestion.id}
-                style={localStyles.suggestionItem}
-                onPress={() => handleSelectCreateVehicleAddress(suggestion.label, suggestion.lat, suggestion.lng)}
+                key={vehicle.id}
+                style={[styles.card, localStyles.vehicleCard, isDesktopWeb ? localStyles.desktopListCard : undefined]}
+                onPress={() => handleOpenVehicleEditor(vehicle.id)}
               >
-                <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
+                <View style={localStyles.vehicleCardMediaWrap}>
+                  {primaryImageUrl ? (
+                    <Image
+                      source={{ uri: primaryImageUrl }}
+                      style={localStyles.vehicleCardMedia}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={localStyles.vehicleCardMediaPlaceholder}>
+                      <Text style={localStyles.vehicleCardMediaPlaceholderText}>Añade una foto para destacar el anuncio</Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={localStyles.vehicleCardBody}>
+                  <View style={localStyles.vehicleCardHeaderRow}>
+                    <View style={localStyles.vehicleCardTitleWrap}>
+                      <Text style={localStyles.vehicleCardTitle}>{vehicle.brand} {vehicle.model}</Text>
+                      <Text style={localStyles.vehicleCardSubtitle}>{vehicle.locationAddress}</Text>
+                    </View>
+                    <Text style={localStyles.vehiclePrice}>{vehicle.pricePerDay.toFixed(2)} EUR/dia</Text>
+                  </View>
+
+                  <View style={localStyles.vehicleMetaRow}>
+                    <View style={localStyles.vehicleMetaChip}><Text style={localStyles.vehicleMetaChipText}>{vehicle.year}</Text></View>
+                  </View>
+
+                  <View style={localStyles.actionRow}>
+                    <ActionButton label="Editar vehiculo" onPress={() => handleOpenVehicleEditor(vehicle.id)} />
+                  </View>
+                </View>
               </Pressable>
-            ))}
-          </View>
-        ) : null}
-        {vehicleSelectedLocation ? (
-          <Text style={styles.linkHint}>
-            Ubicacion seleccionada: {vehicleSelectedLocation.lat.toFixed(5)}, {vehicleSelectedLocation.lng.toFixed(5)}
-          </Text>
-        ) : null}
-        <TextInput value={vehicleFuelTypeInput} onChangeText={setVehicleFuelTypeInput} style={styles.input} placeholder="Combustible" autoCapitalize="none" />
-        <TextInput value={vehicleTransmissionInput} onChangeText={setVehicleTransmissionInput} style={styles.input} placeholder="Transmision" autoCapitalize="none" />
-        <TextInput value={vehicleSeatsInput} onChangeText={setVehicleSeatsInput} style={styles.input} placeholder="Plazas" keyboardType="number-pad" />
-        {createVehicleFormError ? <Text style={styles.error}>{createVehicleFormError}</Text> : null}
-
-        <View style={styles.buttonContainer}>
-          <Button title="Crear vehiculo" onPress={() => void handleCreateVehicle()} disabled={vehiclesCreating} />
+            );
+          })}
         </View>
-      </View>
 
-      <View style={styles.buttonContainer}>
-        <Button title="Recargar" onPress={() => void fetchMyVehicles()} />
-      </View>
+        {!vehiclesLoading && !vehiclesError && myVehicles.length === 0 ? (
+          <EmptyState title="Sin vehiculos" description="Este usuario no tiene vehiculos asociados." />
+        ) : null}
+      </ScrollView>
 
-      {vehiclesLoading || vehiclesCreating ? <ActivityIndicator size="small" /> : null}
-      {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
-      {vehiclesMutationMessage ? <Text style={styles.info}>{vehiclesMutationMessage}</Text> : null}
-
-      {myVehicles.map((vehicle) => (
-        <Pressable key={vehicle.id} style={[styles.card, desktopCardStyle]} onPress={() => handleOpenVehicleEditor(vehicle.id)}>
-          {resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null) ? (
-            <Image
-              source={{ uri: resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null) ?? '' }}
-              style={styles.vehicleCardMedia}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.vehicleCardMediaPlaceholder}>
-              <Text style={styles.vehicleCardMediaPlaceholderText}>Sube una foto para destacar tu anuncio</Text>
-            </View>
-          )}
-          <Text style={styles.cardTitle}>{vehicle.brand} {vehicle.model}</Text>
-          <Text style={styles.row}><Text style={styles.label}>Matricula:</Text> {vehicle.licensePlate}</Text>
-          <Text style={styles.row}><Text style={styles.label}>Precio/dia:</Text> {vehicle.pricePerDay.toFixed(2)} EUR</Text>
-          <Text style={styles.row}><Text style={styles.label}>Estado:</Text> {vehicle.status}</Text>
-          <Text style={styles.linkHint}>Toca para editar, fotos o disponibilidad</Text>
-        </Pressable>
-      ))}
-
-      {!vehiclesLoading && !vehiclesError && myVehicles.length === 0 ? (
-        <EmptyState title="Sin vehiculos" description="Este usuario no tiene vehiculos asociados." />
-      ) : null}
+      <Pressable onPress={handleOpenCreateVehicleScreen} style={[localStyles.fab, { bottom: fabBottomOffset }]}>
+        <Text style={localStyles.fabIcon}>+</Text>
+        <Text style={localStyles.fabLabel}>Nuevo vehiculo</Text>
+      </Pressable>
     </View>
   );
 }
 
 const localStyles = StyleSheet.create({
+  screenRoot: {
+    flex: 1,
+    position: 'relative'
+  },
+  screenScroll: {
+    flex: 1
+  },
+  screenContent: {
+    gap: spacingTokens.md
+  },
   desktopCard: {
     width: '100%',
     maxWidth: 860,
     alignSelf: 'center'
   },
+  vehicleGrid: {
+    width: '100%',
+    gap: spacingTokens.md
+  },
+  vehicleGridDesktop: {
+    maxWidth: 1100,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center'
+  },
+  desktopListCard: {
+    width: '31%',
+    minWidth: 250,
+    maxWidth: 320
+  },
+  actionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacingTokens.sm
+  },
+  bottomNavRow: {
+    marginTop: spacingTokens.md,
+    flexDirection: 'row',
+    justifyContent: 'center'
+  },
+  actionButton: {
+    minHeight: 48,
+    paddingHorizontal: spacingTokens.lg,
+    paddingVertical: spacingTokens.sm,
+    borderRadius: radiusTokens.input,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colorTokens.primary,
+    backgroundColor: colorTokens.primary
+  },
+  actionButtonPrimary: {
+    backgroundColor: colorTokens.primary,
+    borderColor: colorTokens.primary
+  },
+  actionButtonGhost: {
+    backgroundColor: colorTokens.white,
+    borderColor: colorTokens.border
+  },
+  actionButtonDanger: {
+    backgroundColor: colorTokens.alert,
+    borderColor: colorTokens.alert
+  },
+  actionButtonDisabled: {
+    opacity: 0.55
+  },
+  actionButtonText: {
+    color: colorTokens.white,
+    ...typographyTokens.caption,
+    fontWeight: '700'
+  },
+  actionButtonGhostText: {
+    color: colorTokens.secondary
+  },
+  actionButtonDangerText: {
+    color: colorTokens.white
+  },
+  fab: {
+    position: 'absolute',
+    right: spacingTokens.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.sm,
+    paddingHorizontal: spacingTokens.lg,
+    paddingVertical: spacingTokens.md,
+    borderRadius: radiusTokens.pill,
+    backgroundColor: colorTokens.accent2,
+    ...shadowTokens.card
+  },
+  fabIcon: {
+    color: colorTokens.white,
+    fontSize: 18,
+    fontWeight: '700'
+  },
+  fabLabel: {
+    color: colorTokens.white,
+    ...typographyTokens.caption,
+    fontWeight: '700'
+  },
+  fieldWrap: {
+    gap: spacingTokens.xs
+  },
+  fieldLabel: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption,
+    fontWeight: '700'
+  },
+  selectTrigger: {
+    minHeight: 50,
+    paddingHorizontal: spacingTokens.md,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacingTokens.sm
+  },
+  selectValueText: {
+    color: colorTokens.primary,
+    ...typographyTokens.body,
+    fontWeight: '600',
+    flex: 1
+  },
+  selectPlaceholderText: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.body,
+    flex: 1
+  },
+  selectChevron: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption,
+    fontWeight: '700'
+  },
+  selectOptions: {
+    marginTop: spacingTokens.xs,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.card,
+    backgroundColor: colorTokens.white,
+    overflow: 'hidden'
+  },
+  selectOptionItem: {
+    paddingHorizontal: spacingTokens.md,
+    paddingVertical: spacingTokens.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colorTokens.border
+  },
+  selectOptionItemLast: {
+    borderBottomWidth: 0
+  },
+  multilineInput: {
+    minHeight: 108,
+    textAlignVertical: 'top'
+  },
+  readOnlyFieldWrap: {
+    gap: spacingTokens.xs
+  },
+  readOnlyFieldValueWrap: {
+    minHeight: 50,
+    paddingHorizontal: spacingTokens.md,
+    paddingVertical: spacingTokens.md,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.bgLight,
+    justifyContent: 'center'
+  },
+  readOnlyFieldValueText: {
+    color: colorTokens.secondary,
+    ...typographyTokens.body,
+    fontWeight: '700'
+  },
+  formGrid: {
+    gap: spacingTokens.md
+  },
+  formGridRow: {
+    flexDirection: 'row',
+    gap: spacingTokens.sm
+  },
+  vehicleSummaryCard: {
+    flexDirection: 'row',
+    gap: spacingTokens.md,
+    alignItems: 'center',
+    marginBottom: spacingTokens.md,
+    padding: spacingTokens.md,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.card,
+    backgroundColor: colorTokens.bgLight
+  },
+  vehicleSummaryImage: {
+    width: 88,
+    height: 88,
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.bgLight
+  },
+  vehicleSummaryImagePlaceholder: {
+    width: 88,
+    height: 88,
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.white,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  vehicleSummaryImagePlaceholderText: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption,
+    textAlign: 'center'
+  },
+  vehicleSummaryContent: {
+    flex: 1,
+    gap: spacingTokens.xs
+  },
+  vehicleSummaryTitle: {
+    color: colorTokens.primary,
+    ...typographyTokens.sectionLabel
+  },
+  summaryMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacingTokens.xs
+  },
+  summaryMetaText: {
+    color: colorTokens.secondary,
+    ...typographyTokens.caption,
+    fontWeight: '700'
+  },
+  vehicleCard: {
+    gap: spacingTokens.md
+  },
+  vehicleCardMediaWrap: {
+    borderRadius: radiusTokens.input,
+    overflow: 'hidden'
+  },
+  vehicleCardMedia: {
+    width: '100%',
+    height: 190,
+    backgroundColor: colorTokens.bgLight
+  },
+  vehicleCardMediaPlaceholder: {
+    width: '100%',
+    height: 190,
+    borderRadius: radiusTokens.input,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    backgroundColor: colorTokens.bgLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacingTokens.md
+  },
+  vehicleCardMediaPlaceholderText: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption,
+    textAlign: 'center'
+  },
+  vehicleCardBody: {
+    gap: spacingTokens.sm
+  },
+  vehicleCardHeaderRow: {
+    flexDirection: 'row',
+    gap: spacingTokens.sm,
+    alignItems: 'flex-start',
+    justifyContent: 'space-between'
+  },
+  vehicleCardTitleWrap: {
+    flex: 1,
+    gap: 2
+  },
+  vehicleCardTitle: {
+    color: colorTokens.primary,
+    ...typographyTokens.sectionLabel
+  },
+  vehicleCardSubtitle: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
+  },
+  vehiclePrice: {
+    color: colorTokens.secondary,
+    ...typographyTokens.sectionLabel,
+    textAlign: 'right'
+  },
+  vehicleMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacingTokens.xs
+  },
+  vehicleMetaChip: {
+    paddingHorizontal: spacingTokens.md,
+    paddingVertical: spacingTokens.xs,
+    borderRadius: radiusTokens.pill,
+    backgroundColor: colorTokens.bgLight,
+    borderWidth: 1,
+    borderColor: colorTokens.border
+  },
+  vehicleMetaChipText: {
+    color: colorTokens.secondary,
+    ...typographyTokens.caption,
+    fontWeight: '700'
+  },
+  imageCardMediaWrap: {
+    position: 'relative',
+    borderRadius: radiusTokens.input,
+    overflow: 'hidden'
+  },
+  primaryStarButton: {
+    position: 'absolute',
+    top: spacingTokens.sm,
+    right: spacingTokens.sm,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  primaryStarButtonActive: {
+    borderColor: colorTokens.accent1,
+    backgroundColor: colorTokens.accent1
+  },
+  primaryStarText: {
+    color: colorTokens.secondary,
+    fontSize: 16,
+    lineHeight: 18,
+    fontWeight: '700'
+  },
+  primaryStarTextActive: {
+    color: colorTokens.primary
+  },
   suggestionsList: {
     borderWidth: 1,
-    borderColor: '#dde3ee',
-    borderRadius: 10,
-    backgroundColor: '#ffffff',
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.card,
+    backgroundColor: colorTokens.white,
     overflow: 'hidden'
   },
   suggestionItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: spacingTokens.md,
+    paddingVertical: spacingTokens.sm,
     borderBottomWidth: 1,
-    borderBottomColor: '#edf1f7'
+    borderBottomColor: colorTokens.border
   },
   suggestionLabel: {
-    fontSize: 13,
-    color: '#1e2c4f'
+    color: colorTokens.primary,
+    ...typographyTokens.caption
   }
 });

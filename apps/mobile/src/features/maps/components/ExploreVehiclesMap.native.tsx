@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
-import { View, Text, Image, Pressable } from 'react-native';
+import { View, Text, Image, Pressable, StyleSheet, Platform } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
+import { colorTokens } from '../../../app/theme/tokens';
 import { ExploreVehiclesMapProps } from './ExploreVehiclesMap.types';
 
 export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
@@ -8,6 +9,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
   userLocation,
   onVehiclePress,
   height = 400,
+  infoBottomInset = 0,
 }) => {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const lastMarkerPressAtRef = useRef<number>(0);
@@ -55,8 +57,15 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
               longitude: userLocation.longitude,
             }}
             title="Tu ubicacion"
-            pinColor="green"
-          />
+            pinColor={Platform.OS === 'ios' ? colorTokens.accent2 : undefined}
+            anchor={Platform.OS === 'android' ? { x: 0.5, y: 0.5 } : undefined}
+          >
+            {Platform.OS === 'android' ? (
+              <View style={localStyles.userMarkerOuter}>
+                <View style={localStyles.userMarkerInner} />
+              </View>
+            ) : null}
+          </Marker>
         )}
 
         {vehicles.map((vehicle) => (
@@ -66,12 +75,19 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
               latitude: vehicle.location.latitude,
               longitude: vehicle.location.longitude,
             }}
-            pinColor="blue"
+            pinColor={Platform.OS === 'ios' ? colorTokens.secondary : undefined}
+            anchor={Platform.OS === 'android' ? { x: 0.5, y: 0.5 } : undefined}
             onSelect={() => {
               lastMarkerPressAtRef.current = Date.now();
               setSelectedVehicleId(vehicle.id);
             }}
-          />
+          >
+            {Platform.OS === 'android' ? (
+              <View style={localStyles.vehicleMarkerOuter}>
+                <View style={localStyles.vehicleMarkerInner} />
+              </View>
+            ) : null}
+          </Marker>
         ))}
       </MapView>
 
@@ -81,7 +97,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
             position: 'absolute',
             left: 12,
             right: 12,
-            bottom: 12,
+            bottom: 12 + infoBottomInset,
             backgroundColor: '#fff',
             borderRadius: 10,
             padding: 10,
@@ -99,32 +115,39 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
             }}
             style={{
               position: 'absolute',
-              right: 8,
-              top: 8,
+              right: 10,
+              top: 10,
               zIndex: 2,
-              width: 28,
-              height: 28,
-              borderRadius: 14,
-              backgroundColor: '#f3f4f6',
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              backgroundColor: '#ffffff',
+              borderWidth: 1,
+              borderColor: '#d1d5db',
               alignItems: 'center',
               justifyContent: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.08,
+              shadowRadius: 2,
+              elevation: 2,
             }}
             hitSlop={10}
           >
-            <Text style={{ color: '#374151', fontWeight: '700' }}>X</Text>
+            <Text style={{ color: '#1f2937', fontSize: 18, lineHeight: 18, fontWeight: '700' }}>×</Text>
           </Pressable>
 
           {selectedVehicle.imageUrl ? (
             <Image
               source={{ uri: selectedVehicle.imageUrl }}
-              style={{ width: '100%', height: 130, borderRadius: 8, marginBottom: 8 }}
+              style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 8, marginBottom: 8 }}
               resizeMode="cover"
             />
           ) : (
             <View
               style={{
                 width: '100%',
-                height: 130,
+                aspectRatio: 4 / 3,
                 borderRadius: 8,
                 backgroundColor: '#e5e7eb',
                 alignItems: 'center',
@@ -150,16 +173,51 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
               }
             }}
             style={{
-              backgroundColor: '#1d4ed8',
+              backgroundColor: colorTokens.primary,
               borderRadius: 8,
               paddingVertical: 8,
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: '#fff', fontWeight: '600' }}>Ver detalle</Text>
+            <Text style={{ color: colorTokens.white, fontWeight: '600' }}>Ver detalle</Text>
           </Pressable>
         </View>
       ) : null}
     </View>
   );
 };
+
+const localStyles = StyleSheet.create({
+  userMarkerOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colorTokens.white,
+    borderWidth: 2,
+    borderColor: colorTokens.accent2,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  userMarkerInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colorTokens.accent2
+  },
+  vehicleMarkerOuter: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colorTokens.white,
+    borderWidth: 2,
+    borderColor: colorTokens.secondary,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  vehicleMarkerInner: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: colorTokens.primary
+  }
+});

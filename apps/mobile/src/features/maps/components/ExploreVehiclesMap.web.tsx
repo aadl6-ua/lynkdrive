@@ -6,6 +6,7 @@ import {
   Popup,
 } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import { colorTokens } from '../../../app/theme/tokens';
 import { ExploreVehiclesMapProps } from './ExploreVehiclesMap.types';
 
 // Type wrappers para evitar errores de TypeScript
@@ -18,7 +19,9 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
   userLocation,
   onVehiclePress,
   height = 400,
+  infoBottomInset = 0,
 }) => {
+  void infoBottomInset;
   // Calcular centro del mapa
   const centerLocation = userLocation || (vehicles.length > 0 ? vehicles[0].location : null);
 
@@ -34,6 +37,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
     <MapContainer
       center={[centerLocation.latitude, centerLocation.longitude]}
       zoom={13}
+      zoomControl={false}
       style={{ height: `${height}px`, width: '100%', borderRadius: '8px' }}
     >
       <TileLayer
@@ -46,7 +50,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
         <WebCircleMarker
           center={[userLocation.latitude, userLocation.longitude]}
           radius={10}
-          pathOptions={{ color: '#15803d', fillColor: '#22c55e', fillOpacity: 0.95, weight: 2 }}
+          pathOptions={{ color: colorTokens.accent2, fillColor: colorTokens.accent2, fillOpacity: 0.95, weight: 2 }}
         >
           <Popup>
             <div style={{ textAlign: 'center' }}>
@@ -62,7 +66,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
           key={vehicle.id}
           center={[vehicle.location.latitude, vehicle.location.longitude]}
           radius={9}
-          pathOptions={{ color: '#1d4ed8', fillColor: '#3b82f6', fillOpacity: 0.95, weight: 2 }}
+          pathOptions={{ color: colorTokens.secondary, fillColor: colorTokens.primary, fillOpacity: 0.95, weight: 2 }}
         >
           <Popup>
             <div
@@ -117,9 +121,9 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
                 }}
                 style={{
                   marginTop: '8px',
-                  border: '1px solid #1d4ed8',
-                  backgroundColor: '#1d4ed8',
-                  color: '#fff',
+                  border: `1px solid ${colorTokens.primary}`,
+                  backgroundColor: colorTokens.primary,
+                  color: colorTokens.white,
                   borderRadius: '6px',
                   fontSize: '12px',
                   padding: '6px 10px',

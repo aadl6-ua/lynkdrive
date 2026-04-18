@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { httpClient } from '../../api/http';
 import { UploadTarget, uploadImageToApi } from '../../api/uploads';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
@@ -312,6 +312,8 @@ function Stars({ rating }: { rating: number }) {
 }
 
 export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
+  const { width } = useWindowDimensions();
+  const isDesktopWeb = Platform.OS === 'web' && width >= 1024;
   const [mode, setMode] = useState<ProfileMode>('overview');
   const [firstNameInput, setFirstNameInput] = useState('');
   const [lastNameInput, setLastNameInput] = useState('');
@@ -661,6 +663,7 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
         <SectionHeader
           title="Perfil"
           subtitle="Tu resumen de cuenta, actividad y validaciones en una sola vista."
+          centered={isDesktopWeb}
         />
 
         <View style={localStyles.heroCard}>

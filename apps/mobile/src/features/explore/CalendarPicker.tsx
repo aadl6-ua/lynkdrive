@@ -26,6 +26,12 @@ interface CalendarPickerProps {
   availabilityWindows: AvailabilityWindowItem[];
   bookings: BookingItem[];
   onDateRangeChange: (startDate: Date | null, startHour: number, endDate: Date | null, endHour: number) => void;
+  initialDateRange?: {
+    startDate: Date | null;
+    startHour: number;
+    endDate: Date | null;
+    endHour: number;
+  };
 }
 
 type DayStatus = 'past' | 'unavailable' | 'partial' | 'available';
@@ -145,8 +151,17 @@ function adjustHour(currentHour: number, delta: number): number {
   return nextHour;
 }
 
+function formatMonthYear(date: Date): string {
+  const month = date
+    .toLocaleDateString('es-ES', { month: 'long' })
+    .replace(/^./, (character) => character.toUpperCase());
+  const year = date.toLocaleDateString('es-ES', { year: 'numeric' });
+
+  return `${month} ${year}`;
+}
+
 export const CalendarPicker = React.memo(
-  ({ availabilityWindows, bookings, onDateRangeChange }: CalendarPickerProps) => {
+  ({ availabilityWindows, bookings, onDateRangeChange, initialDateRange }: CalendarPickerProps) => {
     const [dateRange, setDateRange] = useState<DateRange>({
       startDate: null,
       startHour: 10,
@@ -169,6 +184,19 @@ export const CalendarPicker = React.memo(
     useEffect(() => {
       onDateRangeChange(dateRange.startDate, dateRange.startHour, dateRange.endDate, dateRange.endHour);
     }, [dateRange, onDateRangeChange]);
+
+    useEffect(() => {
+      if (!initialDateRange) {
+        return;
+      }
+
+      setDateRange({
+        startDate: initialDateRange.startDate,
+        startHour: initialDateRange.startHour,
+        endDate: initialDateRange.endDate,
+        endHour: initialDateRange.endHour
+      });
+    }, [initialDateRange]);
 
     const handleDayPress = (day: Date) => {
       const dayOnly = new Date(day);
@@ -348,9 +376,7 @@ export const CalendarPicker = React.memo(
               <Text style={localStyles.monthNavButtonText}>{'<'}</Text>
             </Pressable>
 
-            <Text style={localStyles.monthTitle}>
-              {activeMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
-            </Text>
+            <Text style={localStyles.monthTitle}>{formatMonthYear(activeMonth)}</Text>
 
             <Pressable
               onPress={() => setActiveMonthIndex((prev) => Math.min(months.length - 1, prev + 1))}
