@@ -12,6 +12,7 @@ import {
   ScrollView,
   useWindowDimensions
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
 import { uploadImageToApi } from '../../api/uploads';
@@ -226,7 +227,7 @@ function SelectField({
           <Text style={selectedLabel ? localStyles.selectValueText : localStyles.selectPlaceholderText}>
             {selectedLabel ?? placeholder}
           </Text>
-          <Text style={localStyles.selectChevron}>{open ? '▲' : '▼'}</Text>
+          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={20} color="#6B7280" />
         </Pressable>
 
         {open ? (
@@ -714,7 +715,7 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
         />
 
         <View style={[styles.card, desktopCardStyle]}>
-          <View style={localStyles.imagesActionRow}>
+          <View style={[localStyles.imagesActionRow, { justifyContent: isDesktopWeb ? 'center' : 'flex-start' }]}>
             <ActionButton
               label={vehicleImageUploading ? 'Subiendo...' : 'Subir desde galeria'}
               onPress={() => void handlePickUploadAndCreateVehicleImage()}
@@ -820,30 +821,45 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
             />
           </View>
 
-          {availabilityStartInput ? <Text style={styles.linkHint}>Inicio: {formatDateTime(availabilityStartInput)}</Text> : null}
-          {availabilityEndInput ? <Text style={styles.linkHint}>Fin: {formatDateTime(availabilityEndInput)}</Text> : null}
+          {availabilityStartInput ? <Text style={[styles.linkHint, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>Inicio: {formatDateTime(availabilityStartInput)}</Text> : null}
+          {availabilityEndInput ? <Text style={[styles.linkHint, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>Fin: {formatDateTime(availabilityEndInput)}</Text> : null}
         </View>
 
         {availabilityWindowsLoading || availabilityWindowsSaving ? <ActivityIndicator size="small" /> : null}
-        {availabilityWindowsError ? <Text style={styles.error}>{availabilityWindowsError}</Text> : null}
-        {availabilityWindowsMutationMessage ? <Text style={styles.info}>{availabilityWindowsMutationMessage}</Text> : null}
+        {availabilityWindowsError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{availabilityWindowsError}</Text> : null}
+        {availabilityWindowsMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{availabilityWindowsMutationMessage}</Text> : null}
 
-        {availabilityWindows.map((window) => (
-          <View key={window.id} style={[styles.card, desktopCardStyle]}>
-            <Text style={styles.row}><Text style={styles.label}>Inicio:</Text> {new Date(window.startDatetime).toLocaleString('es-ES')}</Text>
-            <Text style={styles.row}><Text style={styles.label}>Fin:</Text> {new Date(window.endDatetime).toLocaleString('es-ES')}</Text>
-            <View style={localStyles.actionRow}>
-              <ActionButton
-                label="Eliminar"
-                variant="danger"
-                onPress={() => void handleDeleteAvailabilityWindow(window.id)}
-                disabled={availabilityWindowsSaving}
-              />
+        {(() => {
+          const now = new Date();
+          const futureWindows = availabilityWindows.filter(window => new Date(window.endDatetime) > now);
+          return futureWindows.length > 0 ? (
+            <View style={{ marginTop: spacingTokens.md }}>
+              <Text style={[localStyles.fieldLabel, { marginBottom: spacingTokens.md, textAlign: isDesktopWeb ? 'center' : 'left' }]}>Próximas ventanas ({futureWindows.length})</Text>
+              {futureWindows.map((window) => {
+                const startDate = new Date(window.startDatetime);
+                const endDate = new Date(window.endDatetime);
+                return (
+                  <View key={window.id} style={[styles.card, desktopCardStyle, { marginBottom: spacingTokens.sm }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacingTokens.md }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.row, { marginBottom: spacingTokens.sm, textAlign: 'left' }]}><Text style={styles.label}>Desde:</Text> {startDate.toLocaleDateString('es-ES')} {startDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</Text>
+                        <Text style={[styles.row, { textAlign: 'left' }]}><Text style={styles.label}>Hasta:</Text> {endDate.toLocaleDateString('es-ES')} {endDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</Text>
+                      </View>
+                      <ActionButton
+                        label="Eliminar"
+                        variant="danger"
+                        onPress={() => void handleDeleteAvailabilityWindow(window.id)}
+                        disabled={availabilityWindowsSaving}
+                      />
+                    </View>
+                  </View>
+                );
+              })}
             </View>
-          </View>
-        ))}
+          ) : null;
+        })()} 
 
-        <View style={localStyles.bottomNavRow}>
+        <View style={[localStyles.actionRow, { marginTop: spacingTokens.lg, justifyContent: isDesktopWeb ? 'center' : 'flex-start' }]}>
           <ActionButton label="Volver a edición" onPress={handleBack} variant="ghost" />
         </View>
       </ScrollView>
@@ -852,19 +868,18 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
 
   if (editingVehicle && editingVehicleId) {
     return (
-      <View style={localStyles.screenRoot}>
-        <ScrollView
-          style={localStyles.screenScroll}
-          contentContainerStyle={[
-            localStyles.screenContent,
-            {
-              paddingTop: topPadding,
-              paddingBottom: bottomPadding + spacingTokens.xl,
-              paddingHorizontal: spacingTokens.lg
-            }
-          ]}
-          keyboardShouldPersistTaps="handled"
-        >
+      <ScrollView
+        style={localStyles.screenScroll}
+        contentContainerStyle={[
+          localStyles.screenContent,
+          {
+            paddingTop: topPadding,
+            paddingBottom: bottomPadding + spacingTokens.lg,
+            paddingHorizontal: spacingTokens.lg
+          }
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
           <SectionHeader
             title="Editar vehiculo"
             subtitle="Ajusta datos, fotos y disponibilidad desde un panel unico."
@@ -964,18 +979,16 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
               <ActionButton label="Imagenes" onPress={() => void handleOpenVehicleImagesScreen()} disabled={vehiclesCreating} variant="ghost" />
               <ActionButton label="Disponibilidad" onPress={() => void handleOpenAvailabilityScreen()} disabled={vehiclesCreating} variant="ghost" />
             </View>
+          </View>
 
+          <View style={[localStyles.actionRow, { marginTop: spacingTokens.lg, justifyContent: isDesktopWeb ? 'center' : 'flex-start' }]}>
+            <ActionButton label="Volver a lista" onPress={handleBack} variant="ghost" />
           </View>
 
           {vehiclesCreating ? <ActivityIndicator size="small" /> : null}
-          {vehiclesMutationMessage ? <Text style={styles.info}>{vehiclesMutationMessage}</Text> : null}
-          {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
+          {vehiclesMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesMutationMessage}</Text> : null}
+          {vehiclesError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesError}</Text> : null}
         </ScrollView>
-
-        <View style={localStyles.bottomNavRow}>
-          <ActionButton label="Volver a lista" onPress={handleBack} variant="ghost" />
-        </View>
-      </View>
     );
   }
 
@@ -1065,7 +1078,7 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
   }
 
   return (
-    <View style={localStyles.screenRoot}>
+    <View style={localStyles.screenScroll}>
       <ScrollView
         style={localStyles.screenScroll}
         contentContainerStyle={[
@@ -1085,8 +1098,8 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
         />
 
         {vehiclesLoading || vehiclesCreating ? <ActivityIndicator size="small" /> : null}
-        {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
-        {vehiclesMutationMessage ? <Text style={styles.info}>{vehiclesMutationMessage}</Text> : null}
+        {vehiclesError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesError}</Text> : null}
+        {vehiclesMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesMutationMessage}</Text> : null}
 
         <View style={[localStyles.vehicleGrid, isDesktopWeb ? localStyles.vehicleGridDesktop : undefined]}>
           {myVehicles.map((vehicle) => {
@@ -1148,10 +1161,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
 }
 
 const localStyles = StyleSheet.create({
-  screenRoot: {
-    flex: 1,
-    position: 'relative'
-  },
   screenScroll: {
     flex: 1
   },
@@ -1216,13 +1225,6 @@ const localStyles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
     gap: spacingTokens.sm
-  },
-  bottomNavRow: {
-    marginTop: spacingTokens.lg,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: spacingTokens.lg
   },
   actionButton: {
     minHeight: 48,
@@ -1316,8 +1318,10 @@ const localStyles = StyleSheet.create({
   },
   selectChevron: {
     color: colorTokens.textMuted,
-    ...typographyTokens.caption,
-    fontWeight: '700'
+    fontSize: 12,
+    fontWeight: '700',
+    minWidth: 16,
+    textAlign: 'center'
   },
   selectOptions: {
     marginTop: spacingTokens.xs,

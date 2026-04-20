@@ -15,7 +15,7 @@ import { hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
 
-type ProfileMode = 'overview' | 'account' | 'personal' | 'documents';
+type ProfileMode = 'overview' | 'personal' | 'documents';
 
 type BookingStatus = 'pending' | 'accepted' | 'rejected' | 'paid_confirmed' | 'in_progress' | 'completed' | 'cancelled';
 
@@ -352,12 +352,6 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
     loading: authLoading,
     error: authError,
     message: authMessage,
-    emailInput,
-    passwordInput,
-    setEmailInput,
-    setPasswordInput,
-    signIn,
-    signUp,
     signOut
   } = useAuthStore();
 
@@ -730,18 +724,6 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
           />
         </View>
 
-        {!authUserId ? (
-          <View style={styles.card}>
-            <EmptyState
-              title="Sesion no iniciada"
-              description="Inicia sesion para personalizar tu perfil y activar acciones de alquiler."
-            />
-            <View style={localStyles.inlineActions}>
-              <ActionButton label="Ir a cuenta" onPress={() => setMode('account')} />
-            </View>
-          </View>
-        ) : null}
-
         <View style={styles.card}>
           <Text style={localStyles.sectionTitle}>Datos personales</Text>
           <DataRow label="Nombre completo" value={getDisplayName(profile?.firstName, profile?.lastName)} />
@@ -1061,56 +1043,12 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
     </SectionShell>
   );
 
-  const renderAccountMode = () => (
-    <SectionShell title="Cuenta" subtitle="Gestiona acceso y seguridad desde una vista dedicada.">
-      <View style={localStyles.formGrid}>
-        <LabeledInput
-          label="Email"
-          value={emailInput}
-          onChangeText={setEmailInput}
-          placeholder="tu@email.com"
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-        <LabeledInput
-          label="Contrasena"
-          value={passwordInput}
-          onChangeText={setPasswordInput}
-          placeholder="********"
-          secureTextEntry
-          autoCapitalize="none"
-        />
-      </View>
-
-      <View style={localStyles.inlineActions}>
-        <ActionButton label="Iniciar sesion" onPress={() => void signIn()} disabled={authLoading} />
-        <ActionButton label="Crear cuenta" onPress={() => void signUp()} disabled={authLoading} variant="ghost" />
-        <ActionButton
-          label="Cerrar sesion"
-          onPress={() => void signOut()}
-          disabled={authLoading || !authUserId}
-          variant="danger"
-        />
-      </View>
-
-      <View style={localStyles.accountStatusCard}>
-        <Text style={localStyles.accountStatusLabel}>Estado de sesion</Text>
-        <Text style={localStyles.accountStatusValue}>{authUserId ? 'Activa' : 'No iniciada'}</Text>
-      </View>
-
-      <View style={localStyles.inlineActions}>
-        <ActionButton label="Volver" onPress={() => setMode('overview')} variant="ghost" />
-      </View>
-    </SectionShell>
-  );
-
   return (
     <View style={styles.sectionCard}>
       <View style={localStyles.modePillsWrap}>
         <ModePill label="Resumen" active={mode === 'overview'} onPress={() => setMode('overview')} />
         <ModePill label="Personal" active={mode === 'personal'} onPress={() => setMode('personal')} />
         <ModePill label="Docs" active={mode === 'documents'} onPress={() => setMode('documents')} />
-        <ModePill label="Cuenta" active={mode === 'account'} onPress={() => setMode('account')} />
       </View>
 
       <View style={localStyles.statusBanner}>
@@ -1125,7 +1063,6 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
       {mode === 'overview' ? renderOverview() : null}
       {mode === 'personal' ? renderPersonalMode() : null}
       {mode === 'documents' ? renderDocumentsMode() : null}
-      {mode === 'account' ? renderAccountMode() : null}
 
       {authError ? <Text style={styles.error}>{authError}</Text> : null}
       {authMessage ? <Text style={styles.info}>{authMessage}</Text> : null}
