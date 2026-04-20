@@ -1,6 +1,19 @@
-import MapView, { Marker } from 'react-native-maps';
 import { StyleSheet, Text, View } from 'react-native';
 import { VehicleLocationMapProps } from './VehicleLocationMap.types';
+
+type NativeMapsModule = {
+  default: React.ComponentType<any>;
+  Marker: React.ComponentType<any>;
+};
+
+function tryLoadNativeMaps(): NativeMapsModule | null {
+  try {
+    return require('react-native-maps') as NativeMapsModule;
+  } catch (error) {
+    console.warn('react-native-maps unavailable at runtime. Vehicle map fallback enabled.', error);
+    return null;
+  }
+}
 
 function isValidCoordinate(value: number): boolean {
   return Number.isFinite(value);
@@ -21,7 +34,19 @@ function resolveCenter(vehicleLocation: VehicleLocationMapProps['vehicleLocation
 }
 
 export function VehicleLocationMap({ vehicleLocation, userLocation, height = 260 }: VehicleLocationMapProps) {
+  const nativeMaps = tryLoadNativeMaps();
   const hasVehicleCoords = isValidCoordinate(vehicleLocation.latitude) && isValidCoordinate(vehicleLocation.longitude);
+
+  if (!nativeMaps) {
+    return (
+      <View style={[styles.fallback, { height }]}>
+        <Text style={styles.fallbackText}>Mapa no disponible temporalmente en esta build nativa.</Text>
+      </View>
+    );
+  }
+
+  const MapView = nativeMaps.default;
+  const Marker = nativeMaps.Marker;
 
   if (!hasVehicleCoords) {
     return (
