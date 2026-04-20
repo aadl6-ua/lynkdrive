@@ -1,13 +1,15 @@
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Platform, SafeAreaView, ScrollView, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Platform, SafeAreaView, ScrollView, useWindowDimensions } from 'react-native';
 import { TabBar } from './src/app/components/TabBar';
 import { styles } from './src/app/styles';
 import { AppTabKey } from './src/app/types';
+import { AuthScreen } from './src/features/auth/AuthScreen';
 import { ExploreScreen } from './src/features/explore/ExploreScreen';
 import { ProfileScreen } from './src/features/profile/ProfileScreen';
 import { TripsScreen } from './src/features/trips/TripsScreen';
 import { MyVehiclesScreen } from './src/features/vehicles/MyVehiclesScreen';
+import { spacingTokens } from './src/app/theme/tokens';
 import { useAuthStore } from './src/store/useAuthStore';
 import { useUserProfileStore } from './src/store/useUserProfileStore';
 
@@ -19,7 +21,7 @@ export default function App() {
   const exploreBottomPadding = !isDesktopLike ? 96 : 0;
 
   const { fetchMyProfile } = useUserProfileStore();
-  const { userId: authUserId, hydrateSession } = useAuthStore();
+  const { userId: authUserId, hasHydrated, loading: authLoading, hydrateSession } = useAuthStore();
 
   useEffect(() => {
     void hydrateSession();
@@ -32,6 +34,12 @@ export default function App() {
 
     void fetchMyProfile();
   }, [authUserId, fetchMyProfile]);
+
+  useEffect(() => {
+    if (!authUserId) {
+      setActiveTab('explore');
+    }
+  }, [authUserId]);
 
   const renderActiveScreen = () => {
     if (activeTab === 'explore') {
@@ -55,6 +63,32 @@ export default function App() {
     !isDesktopLike && Platform.OS === 'android' ? { paddingTop: 52 } : undefined,
     !isDesktopLike ? styles.contentWithBottomBar : undefined
   ];
+
+  if (!hasHydrated || (authLoading && !authUserId)) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="small" />
+      </SafeAreaView>
+    );
+  }
+
+  if (!authUserId) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScrollView
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingHorizontal: spacingTokens.lg,
+            paddingVertical: spacingTokens.lg
+          }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <AuthScreen />
+        </ScrollView>
+        <StatusBar style="auto" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>

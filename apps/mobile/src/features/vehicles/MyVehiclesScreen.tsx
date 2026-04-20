@@ -12,6 +12,7 @@ import {
   ScrollView,
   useWindowDimensions
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
 import { uploadImageToApi } from '../../api/uploads';
@@ -226,7 +227,7 @@ function SelectField({
           <Text style={selectedLabel ? localStyles.selectValueText : localStyles.selectPlaceholderText}>
             {selectedLabel ?? placeholder}
           </Text>
-          <Text style={localStyles.selectChevron}>{open ? '▲' : '▼'}</Text>
+          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={20} color="#6B7280" />
         </Pressable>
 
         {open ? (
@@ -296,6 +297,13 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
 
   const [availabilityStartInput, setAvailabilityStartInput] = useState('');
   const [availabilityEndInput, setAvailabilityEndInput] = useState('');
+  const initialAvailabilitySelection = useMemo(
+    () =>
+      availabilityStartInput.trim() && availabilityEndInput.trim()
+        ? buildAvailabilitySelectionFromIso(availabilityStartInput, availabilityEndInput)
+        : emptyAvailabilitySelection(),
+    [availabilityStartInput, availabilityEndInput]
+  );
 
   const resetCreateVehicleForm = () => {
     setVehicleBrandInput('');
@@ -639,16 +647,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
     await deleteVehicleImageById(imageId, editingVehicleId);
   };
 
-  const handleSelectAvailabilityWindowForEdit = (
-    windowId: string,
-    startDatetime: string,
-    endDatetime: string
-  ) => {
-    setEditingAvailabilityWindowId(windowId);
-    setAvailabilityStartInput(startDatetime);
-    setAvailabilityEndInput(endDatetime);
-  };
-
   const handleClearAvailabilityDraft = () => {
     setEditingAvailabilityWindowId(null);
     setAvailabilityStartInput('');
@@ -717,12 +715,13 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
         />
 
         <View style={[styles.card, desktopCardStyle]}>
-          <View style={localStyles.actionRow}>
+          <View style={[localStyles.imagesActionRow, { justifyContent: isDesktopWeb ? 'center' : 'flex-start' }]}>
             <ActionButton
               label={vehicleImageUploading ? 'Subiendo...' : 'Subir desde galeria'}
               onPress={() => void handlePickUploadAndCreateVehicleImage()}
               disabled={vehicleImagesSaving || vehicleImageUploading}
             />
+            <ActionButton label="Volver a edición" onPress={handleBack} variant="ghost" />
           </View>
         </View>
 
@@ -730,39 +729,38 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
         {vehicleImagesError ? <Text style={styles.error}>{vehicleImagesError}</Text> : null}
         {vehicleImagesMutationMessage ? <Text style={styles.info}>{vehicleImagesMutationMessage}</Text> : null}
 
-        {vehicleImages.map((image) => (
-          <View key={image.id} style={[styles.card, desktopCardStyle]}>
-            {resolveStoredImageUrl(image.imageUrl) ? (
-              <View style={localStyles.imageCardMediaWrap}>
-                <Image
-                  source={{ uri: resolveStoredImageUrl(image.imageUrl) ?? '' }}
-                  style={styles.vehicleImagePreview}
-                  resizeMode="cover"
-                />
-                <Pressable
-                  style={[localStyles.primaryStarButton, image.isPrimary ? localStyles.primaryStarButtonActive : undefined]}
-                  onPress={() => void handleSetPrimaryVehicleImage(image.id)}
-                  disabled={vehicleImagesSaving || image.isPrimary}
-                >
-                  <Text style={[localStyles.primaryStarText, image.isPrimary ? localStyles.primaryStarTextActive : undefined]}>★</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Text style={styles.subtitle}>No se puede previsualizar (bucket privado o URL invalida).</Text>
-            )}
-            <Text style={styles.linkHint}>{image.isPrimary ? 'Foto principal' : 'Toca la estrella para marcar como principal'}</Text>
-            <ActionButton
-              label="Eliminar imagen"
-              onPress={() => void handleDeleteVehicleImage(image.id)}
-              variant="danger"
-              disabled={vehicleImagesSaving}
-            />
-          </View>
-        ))}
-
-        <View style={localStyles.bottomNavRow}>
-          <ActionButton label="Volver a edición" onPress={handleBack} variant="ghost" />
+        <View style={[localStyles.imageGrid, isDesktopWeb ? localStyles.imageGridDesktop : undefined]}>
+          {vehicleImages.map((image) => (
+            <View key={image.id} style={[styles.card, localStyles.imageGridCard, isDesktopWeb ? localStyles.imageGridDesktopCard : undefined]}>
+              {resolveStoredImageUrl(image.imageUrl) ? (
+                <View style={localStyles.imageCardMediaWrap}>
+                  <Image
+                    source={{ uri: resolveStoredImageUrl(image.imageUrl) ?? '' }}
+                    style={styles.vehicleImagePreview}
+                    resizeMode="cover"
+                  />
+                  <Pressable
+                    style={[localStyles.primaryStarButton, image.isPrimary ? localStyles.primaryStarButtonActive : undefined]}
+                    onPress={() => void handleSetPrimaryVehicleImage(image.id)}
+                    disabled={vehicleImagesSaving || image.isPrimary}
+                  >
+                    <Text style={[localStyles.primaryStarText, image.isPrimary ? localStyles.primaryStarTextActive : undefined]}>★</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Text style={styles.subtitle}>No se puede previsualizar (bucket privado o URL invalida).</Text>
+              )}
+              <Text style={styles.linkHint}>{image.isPrimary ? 'Foto principal' : 'Toca la estrella para marcar como principal'}</Text>
+              <ActionButton
+                label="Eliminar imagen"
+                onPress={() => void handleDeleteVehicleImage(image.id)}
+                variant="danger"
+                disabled={vehicleImagesSaving}
+              />
+            </View>
+          ))}
         </View>
+
       </ScrollView>
     );
   }
@@ -780,11 +778,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
   }
 
   if (editingVehicle && editingVehicleId && screenMode === 'availability') {
-    const initialAvailabilitySelection =
-      availabilityStartInput.trim() && availabilityEndInput.trim()
-        ? buildAvailabilitySelectionFromIso(availabilityStartInput, availabilityEndInput)
-        : emptyAvailabilitySelection();
-
     return (
       <ScrollView
         style={localStyles.screenScroll}
@@ -813,6 +806,7 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
             }))}
             bookings={[]}
             initialDateRange={initialAvailabilitySelection}
+            mode="owner"
             onDateRangeChange={(startDate, startHour, endDate, endHour) => {
               setAvailabilityStartInput(buildIsoFromSelection(startDate, startHour));
               setAvailabilityEndInput(buildIsoFromSelection(endDate, endHour));
@@ -821,47 +815,51 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
 
           <View style={localStyles.actionRow}>
             <ActionButton
-              label={editingAvailabilityWindowId ? 'Actualizar ventana' : 'Crear ventana'}
+              label="Crear ventana"
               onPress={() => void handleSaveAvailabilityWindow()}
               disabled={availabilityWindowsSaving}
             />
-            <ActionButton
-              label={editingAvailabilityWindowId ? 'Cancelar edición' : 'Nuevo intervalo'}
-              onPress={handleClearAvailabilityDraft}
-              variant="ghost"
-              disabled={availabilityWindowsSaving}
-            />
           </View>
 
-          {availabilityStartInput ? <Text style={styles.linkHint}>Inicio: {formatDateTime(availabilityStartInput)}</Text> : null}
-          {availabilityEndInput ? <Text style={styles.linkHint}>Fin: {formatDateTime(availabilityEndInput)}</Text> : null}
+          {availabilityStartInput ? <Text style={[styles.linkHint, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>Inicio: {formatDateTime(availabilityStartInput)}</Text> : null}
+          {availabilityEndInput ? <Text style={[styles.linkHint, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>Fin: {formatDateTime(availabilityEndInput)}</Text> : null}
         </View>
 
         {availabilityWindowsLoading || availabilityWindowsSaving ? <ActivityIndicator size="small" /> : null}
-        {availabilityWindowsError ? <Text style={styles.error}>{availabilityWindowsError}</Text> : null}
-        {availabilityWindowsMutationMessage ? <Text style={styles.info}>{availabilityWindowsMutationMessage}</Text> : null}
+        {availabilityWindowsError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{availabilityWindowsError}</Text> : null}
+        {availabilityWindowsMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{availabilityWindowsMutationMessage}</Text> : null}
 
-        {availabilityWindows.map((window) => (
-          <View key={window.id} style={[styles.card, desktopCardStyle]}>
-            <Text style={styles.row}><Text style={styles.label}>Inicio:</Text> {new Date(window.startDatetime).toLocaleString('es-ES')}</Text>
-            <Text style={styles.row}><Text style={styles.label}>Fin:</Text> {new Date(window.endDatetime).toLocaleString('es-ES')}</Text>
-            <View style={localStyles.actionRow}>
-              <ActionButton
-                label="Editar"
-                onPress={() => handleSelectAvailabilityWindowForEdit(window.id, window.startDatetime, window.endDatetime)}
-                disabled={availabilityWindowsSaving}
-              />
-              <ActionButton
-                label="Eliminar"
-                variant="danger"
-                onPress={() => void handleDeleteAvailabilityWindow(window.id)}
-                disabled={availabilityWindowsSaving}
-              />
+        {(() => {
+          const now = new Date();
+          const futureWindows = availabilityWindows.filter(window => new Date(window.endDatetime) > now);
+          return futureWindows.length > 0 ? (
+            <View style={{ marginTop: spacingTokens.md }}>
+              <Text style={[localStyles.fieldLabel, { marginBottom: spacingTokens.md, textAlign: isDesktopWeb ? 'center' : 'left' }]}>Próximas ventanas ({futureWindows.length})</Text>
+              {futureWindows.map((window) => {
+                const startDate = new Date(window.startDatetime);
+                const endDate = new Date(window.endDatetime);
+                return (
+                  <View key={window.id} style={[styles.card, desktopCardStyle, { marginBottom: spacingTokens.sm }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacingTokens.md }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.row, { marginBottom: spacingTokens.sm, textAlign: 'left' }]}><Text style={styles.label}>Desde:</Text> {startDate.toLocaleDateString('es-ES')} {startDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</Text>
+                        <Text style={[styles.row, { textAlign: 'left' }]}><Text style={styles.label}>Hasta:</Text> {endDate.toLocaleDateString('es-ES')} {endDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</Text>
+                      </View>
+                      <ActionButton
+                        label="Eliminar"
+                        variant="danger"
+                        onPress={() => void handleDeleteAvailabilityWindow(window.id)}
+                        disabled={availabilityWindowsSaving}
+                      />
+                    </View>
+                  </View>
+                );
+              })}
             </View>
-          </View>
-        ))}
+          ) : null;
+        })()} 
 
-        <View style={localStyles.bottomNavRow}>
+        <View style={[localStyles.actionRow, { marginTop: spacingTokens.lg, justifyContent: isDesktopWeb ? 'center' : 'flex-start' }]}>
           <ActionButton label="Volver a edición" onPress={handleBack} variant="ghost" />
         </View>
       </ScrollView>
@@ -882,115 +880,115 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <SectionHeader
-          title="Editar vehiculo"
-          subtitle="Ajusta datos, fotos y disponibilidad desde un panel unico."
-          centered={isDesktopWeb}
-        />
+          <SectionHeader
+            title="Editar vehiculo"
+            subtitle="Ajusta datos, fotos y disponibilidad desde un panel unico."
+            centered={isDesktopWeb}
+          />
 
-        <View style={[styles.card, desktopCardStyle]}>
-          <View style={localStyles.vehicleSummaryCard}>
-            {resolveStoredImageUrl(imageByVehicleId[editingVehicle.id] ?? null) ? (
-              <Image
-                source={{ uri: resolveStoredImageUrl(imageByVehicleId[editingVehicle.id] ?? null) ?? '' }}
-                style={localStyles.vehicleSummaryImage}
-                resizeMode="cover"
+          <View style={[styles.card, desktopCardStyle]}>
+            <View style={localStyles.vehicleSummaryCard}>
+              {resolveStoredImageUrl(imageByVehicleId[editingVehicle.id] ?? null) ? (
+                <Image
+                  source={{ uri: resolveStoredImageUrl(imageByVehicleId[editingVehicle.id] ?? null) ?? '' }}
+                  style={localStyles.vehicleSummaryImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={localStyles.vehicleSummaryImagePlaceholder}>
+                  <Text style={localStyles.vehicleSummaryImagePlaceholderText}>Sin foto principal</Text>
+                </View>
+              )}
+
+              <View style={localStyles.vehicleSummaryContent}>
+                <Text style={localStyles.vehicleSummaryTitle}>{editingVehicle.brand} {editingVehicle.model}</Text>
+                <Text style={styles.linkHint}>{editingVehicle.locationAddress}</Text>
+                <View style={localStyles.summaryMetaRow}>
+                  <Text style={localStyles.summaryMetaText}>{editingVehicle.year}</Text>
+                  <Text style={localStyles.summaryMetaText}>{formatCurrencyEUR(editingVehicle.pricePerDay)}</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={localStyles.formGrid}>
+              <Field label="Marca" value={editVehicleBrandInput} onChangeText={setEditVehicleBrandInput} placeholder="Marca" />
+              <Field label="Modelo" value={editVehicleModelInput} onChangeText={setEditVehicleModelInput} placeholder="Modelo" />
+              <View style={localStyles.formGridRow}>
+                <Field label="Año" value={editVehicleYearInput} onChangeText={setEditVehicleYearInput} placeholder="Año" keyboardType="number-pad" />
+                <Field label="Precio por dia" value={editVehiclePricePerDayInput} onChangeText={setEditVehiclePricePerDayInput} placeholder="Precio" keyboardType="decimal-pad" />
+              </View>
+              <View style={localStyles.readOnlyFieldWrap}>
+                <Text style={localStyles.fieldLabel}>Matricula</Text>
+                <View style={localStyles.readOnlyFieldValueWrap}>
+                  <Text style={localStyles.readOnlyFieldValueText}>{editVehicleLicensePlateInput}</Text>
+                </View>
+              </View>
+              <Field label="Descripcion" value={editVehicleDescriptionInput} onChangeText={setEditVehicleDescriptionInput} placeholder="Descripcion" multiline />
+              <SelectField
+                label="Combustible"
+                value={editVehicleFuelTypeInput}
+                onChange={setEditVehicleFuelTypeInput}
+                placeholder="Selecciona combustible"
+                options={FUEL_TYPE_OPTIONS}
               />
-            ) : (
-              <View style={localStyles.vehicleSummaryImagePlaceholder}>
-                <Text style={localStyles.vehicleSummaryImagePlaceholderText}>Sin foto principal</Text>
+              <SelectField
+                label="Transmision"
+                value={editVehicleTransmissionInput}
+                onChange={setEditVehicleTransmissionInput}
+                placeholder="Selecciona transmision"
+                options={TRANSMISSION_OPTIONS}
+              />
+              <SelectField
+                label="Plazas"
+                value={editVehicleSeatsInput}
+                onChange={setEditVehicleSeatsInput}
+                placeholder="Selecciona plazas"
+                options={SEATS_OPTIONS}
+              />
+              <Field label="Direccion" value={editVehicleAddressInput} onChangeText={handleEditVehicleAddressChange} placeholder="Escribe una direccion" />
+            </View>
+
+            {editVehicleAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
+            {editVehicleAddressError ? <Text style={styles.error}>{editVehicleAddressError}</Text> : null}
+            {editVehicleAddressSuggestions.length > 0 && !editVehicleSelectedLocation ? (
+              <View style={localStyles.suggestionsList}>
+                {editVehicleAddressSuggestions.map((suggestion) => (
+                  <Pressable
+                    key={suggestion.id}
+                    style={localStyles.suggestionItem}
+                    onPress={() => handleSelectEditVehicleAddress(suggestion.label, suggestion.lat, suggestion.lng)}
+                  >
+                    <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
+                  </Pressable>
+                ))}
               </View>
-            )}
+            ) : null}
+            {editVehicleSelectedLocation ? (
+              <Text style={styles.linkHint}>
+                Ubicacion seleccionada: {editVehicleSelectedLocation.lat.toFixed(5)}, {editVehicleSelectedLocation.lng.toFixed(5)}
+              </Text>
+            ) : null}
+            {editVehicleFormError ? <Text style={styles.error}>{editVehicleFormError}</Text> : null}
 
-            <View style={localStyles.vehicleSummaryContent}>
-              <Text style={localStyles.vehicleSummaryTitle}>{editingVehicle.brand} {editingVehicle.model}</Text>
-              <Text style={styles.linkHint}>{editingVehicle.locationAddress}</Text>
-              <View style={localStyles.summaryMetaRow}>
-                <Text style={localStyles.summaryMetaText}>{editingVehicle.year}</Text>
-                <Text style={localStyles.summaryMetaText}>{formatCurrencyEUR(editingVehicle.pricePerDay)}</Text>
-              </View>
+            <View style={localStyles.actionRow}>
+              <ActionButton label="Guardar cambios" onPress={() => void handleUpdateVehicle()} disabled={vehiclesCreating} />
+              <ActionButton label="Eliminar" variant="danger" onPress={() => void handleDeleteVehicle()} disabled={vehiclesCreating} />
+            </View>
+
+            <View style={localStyles.actionRow}>
+              <ActionButton label="Imagenes" onPress={() => void handleOpenVehicleImagesScreen()} disabled={vehiclesCreating} variant="ghost" />
+              <ActionButton label="Disponibilidad" onPress={() => void handleOpenAvailabilityScreen()} disabled={vehiclesCreating} variant="ghost" />
             </View>
           </View>
 
-          <View style={localStyles.formGrid}>
-            <Field label="Marca" value={editVehicleBrandInput} onChangeText={setEditVehicleBrandInput} placeholder="Marca" />
-            <Field label="Modelo" value={editVehicleModelInput} onChangeText={setEditVehicleModelInput} placeholder="Modelo" />
-            <View style={localStyles.formGridRow}>
-              <Field label="Año" value={editVehicleYearInput} onChangeText={setEditVehicleYearInput} placeholder="Año" keyboardType="number-pad" />
-              <Field label="Precio por dia" value={editVehiclePricePerDayInput} onChangeText={setEditVehiclePricePerDayInput} placeholder="Precio" keyboardType="decimal-pad" />
-            </View>
-            <View style={localStyles.readOnlyFieldWrap}>
-              <Text style={localStyles.fieldLabel}>Matricula</Text>
-              <View style={localStyles.readOnlyFieldValueWrap}>
-                <Text style={localStyles.readOnlyFieldValueText}>{editVehicleLicensePlateInput}</Text>
-              </View>
-            </View>
-            <Field label="Descripcion" value={editVehicleDescriptionInput} onChangeText={setEditVehicleDescriptionInput} placeholder="Descripcion" multiline />
-            <SelectField
-              label="Combustible"
-              value={editVehicleFuelTypeInput}
-              onChange={setEditVehicleFuelTypeInput}
-              placeholder="Selecciona combustible"
-              options={FUEL_TYPE_OPTIONS}
-            />
-            <SelectField
-              label="Transmision"
-              value={editVehicleTransmissionInput}
-              onChange={setEditVehicleTransmissionInput}
-              placeholder="Selecciona transmision"
-              options={TRANSMISSION_OPTIONS}
-            />
-            <SelectField
-              label="Plazas"
-              value={editVehicleSeatsInput}
-              onChange={setEditVehicleSeatsInput}
-              placeholder="Selecciona plazas"
-              options={SEATS_OPTIONS}
-            />
-            <Field label="Direccion" value={editVehicleAddressInput} onChangeText={handleEditVehicleAddressChange} placeholder="Escribe una direccion" />
-          </View>
-
-          {editVehicleAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
-          {editVehicleAddressError ? <Text style={styles.error}>{editVehicleAddressError}</Text> : null}
-          {editVehicleAddressSuggestions.length > 0 && !editVehicleSelectedLocation ? (
-            <View style={localStyles.suggestionsList}>
-              {editVehicleAddressSuggestions.map((suggestion) => (
-                <Pressable
-                  key={suggestion.id}
-                  style={localStyles.suggestionItem}
-                  onPress={() => handleSelectEditVehicleAddress(suggestion.label, suggestion.lat, suggestion.lng)}
-                >
-                  <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-          {editVehicleSelectedLocation ? (
-            <Text style={styles.linkHint}>
-              Ubicacion seleccionada: {editVehicleSelectedLocation.lat.toFixed(5)}, {editVehicleSelectedLocation.lng.toFixed(5)}
-            </Text>
-          ) : null}
-          {editVehicleFormError ? <Text style={styles.error}>{editVehicleFormError}</Text> : null}
-
-          <View style={localStyles.actionRow}>
-            <ActionButton label="Guardar cambios" onPress={() => void handleUpdateVehicle()} disabled={vehiclesCreating} />
-            <ActionButton label="Eliminar" variant="danger" onPress={() => void handleDeleteVehicle()} disabled={vehiclesCreating} />
-          </View>
-
-          <View style={localStyles.actionRow}>
-            <ActionButton label="Imagenes" onPress={() => void handleOpenVehicleImagesScreen()} disabled={vehiclesCreating} variant="ghost" />
-            <ActionButton label="Disponibilidad" onPress={() => void handleOpenAvailabilityScreen()} disabled={vehiclesCreating} variant="ghost" />
-          </View>
-
-          <View style={localStyles.bottomNavRow}>
+          <View style={[localStyles.actionRow, { marginTop: spacingTokens.lg, justifyContent: isDesktopWeb ? 'center' : 'flex-start' }]}>
             <ActionButton label="Volver a lista" onPress={handleBack} variant="ghost" />
           </View>
-        </View>
 
-        {vehiclesCreating ? <ActivityIndicator size="small" /> : null}
-        {vehiclesMutationMessage ? <Text style={styles.info}>{vehiclesMutationMessage}</Text> : null}
-        {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
-      </ScrollView>
+          {vehiclesCreating ? <ActivityIndicator size="small" /> : null}
+          {vehiclesMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesMutationMessage}</Text> : null}
+          {vehiclesError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesError}</Text> : null}
+        </ScrollView>
     );
   }
 
@@ -1080,7 +1078,7 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
   }
 
   return (
-    <View style={localStyles.screenRoot}>
+    <View style={localStyles.screenScroll}>
       <ScrollView
         style={localStyles.screenScroll}
         contentContainerStyle={[
@@ -1100,8 +1098,8 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
         />
 
         {vehiclesLoading || vehiclesCreating ? <ActivityIndicator size="small" /> : null}
-        {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
-        {vehiclesMutationMessage ? <Text style={styles.info}>{vehiclesMutationMessage}</Text> : null}
+        {vehiclesError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesError}</Text> : null}
+        {vehiclesMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesMutationMessage}</Text> : null}
 
         <View style={[localStyles.vehicleGrid, isDesktopWeb ? localStyles.vehicleGridDesktop : undefined]}>
           {myVehicles.map((vehicle) => {
@@ -1163,10 +1161,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
 }
 
 const localStyles = StyleSheet.create({
-  screenRoot: {
-    flex: 1,
-    position: 'relative'
-  },
   screenScroll: {
     flex: 1
   },
@@ -1194,15 +1188,43 @@ const localStyles = StyleSheet.create({
     minWidth: 250,
     maxWidth: 320
   },
+  imageGrid: {
+    width: '100%',
+    gap: spacingTokens.md
+  },
+  imageGridDesktop: {
+    maxWidth: 1100,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center'
+  },
+  imageGridCard: {
+    gap: spacingTokens.sm
+  },
+  imageGridDesktopCard: {
+    width: '31%',
+    minWidth: 250,
+    maxWidth: 320
+  },
   actionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacingTokens.sm
   },
-  bottomNavRow: {
-    marginTop: spacingTokens.md,
+  imagesActionRow: {
     flexDirection: 'row',
-    justifyContent: 'center'
+    flexWrap: 'nowrap',
+    alignSelf: 'center',
+    justifyContent: 'center',
+    width: 'auto',
+    gap: spacingTokens.sm
+  },
+  centeredActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: spacingTokens.sm
   },
   actionButton: {
     minHeight: 48,
@@ -1296,8 +1318,10 @@ const localStyles = StyleSheet.create({
   },
   selectChevron: {
     color: colorTokens.textMuted,
-    ...typographyTokens.caption,
-    fontWeight: '700'
+    fontSize: 12,
+    fontWeight: '700',
+    minWidth: 16,
+    textAlign: 'center'
   },
   selectOptions: {
     marginTop: spacingTokens.xs,
