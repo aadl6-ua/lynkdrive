@@ -1,8 +1,21 @@
 import { useMemo, useRef, useState } from 'react';
 import { View, Text, Image, Pressable, StyleSheet, Platform } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
 import { colorTokens } from '../../../app/theme/tokens';
 import { ExploreVehiclesMapProps } from './ExploreVehiclesMap.types';
+
+type NativeMapsModule = {
+  default: React.ComponentType<any>;
+  Marker: React.ComponentType<any>;
+};
+
+function tryLoadNativeMaps(): NativeMapsModule | null {
+  try {
+    return require('react-native-maps') as NativeMapsModule;
+  } catch (error) {
+    console.warn('react-native-maps unavailable at runtime. Explore map fallback enabled.', error);
+    return null;
+  }
+}
 
 export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
   vehicles,
@@ -11,6 +24,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
   height = 400,
   infoBottomInset = 0,
 }) => {
+  const nativeMaps = useMemo(() => tryLoadNativeMaps(), []);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const lastMarkerPressAtRef = useRef<number>(0);
   const selectedVehicle = useMemo(
@@ -19,6 +33,17 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
   );
 
   const centerLocation = userLocation || (vehicles.length > 0 ? vehicles[0].location : null);
+
+  if (!nativeMaps) {
+    return (
+      <View style={{ height, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 }}>
+        <Text style={{ textAlign: 'center' }}>Mapa no disponible temporalmente en esta build nativa.</Text>
+      </View>
+    );
+  }
+
+  const MapView = nativeMaps.default;
+  const Marker = nativeMaps.Marker;
 
   if (!centerLocation) {
     return (

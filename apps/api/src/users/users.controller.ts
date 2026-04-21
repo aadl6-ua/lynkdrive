@@ -37,6 +37,11 @@ export class UsersController {
     return this.usersService.findById(id);
   }
 
+  @Get(':id/overview')
+  async findOverview(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.usersService.findOverview(id);
+  }
+
   @Post()
   async create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto);

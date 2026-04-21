@@ -158,7 +158,7 @@ function getDisplayName(firstName?: string | null, lastName?: string | null): st
   return fullName || 'Usuario';
 }
 
-type ActionButtonVariant = 'primary' | 'ghost' | 'danger';
+type ActionButtonVariant = 'primary' | 'ghost' | 'danger' | 'accent';
 
 type ActionButtonProps = {
   label: string;
@@ -173,6 +173,8 @@ function ActionButton({ label, onPress, disabled = false, variant = 'primary' }:
       ? localStyles.actionButtonGhost
       : variant === 'danger'
         ? localStyles.actionButtonDanger
+        : variant === 'accent'
+          ? localStyles.actionButtonAccent
         : localStyles.actionButtonPrimary;
 
   const textVariantStyle =
@@ -180,6 +182,8 @@ function ActionButton({ label, onPress, disabled = false, variant = 'primary' }:
       ? localStyles.actionButtonGhostText
       : variant === 'danger'
         ? localStyles.actionButtonDangerText
+        : variant === 'accent'
+          ? localStyles.actionButtonAccentText
         : localStyles.actionButtonPrimaryText;
 
   return (
@@ -371,22 +375,6 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
 
   const hasProfileMinimum = hasMinimumProfileData(profile);
   const isReadyForTransactions = hasProfileMinimum && Boolean(profile?.isVerified);
-
-  const fullName = `${firstNameInput} ${lastNameInput}`.trim() || 'Completa tu perfil';
-
-  const heroChips = useMemo(() => {
-    const chips: Array<{ label: string; tone: StatusChipTone }> = [];
-
-    if (profile?.isVerified) {
-      chips.push({ label: 'Cuenta verificada', tone: 'success' });
-    }
-
-    if (profile?.idDocumentUrl && profile?.driverLicenseUrl) {
-      chips.push({ label: 'Documentos subidos', tone: 'neutral' });
-    }
-
-    return chips;
-  }, [profile?.driverLicenseUrl, profile?.idDocumentUrl, profile?.isVerified]);
 
   const tripReviewByBookingId = useMemo(() => {
     return receivedReviews.reduce<Record<string, ReviewItem>>((acc, review) => {
@@ -649,9 +637,6 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
   };
 
   const renderOverview = () => {
-    const firstInitial = (firstNameInput[0] ?? '?').toUpperCase();
-    const lastInitial = (lastNameInput[0] ?? '').toUpperCase();
-
     return (
       <>
         <SectionHeader
@@ -660,45 +645,15 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
           centered={isDesktopWeb}
         />
 
-        <View style={localStyles.heroCard}>
-          <View style={localStyles.heroContent}>
-            <View style={localStyles.heroTopRow}>
-              <Pressable
-                onPress={() => void handleUploadUserImage('avatar')}
-                disabled={!authUserId || profileUploadingField !== null}
-                style={localStyles.heroAvatarPressable}
-              >
-                {resolvedProfileAvatarUrl ? (
-                  <Image source={{ uri: resolvedProfileAvatarUrl }} style={localStyles.heroAvatar} resizeMode="cover" />
-                ) : (
-                  <View style={localStyles.heroAvatarFallback}>
-                    <Text style={localStyles.heroInitials}>{firstInitial}{lastInitial}</Text>
-                  </View>
-                )}
-              </Pressable>
-
-              <View style={localStyles.heroIdentityBlock}>
-                <Text style={localStyles.heroName}>{fullName}</Text>
-                <Text style={localStyles.heroMail}>{authEmail ?? 'Sin sesion iniciada'}</Text>
-                {heroChips.length > 0 ? (
-                  <View style={localStyles.heroChipRow}>
-                    {heroChips.map((chip) => (
-                      <StatusChip key={chip.label} label={chip.label} tone={chip.tone} compact />
-                    ))}
-                  </View>
-                ) : null}
-              </View>
-            </View>
-
-            <View style={localStyles.inlineActions}>
-              <ActionButton label="Editar perfil" onPress={() => setMode('personal')} disabled={!authUserId} />
-              <ActionButton
-                label="Cerrar sesion"
-                onPress={() => void signOut()}
-                disabled={authLoading || !authUserId}
-                variant="danger"
-              />
-            </View>
+        <View style={styles.card}>
+          <View style={localStyles.inlineActions}>
+            <ActionButton label="Editar perfil" onPress={() => setMode('personal')} disabled={!authUserId} variant="accent" />
+            <ActionButton
+              label="Cerrar sesion"
+              onPress={() => void signOut()}
+              disabled={authLoading || !authUserId}
+              variant="danger"
+            />
           </View>
         </View>
 
@@ -783,15 +738,29 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
         </View>
 
         <View style={styles.card}>
-          <View style={localStyles.sectionWithActionRow}>
-            <Text style={localStyles.sectionTitle}>Ultimos viajes como conductor</Text>
-            <ActionButton
-              label="Ver todos"
-              onPress={() => onNavigateToTab?.('trips')}
-              variant="ghost"
-              disabled={!onNavigateToTab}
-            />
-          </View>
+          {isDesktopWeb ? (
+            <View style={localStyles.sectionWithActionRow}>
+              <Text style={localStyles.sectionTitle}>Ultimos viajes como conductor</Text>
+              <ActionButton
+                label="Ver todos"
+                onPress={() => onNavigateToTab?.('trips')}
+                variant="ghost"
+                disabled={!onNavigateToTab}
+              />
+            </View>
+          ) : (
+            <>
+              <Text style={localStyles.sectionTitle}>Ultimos viajes como conductor</Text>
+              <View style={localStyles.mobileSectionActionWrap}>
+                <ActionButton
+                  label="Ver todos"
+                  onPress={() => onNavigateToTab?.('trips')}
+                  variant="ghost"
+                  disabled={!onNavigateToTab}
+                />
+              </View>
+            </>
+          )}
 
           {tripsLoading ? (
             <SectionPlaceholder height={140} />
@@ -1244,6 +1213,10 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     gap: spacingTokens.sm
   },
+  mobileSectionActionWrap: {
+    marginTop: spacingTokens.sm,
+    alignSelf: 'flex-start'
+  },
   dataRow: {
     paddingVertical: spacingTokens.xs,
     borderBottomWidth: 1,
@@ -1631,6 +1604,14 @@ const localStyles = StyleSheet.create({
     borderColor: '#0F172A'
   },
   actionButtonPrimaryText: {
+    color: colorTokens.white,
+    fontWeight: '700'
+  },
+  actionButtonAccent: {
+    backgroundColor: '#f97316',
+    borderColor: '#f97316'
+  },
+  actionButtonAccentText: {
     color: colorTokens.white,
     fontWeight: '700'
   },

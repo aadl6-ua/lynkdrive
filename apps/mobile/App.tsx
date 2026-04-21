@@ -47,7 +47,7 @@ export default function App() {
     }
 
     if (activeTab === 'trips') {
-      return <TripsScreen />;
+      return <TripsScreen onNavigateToTab={setActiveTab} />;
     }
 
     if (activeTab === 'myVehicles') {
