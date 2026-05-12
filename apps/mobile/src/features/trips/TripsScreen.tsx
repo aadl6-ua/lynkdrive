@@ -20,6 +20,7 @@ import { SectionHeader } from '../../app/components/ui/SectionHeader';
 import { styles } from '../../app/styles';
 import { colorTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 import { AppTabKey } from '../../app/types';
+import { UserOverviewModal } from '../../shared/components/UserOverviewModal';
 import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
@@ -360,6 +361,7 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
   const [reviewSaving, setReviewSaving] = useState(false);
   const [reviewRatingInput, setReviewRatingInput] = useState(5);
   const [reviewCommentInput, setReviewCommentInput] = useState('');
+  const [overviewUser, setOverviewUser] = useState<{ id: string; displayName: string; avatarUrl: string | null } | null>(null);
 
   useEffect(() => {
     if (!mutationMessage) {
@@ -879,6 +881,18 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
     }
   };
 
+  const handleOpenUserOverview = (userId: string, profileData?: UserMiniProfile) => {
+    if (authUserId && userId === authUserId) {
+      return;
+    }
+
+    setOverviewUser({
+      id: userId,
+      displayName: getUserDisplayName(profileData),
+      avatarUrl: profileData?.avatarUrl ?? null
+    });
+  };
+
   if (!authUserId) {
     return (
       <View style={styles.sectionCard}>
@@ -975,21 +989,26 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
 
           {checklistImagesLoading ? <ActivityIndicator size="small" /> : null}
 
-          {pendingImagesForType.map((image, index) => {
-            return (
-              <View key={`${image.fileName}-${index}`} style={localStyles.imageEvidenceCard}>
-                <Image source={{ uri: image.previewUri }} style={localStyles.imageEvidence} resizeMode="cover" />
-                <View style={styles.actionsRow}>
-                  <ActionButton
-                    label="Quitar del borrador"
-                    onPress={() => handleRemovePendingChecklistImage(editingChecklistType, index)}
-                    variant="danger"
-                    disabled={!!currentChecklist}
-                  />
+          <View style={[localStyles.imageEvidenceGrid, isDesktopWeb ? localStyles.imageEvidenceGridDesktop : undefined]}>
+            {pendingImagesForType.map((image, index) => {
+              return (
+                <View
+                  key={`${image.fileName}-${index}`}
+                  style={[localStyles.imageEvidenceCard, isDesktopWeb ? localStyles.imageEvidenceCardDesktop : undefined]}
+                >
+                  <Image source={{ uri: image.previewUri }} style={localStyles.imageEvidence} resizeMode="cover" />
+                  <View style={styles.actionsRow}>
+                    <ActionButton
+                      label="Quitar del borrador"
+                      onPress={() => handleRemovePendingChecklistImage(editingChecklistType, index)}
+                      variant="danger"
+                      disabled={!!currentChecklist}
+                    />
+                  </View>
                 </View>
-              </View>
-            );
-          })}
+              );
+            })}
+          </View>
 
           {!checklistImagesLoading && pendingImagesForType.length === 0 ? (
             <Text style={styles.linkHint}>Todavia no hay evidencias en el borrador.</Text>
@@ -1141,7 +1160,7 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
           <Text style={styles.linkHint}>Creada el {formatDateTime(selectedBooking.createdAt)}</Text>
 
           <View style={localStyles.peopleSection}>
-            <View style={localStyles.personRow}>
+            <Pressable style={localStyles.personRow} onPress={() => handleOpenUserOverview(selectedBooking.ownerId, ownerProfile)}>
               {ownerAvatarUrl ? (
                 <Image source={{ uri: ownerAvatarUrl }} style={localStyles.personAvatar} resizeMode="cover" />
               ) : (
@@ -1153,9 +1172,9 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
                 <Text style={localStyles.personRoleLabel}>Propietario</Text>
                 <Text style={localStyles.personName}>{getUserDisplayName(ownerProfile)}</Text>
               </View>
-            </View>
+            </Pressable>
 
-            <View style={localStyles.personRow}>
+            <Pressable style={localStyles.personRow} onPress={() => handleOpenUserOverview(selectedBooking.driverId, driverProfile)}>
               {driverAvatarUrl ? (
                 <Image source={{ uri: driverAvatarUrl }} style={localStyles.personAvatar} resizeMode="cover" />
               ) : (
@@ -1167,7 +1186,7 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
                 <Text style={localStyles.personRoleLabel}>Conductor</Text>
                 <Text style={localStyles.personName}>{getUserDisplayName(driverProfile)}</Text>
               </View>
-            </View>
+            </Pressable>
           </View>
         </View>
 
@@ -1304,6 +1323,14 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
             <Text style={[styles.info, localStyles.feedbackBannerText]}>{mutationMessage}</Text>
           </View>
         ) : null}
+
+        <UserOverviewModal
+          visible={!!overviewUser}
+          userId={overviewUser?.id ?? null}
+          displayName={overviewUser?.displayName ?? 'Usuario'}
+          avatarUrl={overviewUser?.avatarUrl ?? null}
+          onClose={() => setOverviewUser(null)}
+        />
       </View>
     );
   }
@@ -1396,6 +1423,14 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
           />
         </View>
       ) : null}
+
+      <UserOverviewModal
+        visible={!!overviewUser}
+        userId={overviewUser?.id ?? null}
+        displayName={overviewUser?.displayName ?? 'Usuario'}
+        avatarUrl={overviewUser?.avatarUrl ?? null}
+        onClose={() => setOverviewUser(null)}
+      />
     </View>
   );
 }
@@ -1504,6 +1539,18 @@ const localStyles = StyleSheet.create({
     gap: spacingTokens.sm,
     marginTop: spacingTokens.sm,
     backgroundColor: colorTokens.white
+  },
+  imageEvidenceGrid: {
+    width: '100%',
+    gap: spacingTokens.sm
+  },
+  imageEvidenceGridDesktop: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between'
+  },
+  imageEvidenceCardDesktop: {
+    width: '49%'
   },
   imageEvidence: {
     width: '100%',

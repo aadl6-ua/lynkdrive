@@ -28,6 +28,7 @@ import { useGeocodingSuggestions } from '../../shared/useGeocodingSuggestions';
 import { useUserLocation } from '../../shared/useUserLocation';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
 import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
+import { UserOverviewModal } from '../../shared/components/UserOverviewModal';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
 import { useVehicleAvailabilityWindowsStore } from '../../store/useVehicleAvailabilityWindowsStore';
@@ -322,6 +323,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [bookingMessage, setBookingMessage] = useState<string | null>(null);
   const [hasShownLocationPrompt, setHasShownLocationPrompt] = useState(false);
+  const [overviewUser, setOverviewUser] = useState<{ id: string; displayName: string; avatarUrl: string | null } | null>(null);
 
   const [vehicleBookings, setVehicleBookings] = useState<VehicleBookingItem[]>([]);
   const [vehicleBookingsLoading, setVehicleBookingsLoading] = useState(false);
@@ -882,6 +884,14 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
     }
   };
 
+  const handleOpenUserOverview = (userId: string, displayName: string, avatarUrl: string | null) => {
+    if (authUserId && userId === authUserId) {
+      return;
+    }
+
+    setOverviewUser({ id: userId, displayName, avatarUrl });
+  };
+
   if (screenMode === 'detail' && selectedVehicle) {
     const selectedOwner = ownerById[selectedVehicle.ownerId];
     const selectedOwnerAvatarUrl = resolveStoredImageUrl(selectedOwner?.avatarUrl ?? null);
@@ -912,7 +922,16 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
         ) : null}
 
         <View style={[styles.card, desktopCardStyle]}>
-          <View style={localStyles.ownerCard}>
+          <Pressable
+            style={localStyles.ownerCard}
+            onPress={() =>
+              handleOpenUserOverview(
+                selectedVehicle.ownerId,
+                getUserFullName(selectedOwner),
+                selectedOwner?.avatarUrl ?? null
+              )
+            }
+          >
             {selectedOwnerAvatarUrl ? (
               <Image source={{ uri: selectedOwnerAvatarUrl }} style={localStyles.ownerAvatar} resizeMode="cover" />
             ) : (
@@ -924,7 +943,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
               <Text style={localStyles.ownerLabel}>Propietario</Text>
               <Text style={localStyles.ownerName}>{getUserFullName(selectedOwner)}</Text>
             </View>
-          </View>
+          </Pressable>
 
           {vehicleImagesLoading || availabilityWindowsLoading ? <ActivityIndicator size="small" /> : null}
           {vehicleImagesError ? <Text style={styles.error}>{vehicleImagesError}</Text> : null}
@@ -1060,6 +1079,14 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
             </View>
           </View>
         </Modal>
+
+        <UserOverviewModal
+          visible={!!overviewUser}
+          userId={overviewUser?.id ?? null}
+          displayName={overviewUser?.displayName ?? 'Usuario'}
+          avatarUrl={overviewUser?.avatarUrl ?? null}
+          onClose={() => setOverviewUser(null)}
+        />
       </ScrollView>
     );
   }
@@ -1189,14 +1216,22 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
                 </View>
 
                 <View style={localStyles.ownerInlineRow}>
-                  {ownerAvatarUrl ? (
-                    <Image source={{ uri: ownerAvatarUrl }} style={localStyles.ownerAvatarInline} resizeMode="cover" />
-                  ) : (
-                    <View style={localStyles.ownerAvatarInlineFallback}>
-                      <Text style={localStyles.ownerAvatarInlineFallbackText}>{getInitials(owner)}</Text>
-                    </View>
-                  )}
-                  <Text style={localStyles.ownerInlineName}>{getUserFullName(owner)}</Text>
+                  <Pressable
+                    style={localStyles.ownerInlineTap}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      handleOpenUserOverview(vehicle.ownerId, getUserFullName(owner), owner?.avatarUrl ?? null);
+                    }}
+                  >
+                    {ownerAvatarUrl ? (
+                      <Image source={{ uri: ownerAvatarUrl }} style={localStyles.ownerAvatarInline} resizeMode="cover" />
+                    ) : (
+                      <View style={localStyles.ownerAvatarInlineFallback}>
+                        <Text style={localStyles.ownerAvatarInlineFallbackText}>{getInitials(owner)}</Text>
+                      </View>
+                    )}
+                    <Text style={localStyles.ownerInlineName}>{getUserFullName(owner)}</Text>
+                  </Pressable>
                 </View>
 
                 <Text style={styles.linkHint}>Toca para ver ficha completa, galeria y disponibilidad.</Text>
@@ -1208,6 +1243,14 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
       {!vehiclesLoading && !vehiclesError && exploreVehicles.length === 0 ? (
         <EmptyState title="Sin resultados" description="No hay vehiculos disponibles con estos filtros." />
       ) : null}
+
+      <UserOverviewModal
+        visible={!!overviewUser}
+        userId={overviewUser?.id ?? null}
+        displayName={overviewUser?.displayName ?? 'Usuario'}
+        avatarUrl={overviewUser?.avatarUrl ?? null}
+        onClose={() => setOverviewUser(null)}
+      />
     </ScrollView>
   );
 }
@@ -1616,6 +1659,11 @@ const localStyles = StyleSheet.create({
     gap: spacingTokens.xs
   },
   ownerInlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.sm
+  },
+  ownerInlineTap: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacingTokens.sm

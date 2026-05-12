@@ -321,7 +321,7 @@ export const CalendarPicker = React.memo(
               <Pressable
                 style={localStyles.hourAdjustButton}
                 onPress={() =>
-                  setDateRange((prev) => ({
+                  setDateRange((prev: DateRange) => ({
                     ...prev,
                     startHour: adjustHour(prev.startHour, -1)
                   }))
@@ -332,7 +332,7 @@ export const CalendarPicker = React.memo(
               <Pressable
                 style={localStyles.hourAdjustButton}
                 onPress={() =>
-                  setDateRange((prev) => ({
+                  setDateRange((prev: DateRange) => ({
                     ...prev,
                     startHour: adjustHour(prev.startHour, 1)
                   }))
@@ -367,7 +367,7 @@ export const CalendarPicker = React.memo(
               <Pressable
                 style={localStyles.hourAdjustButton}
                 onPress={() =>
-                  setDateRange((prev) => ({
+                  setDateRange((prev: DateRange) => ({
                     ...prev,
                     endHour: adjustHour(prev.endHour, -1)
                   }))
@@ -378,7 +378,7 @@ export const CalendarPicker = React.memo(
               <Pressable
                 style={localStyles.hourAdjustButton}
                 onPress={() =>
-                  setDateRange((prev) => ({
+                  setDateRange((prev: DateRange) => ({
                     ...prev,
                     endHour: adjustHour(prev.endHour, 1)
                   }))
@@ -428,7 +428,7 @@ export const CalendarPicker = React.memo(
               <View key={`empty-${i}`} style={localStyles.dayCell} />
             ))}
 
-            {Array.from({ length: daysInMonth }).map((_, dayIdx) => {
+            {Array.from({ length: daysInMonth }).map((_, dayIdx: number) => {
               const day = dayIdx + 1;
               const date = new Date(year, month, day);
               const status =

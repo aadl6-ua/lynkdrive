@@ -374,7 +374,21 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
   );
 
   const hasProfileMinimum = hasMinimumProfileData(profile);
-  const isReadyForTransactions = hasProfileMinimum && Boolean(profile?.isVerified);
+  const fullName = `${firstNameInput} ${lastNameInput}`.trim() || 'Completa tu perfil';
+
+  const heroChips = useMemo(() => {
+    const chips: Array<{ label: string; tone: StatusChipTone }> = [];
+
+    if (profile?.isVerified) {
+      chips.push({ label: 'Cuenta verificada', tone: 'success' });
+    }
+
+    if (profile?.idDocumentUrl && profile?.driverLicenseUrl) {
+      chips.push({ label: 'Documentos subidos', tone: 'neutral' });
+    }
+
+    return chips;
+  }, [profile?.driverLicenseUrl, profile?.idDocumentUrl, profile?.isVerified]);
 
   const tripReviewByBookingId = useMemo(() => {
     return receivedReviews.reduce<Record<string, ReviewItem>>((acc, review) => {
@@ -637,6 +651,9 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
   };
 
   const renderOverview = () => {
+    const firstInitial = (firstNameInput[0] ?? '?').toUpperCase();
+    const lastInitial = (lastNameInput[0] ?? '').toUpperCase();
+
     return (
       <>
         <SectionHeader
@@ -645,15 +662,45 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
           centered={isDesktopWeb}
         />
 
-        <View style={styles.card}>
-          <View style={localStyles.inlineActions}>
-            <ActionButton label="Editar perfil" onPress={() => setMode('personal')} disabled={!authUserId} variant="accent" />
-            <ActionButton
-              label="Cerrar sesion"
-              onPress={() => void signOut()}
-              disabled={authLoading || !authUserId}
-              variant="danger"
-            />
+        <View style={localStyles.heroCard}>
+          <View style={localStyles.heroContent}>
+            <View style={localStyles.heroTopRow}>
+              <Pressable
+                onPress={() => void handleUploadUserImage('avatar')}
+                disabled={!authUserId || profileUploadingField !== null}
+                style={localStyles.heroAvatarPressable}
+              >
+                {resolvedProfileAvatarUrl ? (
+                  <Image source={{ uri: resolvedProfileAvatarUrl }} style={localStyles.heroAvatar} resizeMode="cover" />
+                ) : (
+                  <View style={localStyles.heroAvatarFallback}>
+                    <Text style={localStyles.heroInitials}>{firstInitial}{lastInitial}</Text>
+                  </View>
+                )}
+              </Pressable>
+
+              <View style={localStyles.heroIdentityBlock}>
+                <Text style={localStyles.heroName}>{fullName}</Text>
+                <Text style={localStyles.heroMail}>{authEmail ?? 'Sin sesion iniciada'}</Text>
+                {heroChips.length > 0 ? (
+                  <View style={localStyles.heroChipRow}>
+                    {heroChips.map((chip) => (
+                      <StatusChip key={chip.label} label={chip.label} tone={chip.tone} compact />
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            </View>
+
+            <View style={localStyles.inlineActions}>
+              <ActionButton label="Editar perfil" onPress={() => setMode('personal')} disabled={!authUserId} variant="accent" />
+              <ActionButton
+                label="Cerrar sesion"
+                onPress={() => void signOut()}
+                disabled={authLoading || !authUserId}
+                variant="danger"
+              />
+            </View>
           </View>
         </View>
 
@@ -1020,15 +1067,6 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
         <ModePill label="Docs" active={mode === 'documents'} onPress={() => setMode('documents')} />
       </View>
 
-      <View style={localStyles.statusBanner}>
-        <Text style={localStyles.statusBannerTitle}>Estado de tu cuenta</Text>
-        <Text style={localStyles.statusBannerText}>
-          {isReadyForTransactions
-            ? 'Todo listo para reservar, pagar y gestionar viajes.'
-            : 'Te faltan datos o verificacion documental para desbloquear todas las funciones.'}
-        </Text>
-      </View>
-
       {mode === 'overview' ? renderOverview() : null}
       {mode === 'personal' ? renderPersonalMode() : null}
       {mode === 'documents' ? renderDocumentsMode() : null}
@@ -1076,24 +1114,6 @@ const localStyles = StyleSheet.create({
   modePillTextActive: {
     color: '#0F172A',
     fontWeight: '700'
-  },
-  statusBanner: {
-    borderWidth: 1,
-    borderColor: '#1E293B',
-    backgroundColor: '#0F172A',
-    borderRadius: 16,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.md,
-    gap: spacingTokens.xs,
-    marginBottom: spacingTokens.md
-  },
-  statusBannerTitle: {
-    color: '#F8FAFC',
-    ...typographyTokens.sectionLabel
-  },
-  statusBannerText: {
-    color: '#CBD5E1',
-    ...typographyTokens.caption
   },
   sectionPlaceholder: {
     width: '100%',
