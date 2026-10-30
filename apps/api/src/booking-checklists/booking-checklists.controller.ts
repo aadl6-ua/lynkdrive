@@ -24,7 +24,7 @@ export class BookingChecklistsController {
   constructor(private readonly bookingChecklistsService: BookingChecklistsService) {}
 
   @Get()
-  async findAll(@CurrentUser() user: AuthUser, @Query('bookingId') bookingId?: string) {
+  async findAll(@CurrentUser() user: AuthUser, @Query('bookingId', new ParseUUIDPipe({ optional: true })) bookingId?: string) {
     return this.bookingChecklistsService.findAllForUser(user.sub, bookingId ?? '');
   }
 
