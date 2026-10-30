@@ -7,8 +7,44 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
-    "lint": "eslint \"src/**/*.ts\"",
-    "test": "jest"
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "typecheck": "tsc --noEmit -p test/tsconfig.json",
+    "test": "jest",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.ts$": "ts-jest",
+      "^.+\\.js$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "allowJs": true
+          },
+          "isolatedModules": true
+        }
+      ]
+    },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!jose/)"
+    ],
+    "moduleNameMapper": {
+      "^src/(.*)$": "<rootDir>/$1"
+    },
+    "collectCoverageFrom": [
+      "**/*.ts",
+      "!**/*.module.ts",
+      "!main.ts"
+    ],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.8",
@@ -33,12 +69,15 @@
     "@types/jest": "^29.5.12",
     "@types/multer": "^2.1.0",
     "@types/node": "^20.17.19",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^6.0.3",
     "@typescript-eslint/eslint-plugin": "^8.24.1",
     "@typescript-eslint/parser": "^8.24.1",
     "eslint": "^9.20.1",
     "eslint-config-prettier": "^10.0.1",
     "jest": "^29.7.0",
     "prettier": "^3.5.1",
+    "supertest": "^7.3.1",
     "ts-jest": "^29.2.5",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
