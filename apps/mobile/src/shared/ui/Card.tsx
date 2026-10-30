@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { ReactNode } from 'react';
-import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 
 type CardProps = {
@@ -32,11 +32,12 @@ export function Card({
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
         accessibilityHint={accessibilityHint}
+        android_ripple={{ color: 'rgba(13,27,42,0.06)' }}
         style={({ pressed }) => [
           styles.base,
           variantStyle,
           { padding },
-          pressed ? styles.pressed : null,
+          pressed && Platform.OS !== 'android' ? styles.pressed : null,
           style
         ]}
       >
