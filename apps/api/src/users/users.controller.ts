@@ -14,13 +14,17 @@ import {
 import { CurrentUser } from 'src/auth/current-user.decorator';
 import { AuthUser } from 'src/auth/auth-user.type';
 import { SupabaseJwtAuthGuard } from 'src/auth/supabase-jwt-auth.guard';
+import { AccountService } from './account.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly accountService: AccountService
+  ) {}
 
   @UseGuards(SupabaseJwtAuthGuard)
   @Get()
@@ -32,6 +36,19 @@ export class UsersController {
   @Get('me')
   async findMe(@CurrentUser() user: AuthUser) {
     return this.usersService.findById(user.sub);
+  }
+
+  @UseGuards(SupabaseJwtAuthGuard)
+  @Get('me/export')
+  async exportMe(@CurrentUser() user: AuthUser) {
+    return this.accountService.exportData(user);
+  }
+
+  @UseGuards(SupabaseJwtAuthGuard)
+  @Delete('me')
+  @HttpCode(204)
+  async deleteMe(@CurrentUser() user: AuthUser) {
+    await this.accountService.deleteAccount(user);
   }
 
   @Get(':id')

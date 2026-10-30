@@ -14,7 +14,7 @@ async function bootstrap() {
 
     res.on('finish', () => {
       const duration = Date.now() - startedAt;
-      logger.log(`${req.method} ${req.originalUrl} ${res.statusCode} - ${duration}ms`);
+      logger.log(`${req.method} ${req.originalUrl.split('?')[0]} ${res.statusCode} - ${duration}ms`);
     });
 
     next();

@@ -145,11 +145,19 @@ export class AccountService {
         [user.sub]
       );
 
+      const checklistImageRows: Array<{ image_url: string }> = await this.dataSource.query(
+        `SELECT ci.image_url FROM checklist_images ci
+         INNER JOIN booking_checklists c ON c.id = ci.checklist_id
+         WHERE c.submitted_by = $1`,
+        [user.sub]
+      );
+
       const filesToRemove = [
         profile.avatar_url,
         profile.id_document_url,
         profile.driver_license_url,
-        ...vehicleImageRows.map((row) => row.image_url)
+        ...vehicleImageRows.map((row) => row.image_url),
+        ...checklistImageRows.map((row) => row.image_url)
       ]
         .map((value) => parseStorageReference(value))
         .filter((reference): reference is StorageReference => reference !== null);
@@ -169,6 +177,17 @@ export class AccountService {
           [user.sub]
         );
         await manager.query(`UPDATE reviews SET comment = NULL WHERE reviewer_id = $1`, [user.sub]);
+        // Las reservas completadas/rechazadas/canceladas se conservan (historial contable) sin datos personales.
+        await manager.query(
+          `UPDATE bookings SET owner_contact_method = NULL
+           WHERE driver_id = $1 OR vehicle_id IN (SELECT id FROM vehicles WHERE owner_id = $1)`,
+          [user.sub]
+        );
+        await manager.query(
+          `DELETE FROM checklist_images WHERE checklist_id IN (SELECT id FROM booking_checklists WHERE submitted_by = $1)`,
+          [user.sub]
+        );
+        await manager.query(`UPDATE booking_checklists SET notes = NULL WHERE submitted_by = $1`, [user.sub]);
         await manager.query(
           `UPDATE users SET
              first_name = 'Usuario',
