@@ -21,6 +21,7 @@ import { styles } from '../../app/styles';
 import { colorTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 import { AppTabKey } from '../../app/types';
 import { UserOverviewModal } from '../../shared/components/UserOverviewModal';
+import { PaymentAction } from '../payments/PaymentAction';
 import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
@@ -1226,7 +1227,13 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
 
           {!selectedBookingIsOwnerView && selectedBooking.status === 'accepted' ? (
             <View style={styles.actionsRow}>
-              <ActionButton label="Pagar" onPress={() => void handleUpdateBookingStatus('paid_confirmed')} disabled={statusUpdating || !canTransact} />
+              <PaymentAction
+                bookingId={selectedBooking.id}
+                disabled={statusUpdating || !canTransact}
+                renderButton={(buttonProps) => <ActionButton {...buttonProps} />}
+                onDemoConfirm={() => void handleUpdateBookingStatus('paid_confirmed')}
+                onPaid={refreshAll}
+              />
             </View>
           ) : null}
 

@@ -14,6 +14,7 @@ import { colorTokens, radiusTokens, spacingTokens, typographyTokens } from '../.
 import { hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
+import { OwnerPayoutsCard } from '../payments/OwnerPayoutsCard';
 
 type ProfileMode = 'overview' | 'personal' | 'documents';
 
@@ -906,6 +907,8 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
             )}
           </View>
         ) : null}
+
+        <OwnerPayoutsCard />
 
         <View style={styles.card}>
           <Text style={localStyles.sectionTitle}>Legal</Text>
