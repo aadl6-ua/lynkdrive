@@ -6,7 +6,7 @@ import { ReviewEntity } from '../reviews/entities/review.entity';
 import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UserOverviewResponseDto } from './dto/user-overview-response.dto';
-import { UserResponseDto } from './dto/user-response.dto';
+import { PublicUserResponseDto, UserResponseDto } from './dto/user-response.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserEntity } from './entities/user.entity';
 
@@ -28,6 +28,16 @@ export class UsersService {
     });
 
     return users.map((user) => this.toResponseDto(user));
+  }
+
+  async findAllPublic(): Promise<PublicUserResponseDto[]> {
+    const users = await this.findAll();
+
+    return users.map((user) => this.toPublicDto(user));
+  }
+
+  async findPublicById(id: string): Promise<PublicUserResponseDto> {
+    return this.toPublicDto(await this.findById(id));
   }
 
   async findById(id: string): Promise<UserResponseDto> {
@@ -137,6 +147,18 @@ export class UsersService {
       completedTripsAsOwner,
       averageRating: averageRatingRaw === null ? null : Number(averageRatingRaw),
       ratingsCount
+    };
+  }
+
+  // Perfil visible para terceros: sin telefono ni documentos personales.
+  private toPublicDto(user: UserResponseDto): PublicUserResponseDto {
+    return {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatarUrl: user.avatarUrl,
+      isVerified: user.isVerified,
+      createdAt: user.createdAt
     };
   }
 

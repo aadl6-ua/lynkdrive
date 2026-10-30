@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   Param,
@@ -21,9 +22,10 @@ import { UsersService } from './users.service';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Get()
   async findAll() {
-    return this.usersService.findAll();
+    return this.usersService.findAllPublic();
   }
 
   @UseGuards(SupabaseJwtAuthGuard)
@@ -34,7 +36,7 @@ export class UsersController {
 
   @Get(':id')
   async findById(@Param('id', new ParseUUIDPipe()) id: string) {
-    return this.usersService.findById(id);
+    return this.usersService.findPublicById(id);
   }
 
   @Get(':id/overview')
@@ -42,8 +44,10 @@ export class UsersController {
     return this.usersService.findOverview(id);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Post()
-  async create(@Body() createUserDto: CreateUserDto) {
+  async create(@CurrentUser() user: AuthUser, @Body() createUserDto: CreateUserDto) {
+    this.ensureSelf(user, createUserDto.id);
     return this.usersService.create(createUserDto);
   }
 
@@ -53,17 +57,28 @@ export class UsersController {
     return this.usersService.update(user.sub, updateUserDto);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Put(':id')
   async update(
+    @CurrentUser() user: AuthUser,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() updateUserDto: UpdateUserDto
   ) {
+    this.ensureSelf(user, id);
     return this.usersService.update(id, updateUserDto);
   }
 
+  @UseGuards(SupabaseJwtAuthGuard)
   @Delete(':id')
   @HttpCode(204)
-  async softDelete(@Param('id', new ParseUUIDPipe()) id: string) {
+  async softDelete(@CurrentUser() user: AuthUser, @Param('id', new ParseUUIDPipe()) id: string) {
+    this.ensureSelf(user, id);
     await this.usersService.softDelete(id);
+  }
+
+  private ensureSelf(user: AuthUser, targetId: string | undefined): void {
+    if (!targetId || targetId !== user.sub) {
+      throw new ForbiddenException('Solo puedes operar sobre tu propio usuario');
+    }
   }
 }
