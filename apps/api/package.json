@@ -10,6 +10,18 @@
     "lint": "eslint \"src/**/*.ts\"",
     "test": "jest"
   },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    },
+    "moduleNameMapper": {
+      "^src/(.*)$": "<rootDir>/$1"
+    },
+    "testEnvironment": "node"
+  },
   "dependencies": {
     "@nestjs/common": "^10.4.8",
     "@nestjs/config": "^3.3.0",

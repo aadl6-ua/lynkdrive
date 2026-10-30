@@ -5,4 +5,7 @@ export class PaymentIntentResponseDto {
   amountCents!: number;
   currency!: string;
   mode!: 'stripe' | 'prototype';
+  publishableKey!: string | null;
+  destinationAccountId!: string | null;
+  applicationFeeCents!: number | null;
 }
