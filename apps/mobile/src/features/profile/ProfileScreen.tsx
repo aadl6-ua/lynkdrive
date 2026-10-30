@@ -639,12 +639,12 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
       }
 
       if (target === 'avatar') {
-        setProfileUploadMessage('Avatar actualizado.');
+        setProfileUploadMessage(null);
       } else {
-        setProfileUploadMessage('Documento subido. Pulsa Guardar cambios para persistir.');
+        setProfileUploadMessage(null);
       }
     } catch {
-      setProfileUploadMessage('No se pudo subir la imagen. Revisa permisos, tamano y bucket.');
+      setProfileUploadMessage(null);
     } finally {
       setProfileUploadingField(null);
     }
@@ -992,12 +992,6 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
         <Text style={localStyles.accountStatusValue}>{authEmail ?? 'Sin email en sesion'}</Text>
       </View>
 
-      <View style={localStyles.miniHintCard}>
-        <Text style={localStyles.miniHintText}>
-          Para uso en produccion: manten nombre y apellidos completos, y revisa telefono antes de guardar.
-        </Text>
-      </View>
-
       <View style={localStyles.inlineActions}>
         <ActionButton
           label={saving ? 'Guardando...' : 'Guardar cambios'}
@@ -1072,10 +1066,7 @@ export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
       {mode === 'documents' ? renderDocumentsMode() : null}
 
       {authError ? <Text style={styles.error}>{authError}</Text> : null}
-      {authMessage ? <Text style={styles.info}>{authMessage}</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      {mutationMessage ? <Text style={styles.info}>{mutationMessage}</Text> : null}
-      {profileUploadMessage ? <Text style={styles.info}>{profileUploadMessage}</Text> : null}
     </View>
   );
 }
@@ -1668,16 +1659,4 @@ const localStyles = StyleSheet.create({
     color: colorTokens.primary,
     ...typographyTokens.sectionLabel
   },
-  miniHintCard: {
-    borderWidth: 1,
-    borderColor: '#E6ECF3',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.sm
-  },
-  miniHintText: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  }
 });

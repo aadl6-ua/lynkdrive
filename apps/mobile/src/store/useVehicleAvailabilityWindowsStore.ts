@@ -71,8 +71,7 @@ export const useVehicleAvailabilityWindowsStore = create<VehicleAvailabilityWind
 
       set({
         items: response.data,
-        saving: false,
-        mutationMessage: 'Ventana creada correctamente.'
+        saving: false
       });
     } catch {
       set({
@@ -102,8 +101,7 @@ export const useVehicleAvailabilityWindowsStore = create<VehicleAvailabilityWind
 
       set({
         items: response.data,
-        saving: false,
-        mutationMessage: 'Ventana actualizada correctamente.'
+        saving: false
       });
     } catch {
       set({
@@ -130,8 +128,7 @@ export const useVehicleAvailabilityWindowsStore = create<VehicleAvailabilityWind
 
       set({
         items: response.data,
-        saving: false,
-        mutationMessage: 'Ventana eliminada correctamente.'
+        saving: false
       });
     } catch {
       set({

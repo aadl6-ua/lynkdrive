@@ -727,7 +727,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
 
         {vehicleImagesLoading || vehicleImagesSaving || vehicleImageUploading ? <ActivityIndicator size="small" /> : null}
         {vehicleImagesError ? <Text style={styles.error}>{vehicleImagesError}</Text> : null}
-        {vehicleImagesMutationMessage ? <Text style={styles.info}>{vehicleImagesMutationMessage}</Text> : null}
 
         <View style={[localStyles.imageGrid, isDesktopWeb ? localStyles.imageGridDesktop : undefined]}>
           {vehicleImages.map((image) => (
@@ -827,7 +826,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
 
         {availabilityWindowsLoading || availabilityWindowsSaving ? <ActivityIndicator size="small" /> : null}
         {availabilityWindowsError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{availabilityWindowsError}</Text> : null}
-        {availabilityWindowsMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{availabilityWindowsMutationMessage}</Text> : null}
 
         {(() => {
           const now = new Date();
@@ -986,7 +984,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
           </View>
 
           {vehiclesCreating ? <ActivityIndicator size="small" /> : null}
-          {vehiclesMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesMutationMessage}</Text> : null}
           {vehiclesError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesError}</Text> : null}
         </ScrollView>
     );
@@ -1099,7 +1096,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
 
         {vehiclesLoading || vehiclesCreating ? <ActivityIndicator size="small" /> : null}
         {vehiclesError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesError}</Text> : null}
-        {vehiclesMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesMutationMessage}</Text> : null}
 
         <View style={[localStyles.vehicleGrid, isDesktopWeb ? localStyles.vehicleGridDesktop : undefined]}>
           {myVehicles.map((vehicle) => {

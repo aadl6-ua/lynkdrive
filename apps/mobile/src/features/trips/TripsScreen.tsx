@@ -661,7 +661,7 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
       }
 
       await httpClient.put(`/bookings/${selectedBooking.id}/status`, payload);
-      setMutationMessage(`Estado actualizado a: ${STATUS_LABEL[nextStatus]}.`);
+      setMutationMessage(null);
       await refreshAll();
     } catch (error: unknown) {
       setMutationError(getApiErrorMessage(error) ?? 'No se pudo actualizar el estado de la reserva.');
@@ -742,7 +742,7 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
         })
       );
 
-      setMutationMessage(`Checklist ${type === 'check_in' ? 'entrada' : 'salida'} enviado correctamente.`);
+      setMutationMessage(null);
       await loadDetailData();
 
       const refreshed = (await httpClient.get<ChecklistImageItem[]>(`/checklist-images?checklistId=${checklistId}`)).data;
@@ -809,7 +809,7 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
         ]
       }));
 
-      setMutationMessage('Imagen añadida al borrador y previsualizada. Se subira al enviar el checklist.');
+      setMutationMessage(null);
     } catch (error: unknown) {
       setMutationError(getApiErrorMessage(error) ?? 'No se pudo preparar la imagen del checklist.');
     } finally {
@@ -830,7 +830,7 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
     try {
       await httpClient.delete(`/checklist-images/${imageId}`);
       await loadChecklistImages(checklistId);
-      setMutationMessage('Imagen eliminada del checklist.');
+      setMutationMessage(null);
     } catch (error: unknown) {
       setMutationError(getApiErrorMessage(error) ?? 'No se pudo eliminar la imagen del checklist.');
     } finally {
@@ -870,7 +870,7 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
         comment: reviewCommentInput.trim() || undefined
       });
 
-      setMutationMessage('Resena enviada correctamente. Puedes verla desde Perfil.');
+      setMutationMessage(null);
       setReviewCommentInput('');
       await loadDetailData();
       setScreenMode('detail');
@@ -977,14 +977,14 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
 
           <View style={styles.buttonContainer}>
             <ActionButton
-              label={checklistImageUploading ? 'Procesando...' : 'Añadir imagen (previsualizar)'}
+              label={checklistImageUploading ? 'Procesando...' : 'Añadir imagen'}
               onPress={() => void handleUploadChecklistImage()}
               disabled={checklistImageUploading || !canTransact || !!currentChecklist}
             />
           </View>
 
           {!currentChecklist ? (
-            <Text style={styles.linkHint}>Las imagenes se previsualizan ahora y se suben definitivamente al enviar el checklist.</Text>
+            <Text style={styles.linkHint}>Las imagenes adjuntas quedaran asociadas al checklist al enviarlo.</Text>
           ) : null}
 
           {checklistImagesLoading ? <ActivityIndicator size="small" /> : null}
@@ -1011,16 +1011,11 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
           </View>
 
           {!checklistImagesLoading && pendingImagesForType.length === 0 ? (
-            <Text style={styles.linkHint}>Todavia no hay evidencias en el borrador.</Text>
+            <Text style={styles.linkHint}>Aun no se han añadido evidencias.</Text>
           ) : null}
         </View>
 
         {mutationError ? <Text style={styles.error}>{mutationError}</Text> : null}
-        {mutationMessage ? (
-          <View style={[localStyles.feedbackBanner, isDesktopWeb ? localStyles.feedbackBannerDesktop : undefined]}>
-            <Text style={[styles.info, localStyles.feedbackBannerText]}>{mutationMessage}</Text>
-          </View>
-        ) : null}
       </View>
     );
   }
@@ -1073,11 +1068,6 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
         </View>
 
         {mutationError ? <Text style={styles.error}>{mutationError}</Text> : null}
-        {mutationMessage ? (
-          <View style={[localStyles.feedbackBanner, isDesktopWeb ? localStyles.feedbackBannerDesktop : undefined]}>
-            <Text style={[styles.info, localStyles.feedbackBannerText]}>{mutationMessage}</Text>
-          </View>
-        ) : null}
       </View>
     );
   }
@@ -1235,15 +1225,9 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
           ) : null}
 
           {!selectedBookingIsOwnerView && selectedBooking.status === 'accepted' ? (
-            <>
-              <View style={styles.actionsRow}>
-                <ActionButton label="Pago (a implementar en el futuro)" variant="ghost" onPress={() => {}} disabled />
-              </View>
-              <View style={styles.actionsRow}>
-                <ActionButton label="Marcar pago confirmado (demo)" onPress={() => void handleUpdateBookingStatus('paid_confirmed')} disabled={statusUpdating || !canTransact} />
-                <ActionButton label="Cancelar" variant="ghost" onPress={() => void handleUpdateBookingStatus('cancelled')} disabled={statusUpdating || !canTransact} />
-              </View>
-            </>
+            <View style={styles.actionsRow}>
+              <ActionButton label="Pagar" onPress={() => void handleUpdateBookingStatus('paid_confirmed')} disabled={statusUpdating || !canTransact} />
+            </View>
           ) : null}
 
           {!selectedBookingIsOwnerView && selectedBooking.status === 'paid_confirmed' ? (
@@ -1318,11 +1302,6 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
         {detailError ? <Text style={styles.error}>{detailError}</Text> : null}
         {lookupError ? <Text style={styles.error}>{lookupError}</Text> : null}
         {mutationError ? <Text style={styles.error}>{mutationError}</Text> : null}
-        {mutationMessage ? (
-          <View style={[localStyles.feedbackBanner, isDesktopWeb ? localStyles.feedbackBannerDesktop : undefined]}>
-            <Text style={[styles.info, localStyles.feedbackBannerText]}>{mutationMessage}</Text>
-          </View>
-        ) : null}
 
         <UserOverviewModal
           visible={!!overviewUser}
@@ -1381,11 +1360,6 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {lookupError ? <Text style={styles.error}>{lookupError}</Text> : null}
       {mutationError ? <Text style={styles.error}>{mutationError}</Text> : null}
-      {mutationMessage ? (
-        <View style={[localStyles.feedbackBanner, isDesktopWeb ? localStyles.feedbackBannerDesktop : undefined]}>
-          <Text style={[styles.info, localStyles.feedbackBannerText]}>{mutationMessage}</Text>
-        </View>
-      ) : null}
 
       {sortedBookings.map((booking) => {
         const statusColors = STATUS_COLORS[booking.status];

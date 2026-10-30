@@ -71,8 +71,7 @@ export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
 
       set({
         items: response.data,
-        saving: false,
-        mutationMessage: 'Imagen creada correctamente.'
+        saving: false
       });
     } catch {
       set({
@@ -99,8 +98,7 @@ export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
 
       set({
         items: response.data,
-        saving: false,
-        mutationMessage: 'Imagen actualizada correctamente.'
+        saving: false
       });
     } catch {
       set({
@@ -127,8 +125,7 @@ export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
 
       set({
         items: response.data,
-        saving: false,
-        mutationMessage: 'Imagen eliminada correctamente.'
+        saving: false
       });
     } catch {
       set({
