@@ -4,7 +4,8 @@ import { Logger } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: necesario para verificar la firma de los webhooks de Stripe.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const logger = new Logger('HTTP');
 
   app.use((req: Request, res: Response, next: NextFunction) => {
