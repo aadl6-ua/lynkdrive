@@ -249,6 +249,17 @@ export class BookingsService {
       ? updateStatusDto.ownerContactMethod
       : row.owner_contact_method;
 
+    const isAccepting = updateStatusDto.status === 'accepted';
+
+    if (isAccepting) {
+      await this.ensureNoConflicts(
+        row.vehicle_id,
+        new Date(row.start_datetime),
+        new Date(row.end_datetime),
+        row.id
+      );
+    }
+
     await this.bookingsRepository.query(
       `
         UPDATE bookings
@@ -261,7 +272,33 @@ export class BookingsService {
       [updateStatusDto.status, nextOwnerContactMethod ?? null, id]
     );
 
+    if (isAccepting) {
+      await this.rejectOverlappingPendingRequests(row);
+    }
+
     return this.findByIdForUser(id, user.sub);
+  }
+
+  private async rejectOverlappingPendingRequests(acceptedRow: BookingRow): Promise<void> {
+    await this.bookingsRepository.query(
+      `
+        UPDATE bookings
+        SET
+          status = 'rejected',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE vehicle_id = $1
+          AND id <> $2
+          AND status = 'pending'
+          AND start_datetime < $4
+          AND end_datetime > $3
+      `,
+      [
+        acceptedRow.vehicle_id,
+        acceptedRow.id,
+        new Date(acceptedRow.start_datetime).toISOString(),
+        new Date(acceptedRow.end_datetime).toISOString()
+      ]
+    );
   }
 
   private async findBookingRowById(id: string): Promise<BookingRow | null> {
@@ -334,7 +371,12 @@ export class BookingsService {
     }
   }
 
-  private async ensureNoConflicts(vehicleId: string, startDatetime: Date, endDatetime: Date): Promise<void> {
+  private async ensureNoConflicts(
+    vehicleId: string,
+    startDatetime: Date,
+    endDatetime: Date,
+    excludeBookingId?: string
+  ): Promise<void> {
     const rows = await this.bookingsRepository.query(
       `
         SELECT id
@@ -343,9 +385,10 @@ export class BookingsService {
           AND status IN ('accepted', 'paid_confirmed', 'in_progress', 'completed')
           AND start_datetime < $3
           AND end_datetime > $2
+          AND ($4::uuid IS NULL OR id <> $4::uuid)
         LIMIT 1
       `,
-      [vehicleId, startDatetime.toISOString(), endDatetime.toISOString()]
+      [vehicleId, startDatetime.toISOString(), endDatetime.toISOString(), excludeBookingId ?? null]
     );
 
     if (rows[0]?.id) {
