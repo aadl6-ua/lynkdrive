@@ -35,6 +35,11 @@ type BookingRow = {
   updated_at: Date;
 };
 
+type VehicleBookingSlotDto = Pick<
+  BookingResponseDto,
+  'id' | 'vehicleId' | 'startDatetime' | 'endDatetime' | 'status'
+>;
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -141,6 +146,26 @@ export class BookingsService {
     );
 
     return rows.map((row: BookingRow) => this.toResponseDto(row));
+  }
+
+  // Terceros solo ven la ocupacion (fechas y estado); el detalle completo queda para los participantes.
+  async findByVehicleIdForUser(
+    vehicleId: string,
+    userId: string
+  ): Promise<Array<BookingResponseDto | VehicleBookingSlotDto>> {
+    const bookings = await this.findByVehicleId(vehicleId);
+
+    return bookings.map((booking) =>
+      booking.ownerId === userId || booking.driverId === userId
+        ? booking
+        : {
+            id: booking.id,
+            vehicleId: booking.vehicleId,
+            startDatetime: booking.startDatetime,
+            endDatetime: booking.endDatetime,
+            status: booking.status
+          }
+    );
   }
 
   async findByIdForUser(id: string, userId: string): Promise<BookingResponseDto> {
