@@ -6,9 +6,10 @@ import {
 } from '@expo-google-fonts/manrope';
 import { SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk';
 import { useFonts } from 'expo-font';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TabBar } from './src/app/components/TabBar';
 import { colorTokens, layoutTokens, spacingTokens, typographyTokens } from './src/app/theme/tokens';
@@ -22,6 +23,9 @@ import { ConfirmHost, ToastHost } from './src/shared/ui';
 import { useAuthStore } from './src/store/useAuthStore';
 import { useUserProfileStore } from './src/store/useUserProfileStore';
 
+// Mantenemos el splash nativo hasta tener fuentes cargadas (no aplica en web).
+void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+
 /** Si las fuentes tardan (red lenta en web) no bloqueamos el arranque. */
 const FONT_LOAD_TIMEOUT_MS = 2500;
 
@@ -29,14 +33,16 @@ function AppShell() {
   const [activeTab, setActiveTab] = useState<AppTabKey>('explore');
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const isDesktopLike = Platform.OS === 'web' || width >= 768;
+  // Navegación superior solo en pantallas anchas (web escritorio/tablet); en web
+  // móvil se usa la barra inferior igual que en nativo.
+  const isDesktopLike = width >= 768;
 
   // Espacio reservado por las barras flotantes + safe areas del dispositivo.
   const topPadding = isDesktopLike ? layoutTokens.topNavHeight + insets.top : insets.top + spacingTokens.sm;
   const bottomPadding = isDesktopLike ? insets.bottom : layoutTokens.bottomTabHeight + insets.bottom;
 
   const fetchMyProfile = useUserProfileStore((state) => state.fetchMyProfile);
-  const { userId: authUserId, hasHydrated, loading: authLoading, hydrateSession } = useAuthStore();
+  const { userId: authUserId, hasHydrated, hydrateSession } = useAuthStore();
 
   useEffect(() => {
     void hydrateSession();
@@ -51,7 +57,7 @@ function AppShell() {
     void fetchMyProfile();
   }, [authUserId, fetchMyProfile]);
 
-  if (!hasHydrated || (authLoading && !authUserId && !hasHydrated)) {
+  if (!hasHydrated) {
     return <SplashView />;
   }
 
@@ -114,6 +120,12 @@ export default function App() {
   }, []);
 
   const ready = fontsLoaded || !!fontError || fontTimeout;
+
+  useEffect(() => {
+    if (ready) {
+      void SplashScreen.hideAsync().catch(() => undefined);
+    }
+  }, [ready]);
 
   return (
     <SafeAreaProvider>
