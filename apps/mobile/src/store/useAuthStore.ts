@@ -2,18 +2,33 @@ import { create } from 'zustand';
 import { httpClient } from '../api/http';
 import { setAccessToken } from '../api/http';
 import { supabaseClient } from '../api/supabase';
+import { useUserProfileStore } from './useUserProfileStore';
+import { useVehiclesStore } from './useVehiclesStore';
+
+const SUPABASE_ERROR_TRANSLATIONS: Array<[RegExp, string]> = [
+  [/invalid login credentials/i, 'Email o contraseña incorrectos.'],
+  [/email not confirmed/i, 'Tienes que confirmar tu email antes de entrar. Revisa tu bandeja de entrada.'],
+  [/user already registered/i, 'Ya existe una cuenta con este email. Prueba a iniciar sesión.'],
+  [/password should be at least/i, 'La contraseña es demasiado corta.'],
+  [/unable to validate email address|invalid email/i, 'El email no tiene un formato válido.'],
+  [/rate limit|too many requests/i, 'Demasiados intentos. Espera un momento y vuelve a intentarlo.'],
+  [/failed to fetch|network/i, 'Sin conexión. Revisa tu red e inténtalo de nuevo.']
+];
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'message' in error) {
     const message = (error as { message?: unknown }).message;
 
     if (typeof message === 'string' && message.trim()) {
-      return message;
+      const translated = SUPABASE_ERROR_TRANSLATIONS.find(([pattern]) => pattern.test(message));
+      return translated ? translated[1] : message;
     }
   }
 
   return fallback;
 }
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type RegisterProfileInput = {
   firstName: string;
@@ -63,6 +78,8 @@ type AuthState = {
   signIn: () => Promise<void>;
   signUp: (profileInput?: RegisterProfileInput) => Promise<void>;
   signOut: () => Promise<void>;
+  requestPasswordReset: () => Promise<boolean>;
+  clearFeedback: () => void;
 };
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -126,7 +143,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { emailInput, passwordInput } = get();
 
     if (!emailInput.trim() || !passwordInput.trim()) {
-      set({ error: 'Email y password son obligatorios.', message: null });
+      set({ error: 'Introduce tu email y tu contraseña.', message: null });
 
       return;
     }
@@ -148,7 +165,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         userId: data.session.user.id,
         email: data.session.user.email ?? null,
         accessToken: data.session.access_token,
-        loading: false
+        loading: false,
+        passwordInput: ''
       });
     } catch (error: unknown) {
       set({
@@ -162,7 +180,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { emailInput, passwordInput } = get();
 
     if (!emailInput.trim() || !passwordInput.trim()) {
-      set({ error: 'Email y password son obligatorios.', message: null });
+      set({ error: 'Introduce tu email y tu contraseña.', message: null });
 
       return;
     }
@@ -191,14 +209,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         if (profileInput) {
           await updateMinimumProfileWithRetry(profileInput);
+          // El listener de sesión ya pudo cargar el perfil vacío creado por el
+          // trigger; lo recargamos para reflejar nombre y teléfono recién guardados.
+          await useUserProfileStore.getState().fetchMyProfile();
         }
 
-        set({ loading: false });
+        set({ loading: false, passwordInput: '' });
 
         return;
       }
 
-      set({ loading: false });
+      // Proyecto con confirmación de email: no hay sesión hasta confirmar.
+      set({
+        loading: false,
+        passwordInput: '',
+        message: 'Cuenta creada. Te hemos enviado un email para confirmarla; después podrás iniciar sesión.'
+      });
     } catch (error: unknown) {
       set({
         loading: false,
@@ -213,12 +239,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       await supabaseClient.auth.signOut();
       setAccessToken(null);
+      useUserProfileStore.getState().reset();
+      useVehiclesStore.getState().reset();
       set({
         userId: null,
         email: null,
         accessToken: null,
         loading: false,
-        hasHydrated: true
+        hasHydrated: true,
+        passwordInput: ''
       });
     } catch (error: unknown) {
       set({
@@ -227,5 +256,33 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         message: null
       });
     }
-  }
+  },
+  requestPasswordReset: async () => {
+    const email = get().emailInput.trim();
+
+    if (!EMAIL_PATTERN.test(email)) {
+      set({ error: 'Escribe arriba el email de tu cuenta para enviarte el enlace.', message: null });
+      return false;
+    }
+
+    set({ loading: true, error: null, message: null });
+
+    try {
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
+
+      if (error) {
+        throw error;
+      }
+
+      set({
+        loading: false,
+        message: 'Si existe una cuenta con ese email, recibirás un enlace para restablecer la contraseña.'
+      });
+      return true;
+    } catch (error: unknown) {
+      set({ loading: false, error: getErrorMessage(error, 'No se pudo enviar el enlace de recuperación.') });
+      return false;
+    }
+  },
+  clearFeedback: () => set({ error: null, message: null })
 }));

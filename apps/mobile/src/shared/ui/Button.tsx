@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { ActivityIndicator, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { colorTokens, HIT_SIZE, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'accent' | 'danger' | 'dangerGhost' | 'ghost';
@@ -63,6 +63,15 @@ const VARIANTS: Record<
   }
 };
 
+const RIPPLE_COLOR: Record<ButtonVariant, string> = {
+  primary: 'rgba(255,255,255,0.18)',
+  secondary: 'rgba(13,27,42,0.08)',
+  accent: 'rgba(255,255,255,0.22)',
+  danger: 'rgba(255,255,255,0.22)',
+  dangerGhost: 'rgba(231,76,60,0.12)',
+  ghost: 'rgba(13,27,42,0.08)'
+};
+
 export function Button({
   label,
   onPress,
@@ -94,11 +103,12 @@ export function Button({
       accessibilityState={{ disabled: isDisabled, busy: loading }}
       hitSlop={size === 'sm' ? 6 : 0}
       testID={testID}
+      android_ripple={{ color: RIPPLE_COLOR[variant], borderless: false }}
       style={({ pressed }) => [
         styles.base,
         size === 'sm' ? styles.sm : styles.md,
         {
-          backgroundColor: pressed && !isDisabled ? palette.bgPressed : palette.bg,
+          backgroundColor: pressed && !isDisabled && Platform.OS !== 'android' ? palette.bgPressed : palette.bg,
           borderColor: palette.border
         },
         fullWidth ? styles.fullWidth : null,
@@ -163,6 +173,7 @@ export function IconButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
       hitSlop={Math.max(0, (HIT_SIZE - size) / 2)}
+      android_ripple={{ color: 'rgba(13,27,42,0.12)', borderless: true, radius: size / 2 }}
       style={({ pressed }) => [
         styles.iconButton,
         {
@@ -185,6 +196,7 @@ const styles = StyleSheet.create({
   base: {
     borderWidth: 1,
     borderRadius: radiusTokens.input,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center'
   },
