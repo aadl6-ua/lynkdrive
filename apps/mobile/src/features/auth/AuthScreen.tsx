@@ -11,7 +11,7 @@ import {
   View,
   useWindowDimensions
 } from 'react-native';
-import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import { colorTokens, shadowTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 import { Button, InlineMessage, SegmentedControl, TextField } from '../../shared/ui';
 import { useAuthStore } from '../../store/useAuthStore';
 
