@@ -26,6 +26,8 @@ type UploadImageParams = {
   mimeType: string;
   ownerId?: string;
   webFile?: File;
+  /** Progreso de subida 0..1 (si la plataforma lo reporta). */
+  onProgress?: (fraction: number) => void;
 };
 
 export async function uploadImageToApi(params: UploadImageParams): Promise<UploadImageResponse> {
@@ -51,7 +53,16 @@ export async function uploadImageToApi(params: UploadImageParams): Promise<Uploa
     {
       headers: {
         'Content-Type': 'multipart/form-data'
-      }
+      },
+      // Las subidas de imagen pueden tardar más que el timeout general de la API.
+      timeout: 60000,
+      onUploadProgress: params.onProgress
+        ? (event) => {
+            if (event.total && event.total > 0) {
+              params.onProgress?.(Math.min(1, event.loaded / event.total));
+            }
+          }
+        : undefined
     }
   );
 
