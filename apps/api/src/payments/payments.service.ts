@@ -147,6 +147,15 @@ export class PaymentsService {
           `Payment intent must be succeeded before confirmation. Current status: ${intent.status}`
         );
       }
+
+      // Evita reutilizar un pago de otra reserva o de un importe distinto.
+      if (
+        intent.metadata?.bookingId !== booking.booking_id ||
+        intent.amount !== this.toCents(booking.total_price) ||
+        intent.currency !== this.currency
+      ) {
+        throw new BadRequestException('Payment intent does not match this booking');
+      }
     }
 
     await this.dataSource.query(
