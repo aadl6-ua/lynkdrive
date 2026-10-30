@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "echo \"No linter configured yet for shared\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo \"No tests configured yet for shared\""
   },
   "devDependencies": {

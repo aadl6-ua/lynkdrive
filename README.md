@@ -77,5 +77,18 @@ http://localhost:3000/api/health
 ```bash
 npm run build
 npm run lint
+npm run typecheck
 npm run test
 ```
+
+### Tests e2e de la API
+
+Necesitan un Postgres con PostGIS local (el esquema se recrea en cada ejecución):
+
+```bash
+docker run -d --name lynkdrive-test-pg -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=lynkdrive_test -p 55432:5432 postgis/postgis:15-3.4
+npm run test:e2e
+```
+
+Se puede usar otra BD con `TEST_DATABASE_URL`. No apuntar nunca a la BD de Supabase.
