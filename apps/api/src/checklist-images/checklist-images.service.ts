@@ -10,6 +10,7 @@ type ChecklistAccessRow = {
   booking_id: string;
   owner_id: string;
   driver_id: string;
+  submitted_by: string;
 };
 
 @Injectable()
@@ -46,7 +47,7 @@ export class ChecklistImagesService {
   }
 
   async createForUser(userId: string, createChecklistImageDto: CreateChecklistImageDto): Promise<ChecklistImageResponseDto> {
-    await this.ensureChecklistParticipant(createChecklistImageDto.checklistId, userId);
+    await this.ensureChecklistParticipant(createChecklistImageDto.checklistId, userId, true);
 
     const toSave = this.checklistImagesRepository.create({
       checklistId: createChecklistImageDto.checklistId,
@@ -64,14 +65,18 @@ export class ChecklistImagesService {
       throw new NotFoundException(`Checklist image ${id} not found`);
     }
 
-    await this.ensureChecklistParticipant(image.checklistId, userId);
+    await this.ensureChecklistParticipant(image.checklistId, userId, true);
     await this.checklistImagesRepository.delete({ id });
   }
 
-  private async ensureChecklistParticipant(checklistId: string, userId: string): Promise<void> {
+  private async ensureChecklistParticipant(
+    checklistId: string,
+    userId: string,
+    requireSubmitter = false
+  ): Promise<void> {
     const rows = await this.checklistImagesRepository.query(
       `
-        SELECT c.id AS checklist_id, c.booking_id, v.owner_id, b.driver_id
+        SELECT c.id AS checklist_id, c.booking_id, c.submitted_by, v.owner_id, b.driver_id
         FROM booking_checklists c
         INNER JOIN bookings b ON b.id = c.booking_id
         INNER JOIN vehicles v ON v.id = b.vehicle_id
@@ -89,6 +94,10 @@ export class ChecklistImagesService {
 
     if (checklist.owner_id !== userId && checklist.driver_id !== userId) {
       throw new ForbiddenException('You do not have access to this checklist');
+    }
+
+    if (requireSubmitter && checklist.submitted_by !== userId) {
+      throw new ForbiddenException('Only the user who submitted this checklist can modify its images');
     }
   }
 
