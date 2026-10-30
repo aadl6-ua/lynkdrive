@@ -1,3 +1,4 @@
+import { Throttle } from '@nestjs/throttler';
 import {
   BadRequestException,
   Body,
@@ -10,6 +11,7 @@ import {
   UseInterceptors
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 import * as multer from 'multer';
 import { AuthUser } from 'src/auth/auth-user.type';
 import { CurrentUser } from 'src/auth/current-user.decorator';
@@ -26,6 +28,9 @@ type UploadTarget =
   | 'checklist_image';
 
 class UploadImageBodyDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
   ownerId?: string;
 }
 
@@ -34,6 +39,7 @@ class UploadImageBodyDto {
 export class UploadsController {
   constructor(private readonly uploadsService: UploadsService) {}
 
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
   @Post('images/:target')
   @UseInterceptors(
     FileInterceptor('file', {
