@@ -148,8 +148,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         userId: data.session.user.id,
         email: data.session.user.email ?? null,
         accessToken: data.session.access_token,
-        loading: false,
-        message: 'Sesion iniciada correctamente.'
+        loading: false
       });
     } catch (error: unknown) {
       set({
@@ -194,18 +193,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           await updateMinimumProfileWithRetry(profileInput);
         }
 
-        set({
-          loading: false,
-          message: 'Cuenta creada y sesion iniciada correctamente.'
-        });
+        set({ loading: false });
 
         return;
       }
 
-      set({
-        loading: false,
-        message: 'Registro enviado. Revisa tu email para confirmar la cuenta y luego inicia sesion.'
-      });
+      set({ loading: false });
     } catch (error: unknown) {
       set({
         loading: false,
@@ -225,8 +218,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         email: null,
         accessToken: null,
         loading: false,
-        hasHydrated: true,
-        message: 'Sesion cerrada.'
+        hasHydrated: true
       });
     } catch (error: unknown) {
       set({

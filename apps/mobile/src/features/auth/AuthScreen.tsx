@@ -239,7 +239,6 @@ export function AuthScreen() {
 
           {localError ? <Text style={styles.error}>{localError}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          {message ? <Text style={styles.info}>{message}</Text> : null}
         </View>
       </View>
     </View>

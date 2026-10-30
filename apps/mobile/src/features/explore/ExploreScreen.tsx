@@ -868,7 +868,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
       const bookingsResponse = await httpClient.get<VehicleBookingItem[]>(`/bookings/vehicle/${selectedVehicleId}`);
       setVehicleBookings(bookingsResponse.data);
 
-      setBookingMessage('Solicitud enviada. Puedes revisar el estado en la pestana Mis Viajes.');
+      setBookingMessage(null);
       setBookingStartDate(null);
       setBookingStartHour(10);
       setBookingEndDate(null);
@@ -1026,7 +1026,6 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
             </View>
 
             {bookingError ? <Text style={styles.error}>{bookingError}</Text> : null}
-            {bookingMessage ? <Text style={styles.info}>{bookingMessage}</Text> : null}
           </View>
 
           {isDesktopWeb ? (

@@ -120,8 +120,7 @@ export const useVehiclesStore = create<VehiclesState>((set) => ({
       const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
       set({
         items: response.data,
-        creating: false,
-        mutationMessage: 'Vehiculo creado correctamente.'
+        creating: false
       });
     } catch {
       set({
@@ -145,8 +144,7 @@ export const useVehiclesStore = create<VehiclesState>((set) => ({
       const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
       set({
         items: response.data,
-        creating: false,
-        mutationMessage: 'Vehiculo actualizado correctamente.'
+        creating: false
       });
     } catch {
       set({
@@ -170,8 +168,7 @@ export const useVehiclesStore = create<VehiclesState>((set) => ({
       const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
       set({
         items: response.data,
-        creating: false,
-        mutationMessage: 'Vehiculo eliminado correctamente.'
+        creating: false
       });
     } catch {
       set({

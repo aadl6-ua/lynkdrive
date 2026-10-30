@@ -62,7 +62,7 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
     try {
       await httpClient.put('/users/me', payload);
       await get().fetchMyProfile();
-      set({ saving: false, mutationMessage: 'Perfil autenticado actualizado correctamente.' });
+      set({ saving: false });
     } catch {
       set({
         saving: false,
