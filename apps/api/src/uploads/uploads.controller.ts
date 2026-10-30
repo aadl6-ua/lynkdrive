@@ -6,11 +6,17 @@ import {
   ParseFilePipe,
   Post,
   UploadedFile,
+  UseGuards,
   UseInterceptors
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as multer from 'multer';
+import { AuthUser } from 'src/auth/auth-user.type';
+import { CurrentUser } from 'src/auth/current-user.decorator';
+import { SupabaseJwtAuthGuard } from 'src/auth/supabase-jwt-auth.guard';
 import { UploadsService } from './uploads.service';
+
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 
 type UploadTarget =
   | 'avatar'
@@ -23,6 +29,7 @@ class UploadImageBodyDto {
   ownerId?: string;
 }
 
+@UseGuards(SupabaseJwtAuthGuard)
 @Controller('uploads')
 export class UploadsController {
   constructor(private readonly uploadsService: UploadsService) {}
@@ -30,10 +37,12 @@ export class UploadsController {
   @Post('images/:target')
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: multer.memoryStorage()
+      storage: multer.memoryStorage(),
+      limits: { fileSize: MAX_UPLOAD_BYTES, files: 1, fields: 5 }
     })
   )
   async uploadImage(
+    @CurrentUser() user: AuthUser,
     @Param('target') target: string,
     @Body() body: UploadImageBodyDto,
     @UploadedFile(
@@ -47,7 +56,7 @@ export class UploadsController {
       throw new BadRequestException('Target invalido');
     }
 
-    return this.uploadsService.uploadImage(target, body.ownerId, file);
+    return this.uploadsService.uploadImage(target, user.sub, body?.ownerId, file);
   }
 
   private isValidTarget(target: string): target is UploadTarget {
