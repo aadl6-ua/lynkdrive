@@ -80,6 +80,16 @@
     - Mobile: `expo-notifications` + `expo-device` (versiones de Expo SDK 54), cargados de forma diferida en `apps/mobile/src/features/notifications/pushNotifications.native.ts`; en web (`pushNotifications.ts`) no se hace nada. El permiso solo se pide desde la tarjeta "Notificaciones" de Perfil; tras iniciar sesión se registra el token sin diálogos si el permiso ya estaba concedido; al cerrar sesión se da de baja (máx. 3 s de espera). Al tocar una notificación se abre Mis Viajes en el detalle de la reserva. Sin proyecto EAS (`EXPO_PUBLIC_EAS_PROJECT_ID` o `extra.eas.projectId`), en simulador o en Expo Go Android la tarjeta no se muestra y la app sigue igual. En dispositivos reales hace falta development build/EAS con credenciales de push (APNs/FCM).
     - Los tests e2e fijan `PUSH_NOTIFICATIONS_ENABLED=false` y la app de tests usa la misma `ValidationPipe` global que `main.ts`.
 
+- **QA de extremo a extremo en navegador (2026-10-31):**
+    - Explorar filtra por fechas: `GET /api/vehicles?from=...&to=...` (ISO, ambas o ninguna, `from < to`; si no, 400) devuelve solo vehículos con una ventana de disponibilidad que cubra el rango y sin reservas `accepted`, `paid_confirmed`, `in_progress` o `completed` que choquen con el colchón de 2 h (`HANDOVER_BUFFER_HOURS`, ahora en `apps/api/src/common/booking-rules.ts`); las `pending` no bloquean. En la app, sección "Fechas" en la hoja de filtros (`CalendarPicker` en modo `filter`, sin colores de disponibilidad) y la ficha del vehículo precarga esas fechas en "Solicitar reserva".
+    - `GET /api/geocoding/search` responde 503 si Nominatim no contesta (antes `[]`); la app distingue error y "Sin resultados".
+    - `PUT /api/vehicles/:id`: en `fuelType`, `transmission` y `seats`, `undefined` conserva y `null` borra (misma regla que `PUT /users/me`); `seats` mínimo 1.
+    - `PUT /api/users/me` con un teléfono ya usado en otra cuenta → 409 con mensaje. En el registro la app no reintenta los 4xx (solo 404 mientras el trigger crea la fila, red y 5xx) y avisa con un toast si no pudo guardar el perfil.
+    - Cuenta bloqueada: un interceptor de axios detecta el 403 `Cuenta bloqueada por la administración` y la app muestra una pantalla única con "Cerrar sesión" (`AccountBlockedScreen`).
+    - `VehicleResponse.disabledByAdmin` (solo en `mine/list`): Mis Vehículos muestra "Retirado" y no deja reactivarlo.
+    - Mis Viajes: "Gastado"/"Ingresos" solo cuentan reservas pagadas (`paid_confirmed`, `in_progress`, `completed`), como Mis ingresos; si la otra parte borró su cuenta se muestra "Usuario eliminado".
+    - Recorrido reproducible en `scripts/e2e-web/` (`recorrido.mjs` con Playwright y `nominatim-mock.js`); instrucciones en su `README.md`.
+
 ---
 
 ## 1. Descripción del Proyecto
