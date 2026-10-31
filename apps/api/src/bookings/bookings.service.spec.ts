@@ -1,4 +1,5 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { QueryFailedError } from 'typeorm';
 import { BookingsService, HANDOVER_BUFFER_HOURS } from './bookings.service';
 
 type Call = { sql: string; params: unknown[] };
@@ -23,11 +24,19 @@ const bookingRow = {
   updated_at: new Date()
 };
 
-function buildService(opts: { lockedStatus?: string; conflict?: boolean; initialRow?: typeof bookingRow }) {
+function buildService(opts: {
+  lockedStatus?: string;
+  conflict?: boolean;
+  initialRow?: typeof bookingRow;
+  failAcceptWith?: Error;
+}) {
   const calls: Call[] = [];
   let transactionRuns = 0;
   const run = async (sql: string, params: unknown[] = []) => {
     calls.push({ sql, params });
+    if (opts.failAcceptWith && sql.includes("status = 'accepted'")) {
+      throw opts.failAcceptWith;
+    }
     if (sql.includes('FOR UPDATE') && sql.includes('FROM bookings')) {
       return [{ status: opts.lockedStatus ?? 'pending', start_datetime: bookingRow.start_datetime, end_datetime: bookingRow.end_datetime }];
     }
@@ -93,6 +102,42 @@ describe('BookingsService - aceptar reserva', () => {
 
     await expect(service.updateStatus('b1', ownerUser, accept)).rejects.toBeInstanceOf(ConflictException);
     expect(calls.some((c) => c.sql.includes("status = 'accepted'"))).toBe(false);
+  });
+});
+
+describe('BookingsService - restriccion de solapes en BD', () => {
+  it('traduce la violacion de excl_bookings_no_overlap a Conflict', async () => {
+    const exclusion = new QueryFailedError('UPDATE bookings', [], Object.assign(new Error('excl'), { code: '23P01' }));
+    const { service } = buildService({ failAcceptWith: exclusion });
+
+    await expect(service.updateStatus('b1', ownerUser, accept)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('no oculta otros errores de BD', async () => {
+    const other = new QueryFailedError('UPDATE bookings', [], Object.assign(new Error('boom'), { code: '40001' }));
+    const { service } = buildService({ failAcceptWith: other });
+
+    await expect(service.updateStatus('b1', ownerUser, accept)).rejects.toBe(other);
+  });
+});
+
+describe('BookingsService - crear solicitud', () => {
+  it('rechaza reservar un vehiculo inactivo', async () => {
+    const usersRepo = { findOne: jest.fn().mockResolvedValue({ id: 'd1' }) };
+    const vehiclesRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'v1', ownerId: OWNER, pricePerDay: '10', status: 'inactive' })
+    };
+    const bookingsRepo = { query: jest.fn() };
+    const service = new BookingsService(bookingsRepo as never, vehiclesRepo as never, usersRepo as never, {} as never);
+
+    await expect(
+      service.createForDriver('d1', {
+        vehicleId: 'v1',
+        startDatetime: '2030-03-01T10:00:00Z',
+        endDatetime: '2030-03-02T10:00:00Z'
+      } as never)
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(bookingsRepo.query).not.toHaveBeenCalled();
   });
 });
 
