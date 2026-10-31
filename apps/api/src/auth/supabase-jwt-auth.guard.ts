@@ -2,6 +2,7 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  Logger,
   UnauthorizedException
 } from '@nestjs/common';
 import {
@@ -13,6 +14,9 @@ import {
 } from 'jose';
 import { AuthUser } from './auth-user.type';
 
+const SYMMETRIC_ALGORITHMS = ['HS256'];
+const ASYMMETRIC_ALGORITHMS = ['ES256', 'RS256'];
+
 type RequestWithAuthUser = {
   headers: Record<string, string | string[] | undefined>;
   user?: AuthUser;
@@ -20,6 +24,7 @@ type RequestWithAuthUser = {
 
 @Injectable()
 export class SupabaseJwtAuthGuard implements CanActivate {
+  private readonly logger = new Logger(SupabaseJwtAuthGuard.name);
   private readonly supabaseUrl = process.env.SUPABASE_URL;
   private readonly supabaseJwksUrl = process.env.SUPABASE_JWKS_URL;
   private readonly supabaseJwtSecret = process.env.SUPABASE_JWT_SECRET;
@@ -60,9 +65,9 @@ export class SupabaseJwtAuthGuard implements CanActivate {
       return null;
     }
 
-    const [scheme, token] = authorizationHeader.split(' ');
+    const [scheme, token, ...rest] = authorizationHeader.trim().split(/\s+/);
 
-    if (scheme !== 'Bearer' || !token) {
+    if (scheme?.toLowerCase() !== 'bearer' || !token || rest.length > 0) {
       return null;
     }
 
@@ -70,10 +75,16 @@ export class SupabaseJwtAuthGuard implements CanActivate {
   }
 
   private async verifyToken(token: string): Promise<JWTPayload> {
+    if (!this.jwtIssuer) {
+      this.logger.error('SUPABASE_URL no configurada: no se puede validar el issuer del token');
+      throw new UnauthorizedException('Invalid or expired token');
+    }
+
     try {
-      const verifyOptions: JWTVerifyOptions = {
+      const baseOptions: JWTVerifyOptions = {
         issuer: this.jwtIssuer,
-        audience: this.jwtAudience
+        audience: this.jwtAudience,
+        requiredClaims: ['exp', 'sub']
       };
 
       const algorithm = decodeProtectedHeader(token).alg;
@@ -84,7 +95,10 @@ export class SupabaseJwtAuthGuard implements CanActivate {
         this.supabaseJwtSecret !== '<SUPABASE_JWT_SECRET_OPTIONAL>'
       ) {
         const secret = new TextEncoder().encode(this.supabaseJwtSecret);
-        const { payload } = await jwtVerify(token, secret, verifyOptions);
+        const { payload } = await jwtVerify(token, secret, {
+          ...baseOptions,
+          algorithms: SYMMETRIC_ALGORITHMS
+        });
 
         return payload;
       }
@@ -93,7 +107,10 @@ export class SupabaseJwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('SUPABASE_JWKS_URL is required for asymmetric token verification');
       }
 
-      const { payload } = await jwtVerify(token, this.jwks, verifyOptions);
+      const { payload } = await jwtVerify(token, this.jwks, {
+        ...baseOptions,
+        algorithms: ASYMMETRIC_ALGORITHMS
+      });
 
       return payload;
     } catch {

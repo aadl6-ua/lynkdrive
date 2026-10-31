@@ -22,7 +22,7 @@ export class ChecklistImagesController {
   constructor(private readonly checklistImagesService: ChecklistImagesService) {}
 
   @Get()
-  async findAll(@CurrentUser() user: AuthUser, @Query('checklistId') checklistId?: string) {
+  async findAll(@CurrentUser() user: AuthUser, @Query('checklistId', new ParseUUIDPipe({ optional: true })) checklistId?: string) {
     return this.checklistImagesService.findAllForUser(user.sub, checklistId ?? '');
   }
 

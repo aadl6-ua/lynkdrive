@@ -97,6 +97,7 @@ export class BookingChecklistsService {
     }
 
     await this.ensureBookingParticipant(existing.bookingId, userId);
+    this.ensureSubmitter(existing.submittedBy, userId);
 
     const nextFuelLevel =
       typeof updateBookingChecklistDto.fuelLevel === 'number'
@@ -129,7 +130,14 @@ export class BookingChecklistsService {
     }
 
     await this.ensureBookingParticipant(existing.bookingId, userId);
+    this.ensureSubmitter(existing.submittedBy, userId);
     await this.bookingChecklistsRepository.delete({ id });
+  }
+
+  private ensureSubmitter(submittedBy: string, userId: string): void {
+    if (submittedBy !== userId) {
+      throw new ForbiddenException('Only the user who submitted this checklist can modify it');
+    }
   }
 
   private async ensureBookingParticipant(bookingId: string, userId: string): Promise<void> {

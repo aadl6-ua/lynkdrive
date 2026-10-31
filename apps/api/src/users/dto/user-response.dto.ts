@@ -9,3 +9,12 @@ export class UserResponseDto {
   isVerified!: boolean;
   createdAt!: Date;
 }
+
+export class PublicUserResponseDto {
+  id!: string;
+  firstName!: string;
+  lastName!: string;
+  avatarUrl!: string | null;
+  isVerified!: boolean;
+  createdAt!: Date;
+}

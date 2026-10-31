@@ -25,7 +25,7 @@ export class VehicleAvailabilityWindowsController {
   ) {}
 
   @Get()
-  async findAll(@Query('vehicleId') vehicleId?: string) {
+  async findAll(@Query('vehicleId', new ParseUUIDPipe({ optional: true })) vehicleId?: string) {
     return this.vehicleAvailabilityWindowsService.findAll(vehicleId);
   }
 

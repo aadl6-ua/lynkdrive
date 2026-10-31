@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
 
 type UploadTarget =
@@ -28,6 +29,7 @@ type TargetConfig = {
 
 @Injectable()
 export class UploadsService {
+  private readonly logger = new Logger(UploadsService.name);
   private readonly supabaseUrl = process.env.SUPABASE_URL;
   private readonly supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   private readonly signedUrlTtlSeconds = this.parsePositiveInt(
@@ -35,7 +37,12 @@ export class UploadsService {
     3600
   );
 
-  async uploadImage(target: UploadTarget, ownerId: string | undefined, file: Express.Multer.File): Promise<UploadResult> {
+  async uploadImage(
+    target: UploadTarget,
+    userId: string,
+    ownerId: string | undefined,
+    file: Express.Multer.File
+  ): Promise<UploadResult> {
     if (!this.supabaseUrl || !this.supabaseServiceRoleKey) {
       throw new InternalServerErrorException(
         'SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY son obligatorias para subir archivos'
@@ -46,10 +53,17 @@ export class UploadsService {
       throw new BadRequestException('Debes enviar un archivo en el campo file');
     }
 
-    const mimeType = file.mimetype?.toLowerCase() ?? '';
+    const declaredMimeType = file.mimetype?.toLowerCase() ?? '';
 
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(declaredMimeType)) {
       throw new BadRequestException('Tipo de archivo no permitido. Usa jpeg, png o webp');
+    }
+
+    // El tipo real se obtiene de los bytes del archivo, no de la cabecera enviada por el cliente.
+    const mimeType = file.buffer ? this.detectImageMimeType(file.buffer) : null;
+
+    if (!mimeType) {
+      throw new BadRequestException('El contenido del archivo no corresponde a una imagen valida');
     }
 
     const targetConfig = this.resolveTargetConfig(target);
@@ -58,11 +72,15 @@ export class UploadsService {
       throw new BadRequestException(`El archivo supera el limite permitido para ${target}`);
     }
 
-    const extension = this.resolveFileExtension(file.originalname, mimeType);
-    const ownerSegment = this.sanitizePathSegment(ownerId ?? 'anonymous');
+    const extension = this.resolveFileExtension(mimeType);
+    // La carpeta raiz siempre es el usuario autenticado; ownerId solo agrupa dentro de ella.
+    const userSegment = this.sanitizePathSegment(userId);
+    const ownerSegment = ownerId ? this.sanitizePathSegment(ownerId).slice(0, 64) : null;
     const targetSegment = this.sanitizePathSegment(target);
-    const uniqueName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
-    const path = `${targetSegment}/${ownerSegment}/${uniqueName}`;
+    const uniqueName = `${Date.now()}-${randomUUID()}.${extension}`;
+    const path = ownerSegment && ownerSegment !== userSegment
+      ? `${targetSegment}/${userSegment}/${ownerSegment}/${uniqueName}`
+      : `${targetSegment}/${userSegment}/${uniqueName}`;
 
     const supabase = createClient(this.supabaseUrl, this.supabaseServiceRoleKey, {
       auth: { persistSession: false }
@@ -74,7 +92,8 @@ export class UploadsService {
     });
 
     if (uploadError) {
-      throw new InternalServerErrorException(`Error al subir archivo: ${uploadError.message}`);
+      this.logger.error(`Error al subir archivo a storage: ${uploadError.message}`);
+      throw new InternalServerErrorException('Error al subir archivo');
     }
 
     const persistedValue = `supabase://${targetConfig.bucket}/${path}`;
@@ -157,15 +176,8 @@ export class UploadsService {
     };
   }
 
-  private resolveFileExtension(originalName: string, mimeType: string): string {
-    const extensionFromName = originalName.includes('.')
-      ? originalName.split('.').pop()?.toLowerCase()
-      : undefined;
-
-    if (extensionFromName && ['jpg', 'jpeg', 'png', 'webp'].includes(extensionFromName)) {
-      return extensionFromName;
-    }
-
+  // La extension se deriva del mime validado, nunca del nombre enviado por el cliente.
+  private resolveFileExtension(mimeType: string): string {
     if (mimeType === 'image/png') {
       return 'png';
     }
@@ -175,6 +187,29 @@ export class UploadsService {
     }
 
     return 'jpg';
+  }
+
+  private detectImageMimeType(buffer: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | null {
+    if (buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+      return 'image/jpeg';
+    }
+
+    if (
+      buffer.length > 8 &&
+      buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    ) {
+      return 'image/png';
+    }
+
+    if (
+      buffer.length > 12 &&
+      buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+    ) {
+      return 'image/webp';
+    }
+
+    return null;
   }
 
   private sanitizePathSegment(segment: string): string {
