@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { ReactNode } from 'react';
-import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { ReactNode, useEffect } from 'react';
+import { AccessibilityInfo, Platform, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { colorTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 import { Button } from './Button';
 
@@ -137,12 +137,19 @@ export function InlineMessage({
 
 /** Texto de error de campo, pequeño y bajo el input. */
 export function FieldError({ message }: { message?: string | null }) {
+  // iOS no anuncia los cambios de rol "alert": se lee el error al aparecer o cambiar.
+  useEffect(() => {
+    if (message && Platform.OS === 'ios') {
+      AccessibilityInfo.announceForAccessibility(message);
+    }
+  }, [message]);
+
   if (!message) {
     return null;
   }
 
   return (
-    <View style={styles.fieldError} accessibilityRole="alert">
+    <View style={styles.fieldError} accessibilityRole="alert" accessibilityLiveRegion="assertive">
       <Ionicons name="alert-circle" size={14} color={colorTokens.alertText} />
       <Text style={styles.fieldErrorText}>{message}</Text>
     </View>
