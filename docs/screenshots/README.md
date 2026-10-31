@@ -16,3 +16,15 @@ Imágenes referenciadas desde el README principal. Añádelas aquí con estos no
 | `profile.png` | Profile with personal data, documents and verification status |
 | `auth.png` | Login / register screen |
 | `demo.gif` | Short demo (30-60 s): search, request, accept, pay, check-in, check-out, review |
+
+## Cómo regenerarlas
+
+Las capturas se generan con `scripts/dev/capture-screenshots.js` (Playwright, 390 × 844 a 2x) sobre la web con los datos de `scripts/seed-demo.js`:
+
+```bash
+DEMO_PASSWORD='...' DEMO_IMAGES_DIR=./fotos-demo node scripts/seed-demo.js --reset
+WEB_URL=http://localhost:8081 DEMO_PASSWORD='...' DEMO_IMAGES_DIR=./fotos-demo \
+  npx -y -p playwright@1 node scripts/dev/capture-screenshots.js   # ONLY=explore-map.png para una sola
+```
+
+Las actuales usan ilustraciones generadas como fotos de coche; para el portfolio conviene repetirlas con fotos reales en `DEMO_IMAGES_DIR`. Faltan `explore-map.png` (en el entorno donde se generaron no cargaban los mapas de OpenStreetMap) y `demo.gif`.
