@@ -24,7 +24,7 @@ export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @Get()
-  async findAll(@CurrentUser() user: AuthUser, @Query('bookingId') bookingId?: string) {
+  async findAll(@CurrentUser() user: AuthUser, @Query('bookingId', new ParseUUIDPipe({ optional: true })) bookingId?: string) {
     return this.reviewsService.findAllForUser(user.sub, bookingId);
   }
 

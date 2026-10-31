@@ -1,18 +1,101 @@
-import { FuelType, Transmission, VehicleStatus } from './create-vehicle.dto';
+import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min
+} from 'class-validator';
+import {
+  FUEL_TYPES,
+  MAX_PRICE_PER_DAY,
+  FuelType,
+  Transmission,
+  TRANSMISSIONS,
+  VEHICLE_STATUSES,
+  VehicleStatus
+} from './create-vehicle.dto';
+import type { UpdateVehicleRequest } from '@lynkdrive/shared';
 
-export class UpdateVehicleDto {
+export class UpdateVehicleDto implements UpdateVehicleRequest {
+  // Se ignora en el endpoint: el propietario no puede transferirse.
+  @IsOptional()
+  @IsUUID()
   ownerId?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
   brand?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
   model?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1900)
+  @Max(2100)
   year?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(20)
   licensePlate?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(5000)
   description?: string;
+
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(1)
+  @Max(MAX_PRICE_PER_DAY)
   pricePerDay?: number;
+
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(-90)
+  @Max(90)
   locationLat?: number;
+
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(-180)
+  @Max(180)
   locationLng?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
   locationAddress?: string;
-  fuelType?: FuelType;
-  transmission?: Transmission;
-  seats?: number;
+
+  @IsOptional()
+  @IsIn(FUEL_TYPES)
+  fuelType?: FuelType | null;
+
+  @IsOptional()
+  @IsIn(TRANSMISSIONS)
+  transmission?: Transmission | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  seats?: number | null;
+
+  @IsOptional()
+  @IsIn(VEHICLE_STATUSES)
   status?: VehicleStatus;
 }

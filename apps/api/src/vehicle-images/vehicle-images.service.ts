@@ -1,6 +1,7 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { getStorageBuckets, isAcceptableImageValue } from '../common/supabase-storage';
 import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
 import { CreateVehicleImageDto } from './dto/create-vehicle-image.dto';
 import { UpdateVehicleImageDto } from './dto/update-vehicle-image.dto';
@@ -84,7 +85,15 @@ export class VehicleImagesService {
     createVehicleImageDto: CreateVehicleImageDto
   ): Promise<VehicleImageResponseDto> {
     await this.ensureVehicleOwnership(createVehicleImageDto.vehicleId, ownerId);
+    this.ensureOwnImage(createVehicleImageDto.imageUrl, ownerId);
     return this.create(createVehicleImageDto);
+  }
+
+  // Fotos del bucket de vehículos subidas por el propietario, o URLs https externas.
+  private ensureOwnImage(imageUrl: string, ownerId: string): void {
+    if (!isAcceptableImageValue(imageUrl, ownerId, { buckets: [getStorageBuckets().vehicles], allowExternal: true })) {
+      throw new BadRequestException('imageUrl debe ser una foto subida por ti o una URL https');
+    }
   }
 
   async update(id: string, updateVehicleImageDto: UpdateVehicleImageDto): Promise<VehicleImageResponseDto> {
@@ -118,6 +127,10 @@ export class VehicleImagesService {
     ownerId: string,
     updateVehicleImageDto: UpdateVehicleImageDto
   ): Promise<VehicleImageResponseDto> {
+    if (updateVehicleImageDto.imageUrl) {
+      this.ensureOwnImage(updateVehicleImageDto.imageUrl, ownerId);
+    }
+
     const image = await this.vehicleImagesRepository.findOne({
       where: { id },
       select: { id: true, vehicleId: true }

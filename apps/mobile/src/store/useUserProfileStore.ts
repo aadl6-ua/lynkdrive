@@ -1,26 +1,11 @@
+import type { UpdateMyProfileRequest, UserResponse } from '@lynkdrive/shared';
 import { create } from 'zustand';
 import { httpClient } from '../api/http';
+import { getApiErrorMessage } from '../shared/errors';
 
-interface UserProfile {
-  id: string;
-  firstName: string;
-  lastName: string;
-  phoneNumber: string | null;
-  avatarUrl: string | null;
-  idDocumentUrl: string | null;
-  driverLicenseUrl: string | null;
-  isVerified: boolean;
-  createdAt: string;
-}
+export type UserProfile = UserResponse;
 
-interface UserProfileMutation {
-  firstName: string;
-  lastName: string;
-  phoneNumber: string | null;
-  avatarUrl: string | null;
-  idDocumentUrl: string | null;
-  driverLicenseUrl: string | null;
-}
+type UserProfileMutation = Required<UpdateMyProfileRequest>;
 
 interface UserProfileState {
   profile: UserProfile | null;
@@ -29,7 +14,8 @@ interface UserProfileState {
   error: string | null;
   mutationMessage: string | null;
   fetchMyProfile: () => Promise<void>;
-  updateMyProfile: (payload: UserProfileMutation) => Promise<void>;
+  updateMyProfile: (payload: UserProfileMutation) => Promise<boolean>;
+  reset: () => void;
 }
 
 export const useUserProfileStore = create<UserProfileState>((set, get) => ({
@@ -48,11 +34,12 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
         profile: response.data,
         loading: false
       });
-    } catch {
+    } catch (error: unknown) {
+      // Conservamos el perfil previo si existía: un fallo puntual de red no debe
+      // "desverificar" al usuario en la UI.
       set({
         loading: false,
-        profile: null,
-        error: 'No se pudo cargar /users/me. Revisa token de autenticacion.'
+        error: getApiErrorMessage(error, 'No se pudo cargar tu perfil. Comprueba tu conexión.')
       });
     }
   },
@@ -62,12 +49,15 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
     try {
       await httpClient.put('/users/me', payload);
       await get().fetchMyProfile();
-      set({ saving: false, mutationMessage: 'Perfil autenticado actualizado correctamente.' });
-    } catch {
+      set({ saving: false });
+      return true;
+    } catch (error: unknown) {
       set({
         saving: false,
-        mutationMessage: 'No se pudo actualizar /users/me.'
+        mutationMessage: getApiErrorMessage(error, 'No se pudieron guardar los cambios del perfil.')
       });
+      return false;
     }
-  }
+  },
+  reset: () => set({ profile: null, loading: false, saving: false, error: null, mutationMessage: null })
 }));

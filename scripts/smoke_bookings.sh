@@ -177,6 +177,10 @@ if [[ "$BOOKING_STATUS" != "paid_confirmed" ]]; then
 fi
 ok "Booking en paid_confirmed"
 
+log "Checklist de entrega (obligatorio antes de in_progress)"
+request "POST" "$BASE_URL/booking-checklists" "{\"bookingId\":\"$BOOKING_ID\",\"type\":\"check_in\",\"mileage\":10000,\"fuelLevel\":80}" "$DRIVER_TOKEN"
+expect_status "201" "POST /booking-checklists check_in"
+
 log "Owner marca in_progress"
 request "PUT" "$BASE_URL/bookings/$BOOKING_ID/status" "{\"status\":\"in_progress\"}" "$OWNER_TOKEN"
 expect_status "200" "PUT /bookings/:id/status in_progress"
@@ -185,6 +189,10 @@ if [[ "$BOOKING_STATUS" != "in_progress" ]]; then
   fail "Estado esperado in_progress y llego: $BOOKING_STATUS"
 fi
 ok "Booking en in_progress"
+
+log "Checklist de devolución (obligatorio antes de completed)"
+request "POST" "$BASE_URL/booking-checklists" "{\"bookingId\":\"$BOOKING_ID\",\"type\":\"check_out\",\"mileage\":10250,\"fuelLevel\":60}" "$DRIVER_TOKEN"
+expect_status "201" "POST /booking-checklists check_out"
 
 log "Owner marca completed"
 request "PUT" "$BASE_URL/bookings/$BOOKING_ID/status" "{\"status\":\"completed\"}" "$OWNER_TOKEN"

@@ -1,19 +1,39 @@
+import axios from 'axios';
 import { create } from 'zustand';
-import { httpClient } from '../api/http';
-import { setAccessToken } from '../api/http';
+import { httpClient, setAccessToken } from '../api/http';
 import { supabaseClient } from '../api/supabase';
+import { getPasswordResetRedirectUrl } from '../features/auth/PasswordResetScreen';
+import { getApiErrorMessage } from '../shared/errors';
+import { LEGAL_VERSION } from '../shared/legal';
+import { toast } from '../shared/ui/feedback';
+import { unregisterPushNotifications } from '../features/notifications/pushNotifications';
+import { useUserProfileStore } from './useUserProfileStore';
+import { useVehiclesStore } from './useVehiclesStore';
+
+const SUPABASE_ERROR_TRANSLATIONS: Array<[RegExp, string]> = [
+  [/invalid login credentials/i, 'Email o contraseña incorrectos.'],
+  [/email not confirmed/i, 'Tienes que confirmar tu email antes de entrar. Revisa tu bandeja de entrada.'],
+  [/user already registered/i, 'Ya existe una cuenta con este email. Prueba a iniciar sesión.'],
+  [/password should be at least/i, 'La contraseña es demasiado corta.'],
+  [/unable to validate email address|invalid email/i, 'El email no tiene un formato válido.'],
+  [/rate limit|too many requests/i, 'Demasiados intentos. Espera un momento y vuelve a intentarlo.'],
+  [/failed to fetch|network/i, 'Sin conexión. Revisa tu red e inténtalo de nuevo.']
+];
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'message' in error) {
     const message = (error as { message?: unknown }).message;
 
     if (typeof message === 'string' && message.trim()) {
-      return message;
+      const translated = SUPABASE_ERROR_TRANSLATIONS.find(([pattern]) => pattern.test(message));
+      return translated ? translated[1] : message;
     }
   }
 
   return fallback;
 }
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type RegisterProfileInput = {
   firstName: string;
@@ -38,7 +58,11 @@ async function updateMinimumProfileWithRetry(payload: RegisterProfileInput): Pro
       });
       return;
     } catch (error: unknown) {
-      if (attempt === maxAttempts) {
+      // Solo se reintenta mientras el trigger crea la fila (404) o por fallos de red; un 400/409
+      // (p. ej. teléfono ya usado en otra cuenta) no se arregla reintentando.
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+
+      if (attempt === maxAttempts || (status !== undefined && status !== 404 && status < 500)) {
         throw error;
       }
 
@@ -63,6 +87,8 @@ type AuthState = {
   signIn: () => Promise<void>;
   signUp: (profileInput?: RegisterProfileInput) => Promise<void>;
   signOut: () => Promise<void>;
+  requestPasswordReset: () => Promise<boolean>;
+  clearFeedback: () => void;
 };
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -126,7 +152,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { emailInput, passwordInput } = get();
 
     if (!emailInput.trim() || !passwordInput.trim()) {
-      set({ error: 'Email y password son obligatorios.', message: null });
+      set({ error: 'Introduce tu email y tu contraseña.', message: null });
 
       return;
     }
@@ -149,7 +175,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         email: data.session.user.email ?? null,
         accessToken: data.session.access_token,
         loading: false,
-        message: 'Sesion iniciada correctamente.'
+        passwordInput: ''
       });
     } catch (error: unknown) {
       set({
@@ -163,7 +189,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { emailInput, passwordInput } = get();
 
     if (!emailInput.trim() || !passwordInput.trim()) {
-      set({ error: 'Email y password son obligatorios.', message: null });
+      set({ error: 'Introduce tu email y tu contraseña.', message: null });
 
       return;
     }
@@ -173,7 +199,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const { data, error } = await supabaseClient.auth.signUp({
         email: emailInput.trim(),
-        password: passwordInput
+        password: passwordInput,
+        options: {
+          // El trigger auth.users -> public.users usa nombre y apellidos aunque haya confirmación
+          // por email; la aceptación de los textos legales queda registrada con fecha y versión.
+          data: {
+            first_name: profileInput?.firstName,
+            last_name: profileInput?.lastName,
+            terms_accepted_at: new Date().toISOString(),
+            terms_version: LEGAL_VERSION
+          }
+        }
       });
 
       if (error) {
@@ -191,20 +227,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
 
         if (profileInput) {
-          await updateMinimumProfileWithRetry(profileInput);
+          try {
+            await updateMinimumProfileWithRetry(profileInput);
+          } catch (profileError: unknown) {
+            // La cuenta ya existe y hay sesión: se entra en la app y se avisa para completar el perfil.
+            toast.error(
+              `Tu cuenta se ha creado, pero no se pudo guardar tu perfil: ${getApiErrorMessage(
+                profileError,
+                'error inesperado.'
+              )} Complétalo en Perfil.`
+            );
+          }
+          // El listener de sesión ya pudo cargar el perfil vacío creado por el
+          // trigger; lo recargamos para reflejar nombre y teléfono recién guardados.
+          await useUserProfileStore.getState().fetchMyProfile();
         }
 
-        set({
-          loading: false,
-          message: 'Cuenta creada y sesion iniciada correctamente.'
-        });
+        set({ loading: false, passwordInput: '' });
 
         return;
       }
 
+      // Proyecto con confirmación de email: no hay sesión hasta confirmar.
       set({
         loading: false,
-        message: 'Registro enviado. Revisa tu email para confirmar la cuenta y luego inicia sesion.'
+        passwordInput: '',
+        message: 'Cuenta creada. Te hemos enviado un email para confirmarla; después podrás iniciar sesión.'
       });
     } catch (error: unknown) {
       set({
@@ -218,15 +266,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, error: null, message: null });
 
     try {
+      // Baja del token push con la sesión aún activa; sin red no retrasa el cierre más de 3 s.
+      await Promise.race([unregisterPushNotifications(), new Promise((resolve) => setTimeout(resolve, 3000))]);
       await supabaseClient.auth.signOut();
       setAccessToken(null);
+      useUserProfileStore.getState().reset();
+      useVehiclesStore.getState().reset();
       set({
         userId: null,
         email: null,
         accessToken: null,
         loading: false,
         hasHydrated: true,
-        message: 'Sesion cerrada.'
+        passwordInput: ''
       });
     } catch (error: unknown) {
       set({
@@ -235,5 +287,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         message: null
       });
     }
-  }
+  },
+  requestPasswordReset: async () => {
+    const email = get().emailInput.trim();
+
+    if (!EMAIL_PATTERN.test(email)) {
+      set({ error: 'Escribe arriba el email de tu cuenta para enviarte el enlace.', message: null });
+      return false;
+    }
+
+    set({ loading: true, error: null, message: null });
+
+    try {
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: getPasswordResetRedirectUrl()
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      set({
+        loading: false,
+        message: 'Si existe una cuenta con ese email, recibirás un enlace para restablecer la contraseña.'
+      });
+      return true;
+    } catch (error: unknown) {
+      set({ loading: false, error: getErrorMessage(error, 'No se pudo enviar el enlace de recuperación.') });
+      return false;
+    }
+  },
+  clearFeedback: () => set({ error: null, message: null })
 }));

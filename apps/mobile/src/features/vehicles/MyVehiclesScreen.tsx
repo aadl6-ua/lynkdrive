@@ -1,35 +1,87 @@
-import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  ScrollView,
-  useWindowDimensions
-} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
 import { uploadImageToApi } from '../../api/uploads';
-import { EmptyState } from '../../app/components/ui/EmptyState';
-import { SectionHeader } from '../../app/components/ui/SectionHeader';
-import { styles } from '../../app/styles';
-import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import {
+  colorTokens,
+  layoutTokens,
+  radiusTokens,
+  shadowTokens,
+  spacingTokens,
+  typographyTokens
+} from '../../app/theme/tokens';
+import { AppTabKey } from '../../app/types';
+import { AddressSearch } from '../../shared/components/AddressSearch';
+import { getApiErrorMessage } from '../../shared/errors';
+import {
+  calendarDayHourToIso,
+  formatDateTimeMadrid,
+  formatPriceCompact,
+  isoToCalendarDayHour,
+  pluralize,
+  translateFuelType,
+  translateTransmission
+} from '../../shared/format';
+import { ImagePermissionError, ImageSource, pickImages } from '../../shared/imagePicker';
 import { parseLocaleNumber } from '../../shared/number';
-import { useGeocodingSuggestions } from '../../shared/useGeocodingSuggestions';
+import {
+  AppImage,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  ErrorState,
+  InlineMessage,
+  PhotoGrid,
+  PhotoItem,
+  Screen,
+  ScreenHeader,
+  SectionTitle,
+  SelectField,
+  Skeleton,
+  StatusChip,
+  TextField,
+  VehicleCardSkeleton,
+  confirmAction,
+  toast
+} from '../../shared/ui';
+import { useBackHandler } from '../../shared/useBackHandler';
+import { EarningsScreen } from '../earnings/EarningsScreen';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useVehicleAvailabilityWindowsStore } from '../../store/useVehicleAvailabilityWindowsStore';
 import { useVehicleImagesStore } from '../../store/useVehicleImagesStore';
-import { useVehiclesStore } from '../../store/useVehiclesStore';
+import { VehicleItem, useVehiclesStore } from '../../store/useVehiclesStore';
 import { CalendarPicker } from '../explore/CalendarPicker';
 
 type MyVehiclesScreenMode = 'list' | 'create' | 'edit' | 'images' | 'availability';
+
+type MyVehiclesScreenProps = {
+  topPadding?: number;
+  bottomPadding?: number;
+  onNavigateToTab?: (tab: AppTabKey) => void;
+};
+
+type FuelType = NonNullable<VehicleItem['fuelType']>;
+type Transmission = NonNullable<VehicleItem['transmission']>;
+
+type VehicleForm = {
+  brand: string;
+  model: string;
+  year: string;
+  licensePlate: string;
+  description: string;
+  pricePerDay: string;
+  address: string;
+  location: { lat: number; lng: number } | null;
+  fuelType: '' | FuelType;
+  transmission: '' | Transmission;
+  seats: string;
+};
+
+type VehicleFormErrors = Partial<Record<keyof VehicleForm, string>>;
 
 type AvailabilityDateRange = {
   startDate: Date | null;
@@ -38,300 +90,136 @@ type AvailabilityDateRange = {
   endHour: number;
 };
 
-type MyVehiclesScreenProps = {
-  topPadding?: number;
-  bottomPadding?: number;
+/** Subida local en curso (optimizando, subiendo o con error para reintentar). */
+type UploadItem = {
+  key: string;
+  asset: Parameters<typeof prepareUploadImage>[0];
+  previewUri: string;
+  status: 'processing' | 'uploading' | 'error';
+  progress?: number;
+  errorMessage?: string;
 };
 
-type ButtonVariant = 'primary' | 'ghost' | 'danger';
-type SelectOption = {
-  label: string;
-  value: string;
-};
-
-const FUEL_TYPE_OPTIONS: SelectOption[] = [
+const FUEL_TYPE_OPTIONS: Array<{ label: string; value: '' | FuelType }> = [
+  { label: 'Sin especificar', value: '' },
   { label: 'Gasolina', value: 'gasoline' },
-  { label: 'Diesel', value: 'diesel' },
-  { label: 'Electrico', value: 'electric' },
-  { label: 'Hibrido', value: 'hybrid' }
+  { label: 'Diésel', value: 'diesel' },
+  { label: 'Eléctrico', value: 'electric' },
+  { label: 'Híbrido', value: 'hybrid' }
 ];
 
-const TRANSMISSION_OPTIONS: SelectOption[] = [
+const TRANSMISSION_OPTIONS: Array<{ label: string; value: '' | Transmission }> = [
+  { label: 'Sin especificar', value: '' },
   { label: 'Manual', value: 'manual' },
-  { label: 'Automatica', value: 'automatic' }
+  { label: 'Automático', value: 'automatic' }
 ];
 
-const SEATS_OPTIONS: SelectOption[] = [
-  { label: 'No especificado', value: '' },
-  { label: '2 plazas', value: '2' },
-  { label: '3 plazas', value: '3' },
-  { label: '4 plazas', value: '4' },
-  { label: '5 plazas', value: '5' },
-  { label: '6 plazas', value: '6' },
-  { label: '7 plazas', value: '7' },
-  { label: '8 plazas', value: '8' },
-  { label: '9 plazas', value: '9' }
+const SEATS_OPTIONS = [
+  { label: 'Sin especificar', value: '' },
+  ...['2', '3', '4', '5', '6', '7', '8', '9'].map((value) => ({ label: `${value} plazas`, value }))
 ];
 
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('es-ES', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'Europe/Madrid'
-  }).format(new Date(value));
-}
+const MAX_VEHICLE_PHOTOS = 12;
+const CURRENT_YEAR = new Date().getFullYear();
 
-function formatCurrencyEUR(value: number): string {
-  return new Intl.NumberFormat('es-ES', {
-    style: 'currency',
-    currency: 'EUR',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value);
-}
+const EMPTY_FORM: VehicleForm = {
+  brand: '',
+  model: '',
+  year: '',
+  licensePlate: '',
+  description: '',
+  pricePerDay: '',
+  address: '',
+  location: null,
+  fuelType: '',
+  transmission: '',
+  seats: ''
+};
 
-function parseDateFromIso(value: string): Date | null {
-  const date = new Date(value);
+let uploadSeq = 0;
 
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function buildAvailabilitySelectionFromIso(startIso: string, endIso: string): AvailabilityDateRange {
-  const startDate = parseDateFromIso(startIso);
-  const endDate = parseDateFromIso(endIso);
-
+function formFromVehicle(vehicle: VehicleItem): VehicleForm {
   return {
-    startDate,
-    startHour: startDate?.getHours() ?? 10,
-    endDate,
-    endHour: endDate?.getHours() ?? 18
+    brand: vehicle.brand,
+    model: vehicle.model,
+    year: String(vehicle.year),
+    licensePlate: vehicle.licensePlate,
+    description: vehicle.description,
+    pricePerDay: String(vehicle.pricePerDay).replace('.', ','),
+    address: vehicle.locationAddress,
+    location: { lat: vehicle.locationLat, lng: vehicle.locationLng },
+    fuelType: vehicle.fuelType ?? '',
+    transmission: vehicle.transmission ?? '',
+    seats: vehicle.seats !== null ? String(vehicle.seats) : ''
   };
+}
+
+function validateVehicleForm(form: VehicleForm): VehicleFormErrors {
+  const errors: VehicleFormErrors = {};
+  const year = parseLocaleNumber(form.year);
+  const price = parseLocaleNumber(form.pricePerDay);
+
+  if (!form.brand.trim()) errors.brand = 'Indica la marca.';
+  if (!form.model.trim()) errors.model = 'Indica el modelo.';
+  if (!form.year.trim()) {
+    errors.year = 'Indica el año.';
+  } else if (!Number.isInteger(year) || year < 1950 || year > CURRENT_YEAR + 1) {
+    errors.year = `Entre 1950 y ${CURRENT_YEAR + 1}.`;
+  }
+  if (!form.pricePerDay.trim()) {
+    errors.pricePerDay = 'Indica el precio.';
+  } else if (Number.isNaN(price) || price < 1) {
+    errors.pricePerDay = 'Debe ser de al menos 1 €.';
+  } else if (price > 10000) {
+    errors.pricePerDay = 'Máximo 10.000 € por día.';
+  }
+  if (!form.licensePlate.trim()) errors.licensePlate = 'Indica la matrícula.';
+  if (!form.description.trim()) {
+    errors.description = 'Describe el vehículo para generar confianza.';
+  }
+  if (!form.address.trim()) {
+    errors.address = 'Indica dónde se recoge el vehículo.';
+  } else if (!form.location) {
+    errors.address = 'Elige una de las direcciones sugeridas.';
+  }
+
+  return errors;
 }
 
 function emptyAvailabilitySelection(): AvailabilityDateRange {
-  return {
-    startDate: null,
-    startHour: 10,
-    endDate: null,
-    endHour: 18
-  };
+  return { startDate: null, startHour: 10, endDate: null, endHour: 18 };
 }
 
-function buildIsoFromSelection(date: Date | null, hour: number): string {
-  if (!date) {
-    return '';
-  }
-
-  const nextDate = new Date(date);
-  nextDate.setHours(hour, 0, 0, 0);
-  return nextDate.toISOString();
-}
-
-function ActionButton({
-  label,
-  onPress,
-  disabled = false,
-  variant = 'primary'
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  variant?: ButtonVariant;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[
-        localStyles.actionButton,
-        variant === 'primary'
-          ? localStyles.actionButtonPrimary
-          : variant === 'danger'
-            ? localStyles.actionButtonDanger
-            : localStyles.actionButtonGhost,
-        disabled ? localStyles.actionButtonDisabled : undefined
-      ]}
-    >
-      <Text
-        style={[
-          localStyles.actionButtonText,
-          variant === 'ghost' ? localStyles.actionButtonGhostText : undefined,
-          variant === 'danger' ? localStyles.actionButtonDangerText : undefined
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-
-function Field({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-  keyboardType,
-  autoCapitalize = 'sentences',
-  multiline = false
-}: {
-  label: string;
-  value: string;
-  onChangeText: (value: string) => void;
-  placeholder: string;
-  keyboardType?: 'default' | 'number-pad' | 'decimal-pad';
-  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
-  multiline?: boolean;
-}) {
-  return (
-    <View style={localStyles.fieldWrap}>
-      <Text style={localStyles.fieldLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize}
-        multiline={multiline}
-        style={[styles.input, multiline ? localStyles.multilineInput : null]}
-      />
-    </View>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  placeholder,
-  options,
-  onChange
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  options: SelectOption[];
-  onChange: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selectedLabel = options.find((option) => option.value === value)?.label;
-
-  return (
-    <View style={localStyles.fieldWrap}>
-      <Text style={localStyles.fieldLabel}>{label}</Text>
-      <View>
-        <Pressable style={localStyles.selectTrigger} onPress={() => setOpen((prev) => !prev)}>
-          <Text style={selectedLabel ? localStyles.selectValueText : localStyles.selectPlaceholderText}>
-            {selectedLabel ?? placeholder}
-          </Text>
-          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={20} color="#6B7280" />
-        </Pressable>
-
-        {open ? (
-          <View style={localStyles.selectOptions}>
-            {options.map((option, index) => (
-              <Pressable
-                key={option.value || `option-${index}`}
-                style={[
-                  localStyles.selectOptionItem,
-                  index === options.length - 1 ? localStyles.selectOptionItemLast : undefined
-                ]}
-                onPress={() => {
-                  onChange(option.value);
-                  setOpen(false);
-                }}
-              >
-                <Text style={localStyles.suggestionLabel}>{option.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehiclesScreenProps) {
+export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab }: MyVehiclesScreenProps) {
   const { width } = useWindowDimensions();
-  const isDesktopWeb = Platform.OS === 'web' && width >= 1024;
-  const desktopCardStyle = isDesktopWeb ? localStyles.desktopCard : undefined;
-  const fabBottomOffset =
-    Platform.OS === 'web'
-      ? spacingTokens.lg
-      : Math.max(spacingTokens.sm, bottomPadding - spacingTokens.md);
+  const isCompact = width < 768;
 
   const [screenMode, setScreenMode] = useState<MyVehiclesScreenMode>('list');
+  const [showEarnings, setShowEarnings] = useState(false);
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
-  const [vehicleImageUploading, setVehicleImageUploading] = useState(false);
+  const [form, setForm] = useState<VehicleForm>(EMPTY_FORM);
+  const [formErrors, setFormErrors] = useState<VehicleFormErrors>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
+
+  const [uploads, setUploads] = useState<UploadItem[]>([]);
+  const uploadQueueRef = useRef<Promise<void>>(Promise.resolve());
+
   const [editingAvailabilityWindowId, setEditingAvailabilityWindowId] = useState<string | null>(null);
-
-  const [vehicleBrandInput, setVehicleBrandInput] = useState('');
-  const [vehicleModelInput, setVehicleModelInput] = useState('');
-  const [vehicleYearInput, setVehicleYearInput] = useState('');
-  const [vehicleLicensePlateInput, setVehicleLicensePlateInput] = useState('');
-  const [vehicleDescriptionInput, setVehicleDescriptionInput] = useState('');
-  const [vehiclePricePerDayInput, setVehiclePricePerDayInput] = useState('');
-  const [vehicleAddressInput, setVehicleAddressInput] = useState('');
-  const [vehicleSelectedLocation, setVehicleSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [createVehicleFormError, setCreateVehicleFormError] = useState<string | null>(null);
-  const [vehicleFuelTypeInput, setVehicleFuelTypeInput] = useState('');
-  const [vehicleTransmissionInput, setVehicleTransmissionInput] = useState('');
-  const [vehicleSeatsInput, setVehicleSeatsInput] = useState('');
-
-  const [editVehicleBrandInput, setEditVehicleBrandInput] = useState('');
-  const [editVehicleModelInput, setEditVehicleModelInput] = useState('');
-  const [editVehicleYearInput, setEditVehicleYearInput] = useState('');
-  const [editVehicleLicensePlateInput, setEditVehicleLicensePlateInput] = useState('');
-  const [editVehicleDescriptionInput, setEditVehicleDescriptionInput] = useState('');
-  const [editVehiclePricePerDayInput, setEditVehiclePricePerDayInput] = useState('');
-  const [editVehicleAddressInput, setEditVehicleAddressInput] = useState('');
-  const [editVehicleSelectedLocation, setEditVehicleSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [editVehicleFormError, setEditVehicleFormError] = useState<string | null>(null);
-  const [editVehicleFuelTypeInput, setEditVehicleFuelTypeInput] = useState('');
-  const [editVehicleTransmissionInput, setEditVehicleTransmissionInput] = useState('');
-  const [editVehicleSeatsInput, setEditVehicleSeatsInput] = useState('');
-
-
-  const [availabilityStartInput, setAvailabilityStartInput] = useState('');
-  const [availabilityEndInput, setAvailabilityEndInput] = useState('');
-  const initialAvailabilitySelection = useMemo(
-    () =>
-      availabilityStartInput.trim() && availabilityEndInput.trim()
-        ? buildAvailabilitySelectionFromIso(availabilityStartInput, availabilityEndInput)
-        : emptyAvailabilitySelection(),
-    [availabilityStartInput, availabilityEndInput]
+  const [availabilityRange, setAvailabilityRange] = useState<{ start: string; end: string } | null>(null);
+  const [initialAvailabilitySelection, setInitialAvailabilitySelection] = useState<AvailabilityDateRange>(
+    emptyAvailabilitySelection()
   );
-
-  const resetCreateVehicleForm = () => {
-    setVehicleBrandInput('');
-    setVehicleModelInput('');
-    setVehicleYearInput('');
-    setVehicleLicensePlateInput('');
-    setVehicleDescriptionInput('');
-    setVehiclePricePerDayInput('');
-    setVehicleAddressInput('');
-    setVehicleSelectedLocation(null);
-    setCreateVehicleFormError(null);
-    setVehicleFuelTypeInput('');
-    setVehicleTransmissionInput('');
-    setVehicleSeatsInput('');
-  };
-
-  const resetAvailabilityForm = () => {
-    setEditingAvailabilityWindowId(null);
-    setAvailabilityStartInput('');
-    setAvailabilityEndInput('');
-  };
+  const [calendarKey, setCalendarKey] = useState(0);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
 
   const {
-    items: myVehicles,
-    loading: vehiclesLoading,
-    creating: vehiclesCreating,
-    error: vehiclesError,
-    mutationMessage: vehiclesMutationMessage,
+    myItems: myVehicles,
+    myLoading: vehiclesLoading,
+    myLoaded: vehiclesLoaded,
+    myError: vehiclesError,
+    creating: vehiclesSaving,
     fetchMyVehicles,
     createVehicle,
     updateVehicleById,
@@ -344,7 +232,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
     loading: vehicleImagesLoading,
     saving: vehicleImagesSaving,
     error: vehicleImagesError,
-    mutationMessage: vehicleImagesMutationMessage,
     fetchByVehicleId: fetchVehicleImagesByVehicleId,
     createForVehicle: createVehicleImageForVehicle,
     deleteById: deleteVehicleImageById,
@@ -356,7 +243,6 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
     loading: availabilityWindowsLoading,
     saving: availabilityWindowsSaving,
     error: availabilityWindowsError,
-    mutationMessage: availabilityWindowsMutationMessage,
     fetchByVehicleId: fetchAvailabilityWindowsByVehicleId,
     createForVehicle: createAvailabilityWindowForVehicle,
     updateById: updateAvailabilityWindowById,
@@ -368,90 +254,85 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
     [myVehicles, editingVehicleId]
   );
   const imageByVehicleId = useVehiclePrimaryImages(myVehicles.map((vehicle) => vehicle.id));
-  const {
-    suggestions: vehicleAddressSuggestions,
-    loading: vehicleAddressLoading,
-    error: vehicleAddressError
-  } = useGeocodingSuggestions(vehicleAddressInput);
-  const {
-    suggestions: editVehicleAddressSuggestions,
-    loading: editVehicleAddressLoading,
-    error: editVehicleAddressError
-  } = useGeocodingSuggestions(editVehicleAddressInput);
+
+  const futureWindows = useMemo(
+    () =>
+      availabilityWindows
+        .filter((window) => new Date(window.endDatetime).getTime() > Date.now())
+        .sort((a, b) => new Date(a.startDatetime).getTime() - new Date(b.startDatetime).getTime()),
+    [availabilityWindows]
+  );
+
+  // Columnas del listado según ancho (centrado con ancho máximo).
+  const contentWidth = Math.min(width - spacingTokens.lg * 2, layoutTokens.contentMaxWidth);
+  const columns = contentWidth >= 960 ? 3 : contentWidth >= 600 ? 2 : 1;
+  const cardWidth = Math.floor((contentWidth - spacingTokens.lg * (columns - 1)) / columns);
 
   useEffect(() => {
-    if (!authUserId) {
-      return;
+    if (authUserId) {
+      void fetchMyVehicles();
     }
-
-    void fetchMyVehicles();
   }, [authUserId, fetchMyVehicles]);
 
+  const updateForm = <K extends keyof VehicleForm>(key: K, value: VehicleForm[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setFormErrors((current) => ({ ...current, [key]: undefined }));
+    setFormError(null);
+  };
+
+  const isFormDirty = useMemo(() => {
+    if (screenMode === 'create') {
+      return JSON.stringify(form) !== JSON.stringify(EMPTY_FORM);
+    }
+
+    return !!editingVehicle && JSON.stringify(form) !== JSON.stringify(formFromVehicle(editingVehicle));
+  }, [form, screenMode, editingVehicle]);
+
+  const buildPayload = (status: VehicleItem['status']) => {
+    // "Sin especificar" es una cadena vacía: Number('') daría 0 plazas.
+    const seats = form.seats.trim() ? parseLocaleNumber(form.seats) : NaN;
+
+    return {
+      brand: form.brand.trim(),
+      model: form.model.trim(),
+      year: parseLocaleNumber(form.year),
+      licensePlate: form.licensePlate.trim().toUpperCase(),
+      description: form.description.trim(),
+      pricePerDay: parseLocaleNumber(form.pricePerDay),
+      locationLat: form.location?.lat ?? 0,
+      locationLng: form.location?.lng ?? 0,
+      locationAddress: form.address.trim(),
+      fuelType: form.fuelType || null,
+      transmission: form.transmission || null,
+      seats: Number.isNaN(seats) ? null : seats,
+      status
+    };
+  };
+
+  const showStoreError = (fallback: string) => {
+    setFormError(useVehiclesStore.getState().mutationMessage ?? fallback);
+  };
+
   const handleCreateVehicle = async () => {
-    const parsedYear = parseLocaleNumber(vehicleYearInput);
-    const parsedPrice = parseLocaleNumber(vehiclePricePerDayInput);
-    const parsedSeats = parseLocaleNumber(vehicleSeatsInput);
+    const errors = validateVehicleForm(form);
+    setFormErrors(errors);
 
-    if (
-      !vehicleBrandInput.trim() ||
-      !vehicleModelInput.trim() ||
-      !vehicleLicensePlateInput.trim() ||
-      !vehicleDescriptionInput.trim() ||
-      !vehicleAddressInput.trim() ||
-      Number.isNaN(parsedYear) ||
-      Number.isNaN(parsedPrice)
-    ) {
-      setCreateVehicleFormError('Completa todos los campos obligatorios antes de crear el vehiculo.');
+    if (Object.keys(errors).length > 0) {
+      setFormError('Revisa los campos marcados.');
       return;
     }
 
-    if (!vehicleSelectedLocation) {
-      setCreateVehicleFormError('Selecciona una direccion sugerida para obtener coordenadas validas.');
+    const ok = await createVehicle(buildPayload('active'));
+
+    if (!ok) {
+      showStoreError('No se pudo publicar el vehículo.');
       return;
     }
 
-    setCreateVehicleFormError(null);
-
-    await createVehicle({
-      brand: vehicleBrandInput.trim(),
-      model: vehicleModelInput.trim(),
-      year: parsedYear,
-      licensePlate: vehicleLicensePlateInput.trim().toUpperCase(),
-      description: vehicleDescriptionInput.trim(),
-      pricePerDay: parsedPrice,
-      locationLat: vehicleSelectedLocation.lat,
-      locationLng: vehicleSelectedLocation.lng,
-      locationAddress: vehicleAddressInput.trim(),
-      fuelType: ['gasoline', 'diesel', 'electric', 'hybrid'].includes(vehicleFuelTypeInput)
-        ? (vehicleFuelTypeInput as 'gasoline' | 'diesel' | 'electric' | 'hybrid')
-        : null,
-      transmission: ['manual', 'automatic'].includes(vehicleTransmissionInput)
-        ? (vehicleTransmissionInput as 'manual' | 'automatic')
-        : null,
-      seats: Number.isNaN(parsedSeats) ? null : parsedSeats,
-      status: 'active'
-    });
-
-    await fetchMyVehicles();
-    resetCreateVehicleForm();
+    toast.success('Vehículo publicado. Añade fotos y disponibilidad para recibir reservas.');
+    setForm(EMPTY_FORM);
+    setFormErrors({});
     setScreenMode('list');
-  };
-
-  const handleCreateVehicleAddressChange = (value: string) => {
-    setVehicleAddressInput(value);
-    setVehicleSelectedLocation(null);
-    setCreateVehicleFormError(null);
-  };
-
-  const handleOpenCreateVehicleScreen = () => {
-    resetCreateVehicleForm();
-    setScreenMode('create');
-  };
-
-  const handleSelectCreateVehicleAddress = (label: string, lat: number, lng: number) => {
-    setVehicleAddressInput(label);
-    setVehicleSelectedLocation({ lat, lng });
-    setCreateVehicleFormError(null);
   };
 
   const handleOpenVehicleEditor = (vehicleId: string) => {
@@ -462,32 +343,109 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
     }
 
     setEditingVehicleId(vehicle.id);
-    setEditVehicleBrandInput(vehicle.brand);
-    setEditVehicleModelInput(vehicle.model);
-    setEditVehicleYearInput(String(vehicle.year));
-    setEditVehicleLicensePlateInput(vehicle.licensePlate);
-    setEditVehicleDescriptionInput(vehicle.description);
-    setEditVehiclePricePerDayInput(String(vehicle.pricePerDay));
-    setEditVehicleAddressInput(vehicle.locationAddress);
-    setEditVehicleSelectedLocation({ lat: vehicle.locationLat, lng: vehicle.locationLng });
-    setEditVehicleFormError(null);
-    setEditVehicleFuelTypeInput(vehicle.fuelType ?? '');
-    setEditVehicleTransmissionInput(vehicle.transmission ?? '');
-    setEditVehicleSeatsInput(vehicle.seats !== null ? String(vehicle.seats) : '');
+    setForm(formFromVehicle(vehicle));
+    setFormErrors({});
+    setFormError(null);
     setScreenMode('edit');
+    void fetchVehicleImagesByVehicleId(vehicle.id);
+    void fetchAvailabilityWindowsByVehicleId(vehicle.id);
   };
 
-  const handleBack = () => {
-    if (screenMode === 'create') {
-      resetCreateVehicleForm();
-      setScreenMode('list');
+  const handleUpdateVehicle = async () => {
+    if (!editingVehicle) {
       return;
     }
 
-    if (screenMode === 'edit') {
-      setEditingVehicleId(null);
-      setScreenMode('list');
+    const errors = validateVehicleForm(form);
+    setFormErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      setFormError('Revisa los campos marcados.');
       return;
+    }
+
+    const ok = await updateVehicleById(editingVehicle.id, buildPayload(editingVehicle.status));
+
+    if (!ok) {
+      showStoreError('No se pudieron guardar los cambios.');
+      return;
+    }
+
+    toast.success('Cambios guardados.');
+  };
+
+  const handleToggleStatus = async (active: boolean) => {
+    if (!editingVehicle) {
+      return;
+    }
+
+    setStatusSaving(true);
+    // Solo cambia la visibilidad: se envían los datos guardados, no el borrador del formulario.
+    const ok = await updateVehicleById(editingVehicle.id, {
+      brand: editingVehicle.brand,
+      model: editingVehicle.model,
+      year: editingVehicle.year,
+      licensePlate: editingVehicle.licensePlate,
+      description: editingVehicle.description,
+      pricePerDay: editingVehicle.pricePerDay,
+      locationLat: editingVehicle.locationLat,
+      locationLng: editingVehicle.locationLng,
+      locationAddress: editingVehicle.locationAddress,
+      fuelType: editingVehicle.fuelType,
+      transmission: editingVehicle.transmission,
+      seats: editingVehicle.seats,
+      status: active ? 'active' : 'inactive'
+    });
+    setStatusSaving(false);
+
+    if (ok) {
+      toast.success(active ? 'Tu vehículo vuelve a ser visible.' : 'Vehículo oculto de Explorar.');
+    } else {
+      toast.error(useVehiclesStore.getState().mutationMessage ?? 'No se pudo cambiar la visibilidad.');
+    }
+  };
+
+  const handleDeleteVehicle = async () => {
+    if (!editingVehicle) {
+      return;
+    }
+
+    const confirmed = await confirmAction({
+      title: '¿Eliminar este vehículo?',
+      message: `${editingVehicle.brand} ${editingVehicle.model} dejará de estar publicado. Si tiene reservas asociadas no podrá eliminarse.`,
+      confirmLabel: 'Eliminar',
+      destructive: true
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    const ok = await deleteVehicleById(editingVehicle.id);
+
+    if (!ok) {
+      toast.error(useVehiclesStore.getState().mutationMessage ?? 'No se pudo eliminar el vehículo.');
+      return;
+    }
+
+    toast.success('Vehículo eliminado.');
+    setEditingVehicleId(null);
+    setScreenMode('list');
+  };
+
+  const handleBack = useCallback(async () => {
+    if ((screenMode === 'create' || screenMode === 'edit') && isFormDirty) {
+      const confirmed = await confirmAction({
+        title: '¿Salir sin guardar?',
+        message: 'Perderás los cambios que no has guardado.',
+        confirmLabel: 'Salir',
+        cancelLabel: 'Seguir editando',
+        destructive: true
+      });
+
+      if (!confirmed) {
+        return;
+      }
     }
 
     if (screenMode === 'images' || screenMode === 'availability') {
@@ -495,162 +453,215 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
       return;
     }
 
+    setEditingVehicleId(null);
+    setForm(EMPTY_FORM);
+    setFormErrors({});
+    setFormError(null);
     setScreenMode('list');
+  }, [screenMode, isFormDirty]);
+
+  useBackHandler(screenMode !== 'list', () => void handleBack());
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchMyVehicles();
+    if (editingVehicleId && screenMode !== 'list') {
+      await Promise.all([
+        fetchVehicleImagesByVehicleId(editingVehicleId),
+        fetchAvailabilityWindowsByVehicleId(editingVehicleId)
+      ]);
+    }
+    setRefreshing(false);
   };
 
-  const handleOpenVehicleImagesScreen = async () => {
+  /* --------------------------------- Fotos --------------------------------- */
+
+  const runUpload = useCallback(
+    async (item: UploadItem, vehicleId: string) => {
+      const update = (patch: Partial<UploadItem>) =>
+        setUploads((current) => current.map((entry) => (entry.key === item.key ? { ...entry, ...patch } : entry)));
+
+      try {
+        update({ status: 'processing', errorMessage: undefined, progress: undefined });
+        const prepared = await prepareUploadImage(item.asset, 'vehicle_image');
+        update({ status: 'uploading', progress: 0, previewUri: prepared.fileUri });
+
+        const uploaded = await uploadImageToApi({
+          target: 'vehicle_image',
+          ownerId: vehicleId,
+          fileUri: prepared.fileUri,
+          fileName: prepared.fileName,
+          mimeType: prepared.mimeType,
+          webFile: prepared.webFile,
+          onProgress: (fraction) => update({ progress: fraction })
+        });
+
+        // La primera foto del anuncio pasa a ser la portada.
+        const isFirst = useVehicleImagesStore.getState().items.length === 0;
+        const ok = await createVehicleImageForVehicle(vehicleId, uploaded.persistedValue, isFirst);
+
+        if (!ok) {
+          throw new Error(useVehicleImagesStore.getState().mutationMessage ?? 'No se pudo guardar la foto');
+        }
+
+        setUploads((current) => current.filter((entry) => entry.key !== item.key));
+      } catch (uploadError: unknown) {
+        update({
+          status: 'error',
+          errorMessage:
+            uploadError instanceof Error && !('response' in uploadError)
+              ? uploadError.message
+              : getApiErrorMessage(uploadError, 'Error al subir')
+        });
+      }
+    },
+    [createVehicleImageForVehicle]
+  );
+
+  // Las subidas se encadenan una a una para respetar el orden y la portada.
+  const enqueueUpload = useCallback(
+    (item: UploadItem, vehicleId: string) => {
+      uploadQueueRef.current = uploadQueueRef.current.then(() => runUpload(item, vehicleId));
+    },
+    [runUpload]
+  );
+
+  const handleAddPhotos = async (source: ImageSource) => {
     if (!editingVehicleId) {
       return;
     }
 
-    setScreenMode('images');
-    await fetchVehicleImagesByVehicleId(editingVehicleId);
+    const remaining = MAX_VEHICLE_PHOTOS - vehicleImages.length - uploads.length;
+
+    try {
+      const assets = await pickImages(source, { multiple: true, selectionLimit: remaining });
+      const accepted = assets.slice(0, remaining);
+
+      if (assets.length > accepted.length) {
+        toast.info(`Máximo ${MAX_VEHICLE_PHOTOS} fotos por vehículo.`);
+      }
+
+      const items: UploadItem[] = accepted.map((asset) => ({
+        key: `upload-${++uploadSeq}`,
+        asset,
+        previewUri: asset.uri,
+        status: 'processing'
+      }));
+
+      setUploads((current) => [...current, ...items]);
+      items.forEach((item) => enqueueUpload(item, editingVehicleId));
+    } catch (pickError: unknown) {
+      toast.error(
+        pickError instanceof ImagePermissionError ? pickError.message : 'No se pudo abrir el selector de fotos.'
+      );
+    }
   };
 
-  const handleOpenAvailabilityScreen = async () => {
+  const photoItems: PhotoItem[] = useMemo(
+    () => [
+      ...[...vehicleImages]
+        .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+        .map((image) => ({
+          key: image.id,
+          uri: resolveStoredImageUrl(image.imageUrl),
+          status: 'done' as const,
+          isCover: image.isPrimary,
+          privateLabel: 'Sin vista previa'
+        })),
+      ...uploads.map((upload) => ({
+        key: upload.key,
+        uri: upload.previewUri,
+        status: upload.status,
+        progress: upload.progress,
+        errorMessage: upload.errorMessage
+      }))
+    ],
+    [vehicleImages, uploads]
+  );
+
+  const handleRemovePhoto = async (item: PhotoItem) => {
+    if (!editingVehicleId) {
+      return;
+    }
+
+    const upload = uploads.find((entry) => entry.key === item.key);
+
+    if (upload) {
+      setUploads((current) => current.filter((entry) => entry.key !== item.key));
+      return;
+    }
+
+    const confirmed = await confirmAction({
+      title: '¿Eliminar esta foto?',
+      message: item.isCover
+        ? 'Es la portada del anuncio. Elige otra portada después de eliminarla.'
+        : 'Se quitará de la galería del anuncio.',
+      confirmLabel: 'Eliminar',
+      destructive: true
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    const ok = await deleteVehicleImageById(item.key, editingVehicleId);
+    if (ok) {
+      toast.success('Foto eliminada.');
+    } else {
+      toast.error(useVehicleImagesStore.getState().mutationMessage ?? 'No se pudo eliminar la foto.');
+    }
+  };
+
+  const handleSetCover = async (item: PhotoItem) => {
+    if (!editingVehicleId) {
+      return;
+    }
+
+    const ok = await updateVehicleImageById(item.key, editingVehicleId, { isPrimary: true });
+    if (ok) {
+      toast.success('Portada actualizada.');
+    } else {
+      toast.error(useVehicleImagesStore.getState().mutationMessage ?? 'No se pudo cambiar la portada.');
+    }
+  };
+
+  /* ----------------------------- Disponibilidad ----------------------------- */
+
+  const resetAvailabilityForm = () => {
+    setEditingAvailabilityWindowId(null);
+    setAvailabilityRange(null);
+    setAvailabilityError(null);
+    setInitialAvailabilitySelection(emptyAvailabilitySelection());
+    setCalendarKey((key) => key + 1);
+  };
+
+  const handleOpenAvailabilityScreen = () => {
     if (!editingVehicleId) {
       return;
     }
 
     resetAvailabilityForm();
     setScreenMode('availability');
-    await fetchAvailabilityWindowsByVehicleId(editingVehicleId);
+    void fetchAvailabilityWindowsByVehicleId(editingVehicleId);
   };
 
-  const handleUpdateVehicle = async () => {
-    if (!editingVehicleId) {
+  const handleEditAvailabilityWindow = (windowId: string) => {
+    const window = availabilityWindows.find((item) => item.id === windowId);
+    const start = window ? isoToCalendarDayHour(window.startDatetime) : null;
+    const end = window ? isoToCalendarDayHour(window.endDatetime) : null;
+
+    if (!window || !start || !end) {
       return;
     }
 
-    const parsedYear = parseLocaleNumber(editVehicleYearInput);
-    const parsedPrice = parseLocaleNumber(editVehiclePricePerDayInput);
-    const parsedSeats = parseLocaleNumber(editVehicleSeatsInput);
-
-    if (
-      !editVehicleBrandInput.trim() ||
-      !editVehicleModelInput.trim() ||
-      !editVehicleLicensePlateInput.trim() ||
-      !editVehicleDescriptionInput.trim() ||
-      !editVehicleAddressInput.trim() ||
-      Number.isNaN(parsedYear) ||
-      Number.isNaN(parsedPrice)
-    ) {
-      setEditVehicleFormError('Completa todos los campos obligatorios para guardar cambios.');
-      return;
-    }
-
-    if (!editVehicleSelectedLocation) {
-      setEditVehicleFormError('Selecciona una direccion sugerida para obtener coordenadas validas.');
-      return;
-    }
-
-    setEditVehicleFormError(null);
-
-    await updateVehicleById(editingVehicleId, {
-      brand: editVehicleBrandInput.trim(),
-      model: editVehicleModelInput.trim(),
-      year: parsedYear,
-      licensePlate: editVehicleLicensePlateInput.trim().toUpperCase(),
-      description: editVehicleDescriptionInput.trim(),
-      pricePerDay: parsedPrice,
-      locationLat: editVehicleSelectedLocation.lat,
-      locationLng: editVehicleSelectedLocation.lng,
-      locationAddress: editVehicleAddressInput.trim(),
-      fuelType: ['gasoline', 'diesel', 'electric', 'hybrid'].includes(editVehicleFuelTypeInput)
-        ? (editVehicleFuelTypeInput as 'gasoline' | 'diesel' | 'electric' | 'hybrid')
-        : null,
-      transmission: ['manual', 'automatic'].includes(editVehicleTransmissionInput)
-        ? (editVehicleTransmissionInput as 'manual' | 'automatic')
-        : null,
-      seats: Number.isNaN(parsedSeats) ? null : parsedSeats,
-      status: editingVehicle?.status ?? 'active'
+    setEditingAvailabilityWindowId(windowId);
+    setAvailabilityError(null);
+    setInitialAvailabilitySelection({
+      startDate: start.date,
+      startHour: Math.min(20, Math.max(9, start.hour)),
+      endDate: end.date,
+      endHour: Math.min(20, Math.max(9, end.hour))
     });
-
-    await fetchMyVehicles();
-  };
-
-  const handleEditVehicleAddressChange = (value: string) => {
-    setEditVehicleAddressInput(value);
-    setEditVehicleSelectedLocation(null);
-    setEditVehicleFormError(null);
-  };
-
-  const handleSelectEditVehicleAddress = (label: string, lat: number, lng: number) => {
-    setEditVehicleAddressInput(label);
-    setEditVehicleSelectedLocation({ lat, lng });
-    setEditVehicleFormError(null);
-  };
-
-  const handleDeleteVehicle = async () => {
-    if (!editingVehicleId) {
-      return;
-    }
-
-    await deleteVehicleById(editingVehicleId);
-    setEditingVehicleId(null);
-    setScreenMode('list');
-    await fetchMyVehicles();
-  };
-
-  const handlePickUploadAndCreateVehicleImage = async () => {
-    if (!editingVehicleId) {
-      return;
-    }
-
-    try {
-      setVehicleImageUploading(true);
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-      if (!permissionResult.granted) {
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.8
-      });
-
-      if (result.canceled || !result.assets[0]) {
-        return;
-      }
-
-      const prepared = await prepareUploadImage(result.assets[0], 'vehicle_image');
-      const uploaded = await uploadImageToApi({
-        target: 'vehicle_image',
-        ownerId: editingVehicleId,
-        fileUri: prepared.fileUri,
-        fileName: prepared.fileName,
-        mimeType: prepared.mimeType,
-        webFile: prepared.webFile
-      });
-
-      await createVehicleImageForVehicle(editingVehicleId, uploaded.persistedValue, false);
-    } finally {
-      setVehicleImageUploading(false);
-    }
-  };
-
-  const handleSetPrimaryVehicleImage = async (imageId: string) => {
-    if (!editingVehicleId) {
-      return;
-    }
-
-    await updateVehicleImageById(imageId, editingVehicleId, { isPrimary: true });
-  };
-
-  const handleDeleteVehicleImage = async (imageId: string) => {
-    if (!editingVehicleId) {
-      return;
-    }
-
-    await deleteVehicleImageById(imageId, editingVehicleId);
-  };
-
-  const handleClearAvailabilityDraft = () => {
-    setEditingAvailabilityWindowId(null);
-    setAvailabilityStartInput('');
-    setAvailabilityEndInput('');
   };
 
   const handleSaveAvailabilityWindow = async () => {
@@ -658,26 +669,34 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
       return;
     }
 
-    if (editingAvailabilityWindowId) {
-      await updateAvailabilityWindowById(
-        editingAvailabilityWindowId,
-        editingVehicleId,
-        availabilityStartInput,
-        availabilityEndInput
-      );
-    } else {
-      await createAvailabilityWindowForVehicle(
-        editingVehicleId,
-        availabilityStartInput,
-        availabilityEndInput
-      );
+    if (!availabilityRange) {
+      setAvailabilityError('Elige fecha y hora de inicio y de fin.');
+      return;
     }
 
-    if (availabilityStartInput.trim() && availabilityEndInput.trim()) {
-      setEditingAvailabilityWindowId(null);
-      setAvailabilityStartInput('');
-      setAvailabilityEndInput('');
+    if (new Date(availabilityRange.end).getTime() <= new Date(availabilityRange.start).getTime()) {
+      setAvailabilityError('El fin debe ser posterior al inicio.');
+      return;
     }
+
+    const ok = editingAvailabilityWindowId
+      ? await updateAvailabilityWindowById(
+          editingAvailabilityWindowId,
+          editingVehicleId,
+          availabilityRange.start,
+          availabilityRange.end
+        )
+      : await createAvailabilityWindowForVehicle(editingVehicleId, availabilityRange.start, availabilityRange.end);
+
+    if (!ok) {
+      setAvailabilityError(
+        useVehicleAvailabilityWindowsStore.getState().mutationMessage ?? 'No se pudo guardar la disponibilidad.'
+      );
+      return;
+    }
+
+    toast.success(editingAvailabilityWindowId ? 'Disponibilidad actualizada.' : 'Disponibilidad añadida.');
+    resetAvailabilityForm();
   };
 
   const handleDeleteAvailabilityWindow = async (windowId: string) => {
@@ -685,583 +704,768 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0 }: MyVehicl
       return;
     }
 
-    await deleteAvailabilityWindowById(windowId, editingVehicleId);
+    const confirmed = await confirmAction({
+      title: '¿Eliminar esta disponibilidad?',
+      message: 'Los conductores ya no podrán reservar en esas fechas.',
+      confirmLabel: 'Eliminar',
+      destructive: true
+    });
 
+    if (!confirmed) {
+      return;
+    }
+
+    const ok = await deleteAvailabilityWindowById(windowId, editingVehicleId);
+
+    if (!ok) {
+      toast.error(
+        useVehicleAvailabilityWindowsStore.getState().mutationMessage ?? 'No se pudo eliminar la disponibilidad.'
+      );
+      return;
+    }
+
+    toast.success('Disponibilidad eliminada.');
     if (editingAvailabilityWindowId === windowId) {
-      setEditingAvailabilityWindowId(null);
-      setAvailabilityStartInput('');
-      setAvailabilityEndInput('');
+      resetAvailabilityForm();
     }
   };
 
-  if (editingVehicle && editingVehicleId && screenMode === 'images') {
+  const formScreenProps = { topPadding, bottomPadding, maxWidth: layoutTokens.formMaxWidth };
+
+  /* ------------------------------------------------------------------------ */
+  /* Fotos                                                                    */
+  /* ------------------------------------------------------------------------ */
+
+  if (editingVehicle && screenMode === 'images') {
+    const uploadingCount = uploads.filter((item) => item.status !== 'error').length;
+
     return (
-      <ScrollView
-        style={localStyles.screenScroll}
-        contentContainerStyle={[
-          localStyles.screenContent,
-          {
-            paddingTop: topPadding,
-            paddingBottom: bottomPadding + spacingTokens.lg,
-            paddingHorizontal: spacingTokens.lg
-          }
-        ]}
-        keyboardShouldPersistTaps="handled"
+      <Screen
+        {...formScreenProps}
+        refreshing={refreshing}
+        onRefresh={() => void handleRefresh()}
+        header={
+          <ScreenHeader
+            title="Fotos"
+            eyebrow={`${editingVehicle.brand} ${editingVehicle.model}`}
+            subtitle="Buenas fotos multiplican las reservas. La portada es la primera que ven los conductores."
+            onBack={() => void handleBack()}
+            backLabel="Volver al vehículo"
+          />
+        }
       >
-        <SectionHeader
-          title="Imagenes del vehiculo"
-          subtitle={`Gestiona la galeria de ${editingVehicle.brand} ${editingVehicle.model} y marca la principal con estrella.`}
-          centered={isDesktopWeb}
-        />
-
-        <View style={[styles.card, desktopCardStyle]}>
-          <View style={[localStyles.imagesActionRow, { justifyContent: isDesktopWeb ? 'center' : 'flex-start' }]}>
-            <ActionButton
-              label={vehicleImageUploading ? 'Subiendo...' : 'Subir desde galeria'}
-              onPress={() => void handlePickUploadAndCreateVehicleImage()}
-              disabled={vehicleImagesSaving || vehicleImageUploading}
-            />
-            <ActionButton label="Volver a edición" onPress={handleBack} variant="ghost" />
-          </View>
-        </View>
-
-        {vehicleImagesLoading || vehicleImagesSaving || vehicleImageUploading ? <ActivityIndicator size="small" /> : null}
-        {vehicleImagesError ? <Text style={styles.error}>{vehicleImagesError}</Text> : null}
-        {vehicleImagesMutationMessage ? <Text style={styles.info}>{vehicleImagesMutationMessage}</Text> : null}
-
-        <View style={[localStyles.imageGrid, isDesktopWeb ? localStyles.imageGridDesktop : undefined]}>
-          {vehicleImages.map((image) => (
-            <View key={image.id} style={[styles.card, localStyles.imageGridCard, isDesktopWeb ? localStyles.imageGridDesktopCard : undefined]}>
-              {resolveStoredImageUrl(image.imageUrl) ? (
-                <View style={localStyles.imageCardMediaWrap}>
-                  <Image
-                    source={{ uri: resolveStoredImageUrl(image.imageUrl) ?? '' }}
-                    style={styles.vehicleImagePreview}
-                    resizeMode="cover"
-                  />
-                  <Pressable
-                    style={[localStyles.primaryStarButton, image.isPrimary ? localStyles.primaryStarButtonActive : undefined]}
-                    onPress={() => void handleSetPrimaryVehicleImage(image.id)}
-                    disabled={vehicleImagesSaving || image.isPrimary}
-                  >
-                    <Text style={[localStyles.primaryStarText, image.isPrimary ? localStyles.primaryStarTextActive : undefined]}>★</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <Text style={styles.subtitle}>No se puede previsualizar (bucket privado o URL invalida).</Text>
-              )}
-              <Text style={styles.linkHint}>{image.isPrimary ? 'Foto principal' : 'Toca la estrella para marcar como principal'}</Text>
-              <ActionButton
-                label="Eliminar imagen"
-                onPress={() => void handleDeleteVehicleImage(image.id)}
-                variant="danger"
-                disabled={vehicleImagesSaving}
-              />
+        <Card>
+          <CardHeader
+            title="Galería"
+            icon="images-outline"
+            subtitle={`${pluralize(vehicleImages.length, 'foto', 'fotos')} de ${MAX_VEHICLE_PHOTOS}${
+              uploadingCount ? ` · subiendo ${uploadingCount}` : ''
+            }`}
+          />
+          {vehicleImagesLoading && vehicleImages.length === 0 ? (
+            <View style={styles.photoSkeletons}>
+              {[0, 1, 2].map((index) => (
+                <Skeleton key={index} width="31%" height={96} radius={radiusTokens.input} />
+              ))}
             </View>
-          ))}
-        </View>
-
-      </ScrollView>
+          ) : vehicleImagesError ? (
+            <ErrorState
+              message={vehicleImagesError}
+              onRetry={() => void fetchVehicleImagesByVehicleId(editingVehicle.id)}
+            />
+          ) : (
+            <PhotoGrid
+              items={photoItems}
+              onAdd={(source) => void handleAddPhotos(source)}
+              onRemove={(item) => void handleRemovePhoto(item)}
+              onRetry={(item) => {
+                const upload = uploads.find((entry) => entry.key === item.key);
+                if (upload) {
+                  enqueueUpload(upload, editingVehicle.id);
+                }
+              }}
+              onSetCover={(item) => void handleSetCover(item)}
+              maxItems={MAX_VEHICLE_PHOTOS}
+              disabled={vehicleImagesSaving}
+              columns={isCompact ? 3 : 4}
+            />
+          )}
+          <View style={styles.tipRow}>
+            <Ionicons name="bulb-outline" size={16} color={colorTokens.accent2} />
+            <Text style={styles.caption}>
+              Usa la estrella para elegir la portada. Las fotos se optimizan automáticamente antes de subirse.
+            </Text>
+          </View>
+        </Card>
+      </Screen>
     );
   }
 
-  if (!authUserId) {
-    return (
-      <View style={styles.sectionCard}>
-        <SectionHeader
-          title="Mis Vehiculos"
-          subtitle="Inicia sesion para gestionar tus vehiculos."
-          centered={isDesktopWeb}
-        />
-      </View>
-    );
-  }
+  /* ------------------------------------------------------------------------ */
+  /* Disponibilidad                                                           */
+  /* ------------------------------------------------------------------------ */
 
-  if (editingVehicle && editingVehicleId && screenMode === 'availability') {
+  if (editingVehicle && screenMode === 'availability') {
     return (
-      <ScrollView
-        style={localStyles.screenScroll}
-        contentContainerStyle={[
-          localStyles.screenContent,
-          {
-            paddingTop: topPadding,
-            paddingBottom: bottomPadding + spacingTokens.lg,
-            paddingHorizontal: spacingTokens.lg
-          }
-        ]}
-        keyboardShouldPersistTaps="handled"
+      <Screen
+        {...formScreenProps}
+        refreshing={refreshing}
+        onRefresh={() => void handleRefresh()}
+        header={
+          <ScreenHeader
+            title="Disponibilidad"
+            eyebrow={`${editingVehicle.brand} ${editingVehicle.model}`}
+            subtitle="Abre las fechas en las que los conductores pueden reservar."
+            onBack={() => void handleBack()}
+            backLabel="Volver al vehículo"
+          />
+        }
       >
-        <SectionHeader
-          title="Ventanas de disponibilidad"
-          subtitle={`Gestiona disponibilidad para ${editingVehicle.brand} ${editingVehicle.model} con calendario.`}
-          centered={isDesktopWeb}
-        />
-
-        <View style={[styles.card, desktopCardStyle]}>
+        <Card>
+          <CardHeader
+            title={editingAvailabilityWindowId ? 'Editar disponibilidad' : 'Nueva disponibilidad'}
+            icon="calendar-outline"
+          />
           <CalendarPicker
-            availabilityWindows={availabilityWindows.map((window) => ({
-              id: window.id,
-              startDatetime: window.startDatetime,
-              endDatetime: window.endDatetime
-            }))}
+            key={calendarKey}
+            availabilityWindows={availabilityWindows}
             bookings={[]}
             initialDateRange={initialAvailabilitySelection}
             mode="owner"
             onDateRangeChange={(startDate, startHour, endDate, endHour) => {
-              setAvailabilityStartInput(buildIsoFromSelection(startDate, startHour));
-              setAvailabilityEndInput(buildIsoFromSelection(endDate, endHour));
+              setAvailabilityError(null);
+              setAvailabilityRange(
+                startDate && endDate
+                  ? { start: calendarDayHourToIso(startDate, startHour), end: calendarDayHourToIso(endDate, endHour) }
+                  : null
+              );
             }}
           />
-
-          <View style={localStyles.actionRow}>
-            <ActionButton
-              label="Crear ventana"
+          {availabilityError ? <InlineMessage tone="error" message={availabilityError} /> : null}
+          <View style={styles.rowActions}>
+            {editingAvailabilityWindowId ? (
+              <Button label="Cancelar edición" variant="secondary" onPress={resetAvailabilityForm} style={styles.flex1} />
+            ) : null}
+            <Button
+              label={editingAvailabilityWindowId ? 'Guardar cambios' : 'Añadir disponibilidad'}
+              icon={editingAvailabilityWindowId ? 'save-outline' : 'add'}
               onPress={() => void handleSaveAvailabilityWindow()}
-              disabled={availabilityWindowsSaving}
+              loading={availabilityWindowsSaving}
+              disabled={!availabilityRange}
+              style={styles.flex1}
             />
           </View>
+        </Card>
 
-          {availabilityStartInput ? <Text style={[styles.linkHint, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>Inicio: {formatDateTime(availabilityStartInput)}</Text> : null}
-          {availabilityEndInput ? <Text style={[styles.linkHint, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>Fin: {formatDateTime(availabilityEndInput)}</Text> : null}
-        </View>
+        <SectionTitle title="Próximas fechas" count={futureWindows.length} />
 
-        {availabilityWindowsLoading || availabilityWindowsSaving ? <ActivityIndicator size="small" /> : null}
-        {availabilityWindowsError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{availabilityWindowsError}</Text> : null}
-        {availabilityWindowsMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{availabilityWindowsMutationMessage}</Text> : null}
-
-        {(() => {
-          const now = new Date();
-          const futureWindows = availabilityWindows.filter(window => new Date(window.endDatetime) > now);
-          return futureWindows.length > 0 ? (
-            <View style={{ marginTop: spacingTokens.md }}>
-              <Text style={[localStyles.fieldLabel, { marginBottom: spacingTokens.md, textAlign: isDesktopWeb ? 'center' : 'left' }]}>Próximas ventanas ({futureWindows.length})</Text>
-              {futureWindows.map((window) => {
-                const startDate = new Date(window.startDatetime);
-                const endDate = new Date(window.endDatetime);
-                return (
-                  <View key={window.id} style={[styles.card, desktopCardStyle, { marginBottom: spacingTokens.sm }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacingTokens.md }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.row, { marginBottom: spacingTokens.sm, textAlign: 'left' }]}><Text style={styles.label}>Desde:</Text> {startDate.toLocaleDateString('es-ES')} {startDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</Text>
-                        <Text style={[styles.row, { textAlign: 'left' }]}><Text style={styles.label}>Hasta:</Text> {endDate.toLocaleDateString('es-ES')} {endDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</Text>
-                      </View>
-                      <ActionButton
-                        label="Eliminar"
-                        variant="danger"
-                        onPress={() => void handleDeleteAvailabilityWindow(window.id)}
-                        disabled={availabilityWindowsSaving}
-                      />
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          ) : null;
-        })()} 
-
-        <View style={[localStyles.actionRow, { marginTop: spacingTokens.lg, justifyContent: isDesktopWeb ? 'center' : 'flex-start' }]}>
-          <ActionButton label="Volver a edición" onPress={handleBack} variant="ghost" />
-        </View>
-      </ScrollView>
-    );
-  }
-
-  if (editingVehicle && editingVehicleId) {
-    return (
-      <ScrollView
-        style={localStyles.screenScroll}
-        contentContainerStyle={[
-          localStyles.screenContent,
-          {
-            paddingTop: topPadding,
-            paddingBottom: bottomPadding + spacingTokens.lg,
-            paddingHorizontal: spacingTokens.lg
-          }
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
-          <SectionHeader
-            title="Editar vehiculo"
-            subtitle="Ajusta datos, fotos y disponibilidad desde un panel unico."
-            centered={isDesktopWeb}
+        {availabilityWindowsLoading && availabilityWindows.length === 0 ? (
+          <View style={styles.stack}>
+            <Skeleton height={64} radius={radiusTokens.card} />
+            <Skeleton height={64} radius={radiusTokens.card} />
+          </View>
+        ) : availabilityWindowsError ? (
+          <ErrorState
+            message={availabilityWindowsError}
+            onRetry={() => void fetchAvailabilityWindowsByVehicleId(editingVehicle.id)}
           />
-
-          <View style={[styles.card, desktopCardStyle]}>
-            <View style={localStyles.vehicleSummaryCard}>
-              {resolveStoredImageUrl(imageByVehicleId[editingVehicle.id] ?? null) ? (
-                <Image
-                  source={{ uri: resolveStoredImageUrl(imageByVehicleId[editingVehicle.id] ?? null) ?? '' }}
-                  style={localStyles.vehicleSummaryImage}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View style={localStyles.vehicleSummaryImagePlaceholder}>
-                  <Text style={localStyles.vehicleSummaryImagePlaceholderText}>Sin foto principal</Text>
+        ) : futureWindows.length === 0 ? (
+          <EmptyState
+            compact
+            icon="calendar-clear-outline"
+            title="Sin fechas abiertas"
+            description="Mientras no añadas disponibilidad, nadie podrá reservar este vehículo."
+          />
+        ) : (
+          <View style={styles.stack}>
+            {futureWindows.map((window) => (
+              <Card
+                key={window.id}
+                variant="outlined"
+                padding={spacingTokens.md}
+                style={editingAvailabilityWindowId === window.id ? styles.windowEditing : undefined}
+              >
+                <View style={styles.windowRow}>
+                  <View style={styles.windowIcon}>
+                    <Ionicons name="calendar" size={18} color={colorTokens.primary} />
+                  </View>
+                  <View style={styles.flex1}>
+                    <Text style={styles.windowText}>{formatDateTimeMadrid(window.startDatetime)}</Text>
+                    <Text style={styles.caption}>hasta {formatDateTimeMadrid(window.endDatetime)}</Text>
+                  </View>
                 </View>
-              )}
-
-              <View style={localStyles.vehicleSummaryContent}>
-                <Text style={localStyles.vehicleSummaryTitle}>{editingVehicle.brand} {editingVehicle.model}</Text>
-                <Text style={styles.linkHint}>{editingVehicle.locationAddress}</Text>
-                <View style={localStyles.summaryMetaRow}>
-                  <Text style={localStyles.summaryMetaText}>{editingVehicle.year}</Text>
-                  <Text style={localStyles.summaryMetaText}>{formatCurrencyEUR(editingVehicle.pricePerDay)}</Text>
+                <View style={styles.windowActions}>
+                  <Button
+                    label="Editar"
+                    size="sm"
+                    icon="create-outline"
+                    variant="secondary"
+                    onPress={() => handleEditAvailabilityWindow(window.id)}
+                    disabled={availabilityWindowsSaving}
+                  />
+                  <Button
+                    label="Eliminar"
+                    size="sm"
+                    icon="trash-outline"
+                    variant="dangerGhost"
+                    onPress={() => void handleDeleteAvailabilityWindow(window.id)}
+                    disabled={availabilityWindowsSaving}
+                  />
                 </View>
-              </View>
-            </View>
-
-            <View style={localStyles.formGrid}>
-              <Field label="Marca" value={editVehicleBrandInput} onChangeText={setEditVehicleBrandInput} placeholder="Marca" />
-              <Field label="Modelo" value={editVehicleModelInput} onChangeText={setEditVehicleModelInput} placeholder="Modelo" />
-              <View style={localStyles.formGridRow}>
-                <Field label="Año" value={editVehicleYearInput} onChangeText={setEditVehicleYearInput} placeholder="Año" keyboardType="number-pad" />
-                <Field label="Precio por dia" value={editVehiclePricePerDayInput} onChangeText={setEditVehiclePricePerDayInput} placeholder="Precio" keyboardType="decimal-pad" />
-              </View>
-              <View style={localStyles.readOnlyFieldWrap}>
-                <Text style={localStyles.fieldLabel}>Matricula</Text>
-                <View style={localStyles.readOnlyFieldValueWrap}>
-                  <Text style={localStyles.readOnlyFieldValueText}>{editVehicleLicensePlateInput}</Text>
-                </View>
-              </View>
-              <Field label="Descripcion" value={editVehicleDescriptionInput} onChangeText={setEditVehicleDescriptionInput} placeholder="Descripcion" multiline />
-              <SelectField
-                label="Combustible"
-                value={editVehicleFuelTypeInput}
-                onChange={setEditVehicleFuelTypeInput}
-                placeholder="Selecciona combustible"
-                options={FUEL_TYPE_OPTIONS}
-              />
-              <SelectField
-                label="Transmision"
-                value={editVehicleTransmissionInput}
-                onChange={setEditVehicleTransmissionInput}
-                placeholder="Selecciona transmision"
-                options={TRANSMISSION_OPTIONS}
-              />
-              <SelectField
-                label="Plazas"
-                value={editVehicleSeatsInput}
-                onChange={setEditVehicleSeatsInput}
-                placeholder="Selecciona plazas"
-                options={SEATS_OPTIONS}
-              />
-              <Field label="Direccion" value={editVehicleAddressInput} onChangeText={handleEditVehicleAddressChange} placeholder="Escribe una direccion" />
-            </View>
-
-            {editVehicleAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
-            {editVehicleAddressError ? <Text style={styles.error}>{editVehicleAddressError}</Text> : null}
-            {editVehicleAddressSuggestions.length > 0 && !editVehicleSelectedLocation ? (
-              <View style={localStyles.suggestionsList}>
-                {editVehicleAddressSuggestions.map((suggestion) => (
-                  <Pressable
-                    key={suggestion.id}
-                    style={localStyles.suggestionItem}
-                    onPress={() => handleSelectEditVehicleAddress(suggestion.label, suggestion.lat, suggestion.lng)}
-                  >
-                    <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-            {editVehicleSelectedLocation ? (
-              <Text style={styles.linkHint}>
-                Ubicacion seleccionada: {editVehicleSelectedLocation.lat.toFixed(5)}, {editVehicleSelectedLocation.lng.toFixed(5)}
-              </Text>
-            ) : null}
-            {editVehicleFormError ? <Text style={styles.error}>{editVehicleFormError}</Text> : null}
-
-            <View style={localStyles.actionRow}>
-              <ActionButton label="Guardar cambios" onPress={() => void handleUpdateVehicle()} disabled={vehiclesCreating} />
-              <ActionButton label="Eliminar" variant="danger" onPress={() => void handleDeleteVehicle()} disabled={vehiclesCreating} />
-            </View>
-
-            <View style={localStyles.actionRow}>
-              <ActionButton label="Imagenes" onPress={() => void handleOpenVehicleImagesScreen()} disabled={vehiclesCreating} variant="ghost" />
-              <ActionButton label="Disponibilidad" onPress={() => void handleOpenAvailabilityScreen()} disabled={vehiclesCreating} variant="ghost" />
-            </View>
+              </Card>
+            ))}
           </View>
-
-          <View style={[localStyles.actionRow, { marginTop: spacingTokens.lg, justifyContent: isDesktopWeb ? 'center' : 'flex-start' }]}>
-            <ActionButton label="Volver a lista" onPress={handleBack} variant="ghost" />
-          </View>
-
-          {vehiclesCreating ? <ActivityIndicator size="small" /> : null}
-          {vehiclesMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesMutationMessage}</Text> : null}
-          {vehiclesError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesError}</Text> : null}
-        </ScrollView>
+        )}
+      </Screen>
     );
   }
 
-  if (screenMode === 'create') {
-    return (
-      <ScrollView
-        style={localStyles.screenScroll}
-        contentContainerStyle={[
-          localStyles.screenContent,
-          {
-            paddingTop: topPadding,
-            paddingBottom: bottomPadding + spacingTokens.lg,
-            paddingHorizontal: spacingTokens.lg
-          }
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
-        <SectionHeader
-          title="Nuevo vehiculo"
-          subtitle="Crea un anuncio con una ficha limpia, realista y lista para publicar."
-          centered={isDesktopWeb}
+  /* ------------------------------------------------------------------------ */
+  /* Crear / editar                                                           */
+  /* ------------------------------------------------------------------------ */
+
+  if (screenMode === 'create' || (screenMode === 'edit' && editingVehicle)) {
+    const isEdit = screenMode === 'edit' && !!editingVehicle;
+    const primaryImageUrl = editingVehicle ? resolveStoredImageUrl(imageByVehicleId[editingVehicle.id] ?? null) : null;
+
+    const formFields = (
+      <Card>
+        <CardHeader title="Datos del anuncio" icon="car-sport-outline" />
+        <View style={styles.formRow}>
+          <TextField
+            label="Marca"
+            required
+            value={form.brand}
+            onChangeText={(value) => updateForm('brand', value)}
+            placeholder="Ej. Seat"
+            autoCapitalize="words"
+            error={formErrors.brand}
+            containerStyle={styles.flex1}
+          />
+          <TextField
+            label="Modelo"
+            required
+            value={form.model}
+            onChangeText={(value) => updateForm('model', value)}
+            placeholder="Ej. Ibiza"
+            autoCapitalize="words"
+            error={formErrors.model}
+            containerStyle={styles.flex1}
+          />
+        </View>
+        <View style={styles.formRow}>
+          <TextField
+            label="Año"
+            required
+            value={form.year}
+            onChangeText={(value) => updateForm('year', value.replace(/[^0-9]/g, '').slice(0, 4))}
+            placeholder={String(CURRENT_YEAR)}
+            keyboardType="number-pad"
+            error={formErrors.year}
+            containerStyle={styles.flex1}
+          />
+          <TextField
+            label="Precio por día"
+            required
+            value={form.pricePerDay}
+            onChangeText={(value) => updateForm('pricePerDay', value.replace(/[^0-9.,]/g, ''))}
+            placeholder="45"
+            keyboardType="decimal-pad"
+            right={<Text style={styles.unit}>€</Text>}
+            error={formErrors.pricePerDay}
+            containerStyle={styles.flex1}
+          />
+        </View>
+        <TextField
+          label="Matrícula"
+          required={!isEdit}
+          value={form.licensePlate}
+          onChangeText={(value) => updateForm('licensePlate', value.toUpperCase())}
+          placeholder="1234 ABC"
+          autoCapitalize="characters"
+          autoCorrect={false}
+          error={formErrors.licensePlate}
+          readOnlyValue={isEdit}
+          hint={isEdit ? 'La matrícula no se puede cambiar.' : 'No se muestra públicamente en el anuncio.'}
+        />
+        <TextField
+          label="Descripción"
+          required
+          value={form.description}
+          onChangeText={(value) => updateForm('description', value)}
+          placeholder="Estado, equipamiento, normas (mascotas, fumar…)"
+          multiline
+          maxLength={2000}
+          error={formErrors.description}
+          hint={formErrors.description ? undefined : `${form.description.length}/2000`}
+        />
+        <View style={isCompact ? styles.stack : styles.formRow}>
+          <SelectField
+            label="Combustible"
+            value={form.fuelType}
+            options={FUEL_TYPE_OPTIONS}
+            onChange={(value) => updateForm('fuelType', value)}
+            containerStyle={styles.flex1}
+          />
+          <SelectField
+            label="Cambio"
+            value={form.transmission}
+            options={TRANSMISSION_OPTIONS}
+            onChange={(value) => updateForm('transmission', value)}
+            containerStyle={styles.flex1}
+          />
+          <SelectField
+            label="Plazas"
+            value={form.seats}
+            options={SEATS_OPTIONS}
+            onChange={(value) => updateForm('seats', value)}
+            containerStyle={styles.flex1}
+          />
+        </View>
+        <AddressSearch
+          label="Dirección de recogida"
+          required
+          value={form.address}
+          selected={!!form.location}
+          error={formErrors.address}
+          placeholder="Calle, número y ciudad"
+          onChange={(value) => {
+            setForm((current) => ({ ...current, address: value, location: null }));
+            setFormErrors((current) => ({ ...current, address: undefined }));
+          }}
+          onSelect={(label, lat, lng) => {
+            setForm((current) => ({ ...current, address: label, location: { lat, lng } }));
+            setFormErrors((current) => ({ ...current, address: undefined }));
+          }}
+          onClear={() => setForm((current) => ({ ...current, address: '', location: null }))}
         />
 
-        <View style={[styles.card, desktopCardStyle]}>
-          <View style={localStyles.formGrid}>
-            <Field label="Marca" value={vehicleBrandInput} onChangeText={setVehicleBrandInput} placeholder="Marca" />
-            <Field label="Modelo" value={vehicleModelInput} onChangeText={setVehicleModelInput} placeholder="Modelo" />
-            <View style={localStyles.formGridRow}>
-              <Field label="Año" value={vehicleYearInput} onChangeText={setVehicleYearInput} placeholder="Año" keyboardType="number-pad" />
-              <Field label="Precio por dia" value={vehiclePricePerDayInput} onChangeText={setVehiclePricePerDayInput} placeholder="Precio" keyboardType="decimal-pad" />
-            </View>
-            <Field label="Matricula" value={vehicleLicensePlateInput} onChangeText={setVehicleLicensePlateInput} placeholder="Matricula" autoCapitalize="characters" />
-            <Field label="Descripcion" value={vehicleDescriptionInput} onChangeText={setVehicleDescriptionInput} placeholder="Describe el vehiculo" multiline />
-            <SelectField
-              label="Combustible"
-              value={vehicleFuelTypeInput}
-              onChange={setVehicleFuelTypeInput}
-              placeholder="Selecciona combustible"
-              options={FUEL_TYPE_OPTIONS}
-            />
-            <SelectField
-              label="Transmision"
-              value={vehicleTransmissionInput}
-              onChange={setVehicleTransmissionInput}
-              placeholder="Selecciona transmision"
-              options={TRANSMISSION_OPTIONS}
-            />
-            <SelectField
-              label="Plazas"
-              value={vehicleSeatsInput}
-              onChange={setVehicleSeatsInput}
-              placeholder="Selecciona plazas"
-              options={SEATS_OPTIONS}
-            />
-            <Field label="Direccion" value={vehicleAddressInput} onChangeText={handleCreateVehicleAddressChange} placeholder="Escribe una direccion" />
-          </View>
+        {formError ? <InlineMessage tone="error" message={formError} /> : null}
 
-          {vehicleAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
-          {vehicleAddressError ? <Text style={styles.error}>{vehicleAddressError}</Text> : null}
-          {vehicleAddressSuggestions.length > 0 && !vehicleSelectedLocation ? (
-            <View style={localStyles.suggestionsList}>
-              {vehicleAddressSuggestions.map((suggestion) => (
-                <Pressable
-                  key={suggestion.id}
-                  style={localStyles.suggestionItem}
-                  onPress={() => handleSelectCreateVehicleAddress(suggestion.label, suggestion.lat, suggestion.lng)}
-                >
-                  <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-          {vehicleSelectedLocation ? (
-            <Text style={styles.linkHint}>
-              Ubicacion seleccionada: {vehicleSelectedLocation.lat.toFixed(5)}, {vehicleSelectedLocation.lng.toFixed(5)}
-            </Text>
-          ) : null}
-          {createVehicleFormError ? <Text style={styles.error}>{createVehicleFormError}</Text> : null}
+        <Button
+          label={isEdit ? 'Guardar cambios' : 'Publicar vehículo'}
+          icon={isEdit ? 'save-outline' : 'cloud-upload-outline'}
+          onPress={() => void (isEdit ? handleUpdateVehicle() : handleCreateVehicle())}
+          loading={vehiclesSaving && !statusSaving}
+          disabled={isEdit && !isFormDirty}
+          fullWidth
+        />
+      </Card>
+    );
 
-          <View style={localStyles.actionRow}>
-            <ActionButton label={vehiclesCreating ? 'Creando...' : 'Crear vehiculo'} onPress={() => void handleCreateVehicle()} disabled={vehiclesCreating} />
-            <ActionButton label="Cancelar" onPress={handleBack} variant="ghost" disabled={vehiclesCreating} />
+    if (!isEdit || !editingVehicle) {
+      return (
+        <Screen
+          {...formScreenProps}
+          header={
+            <ScreenHeader
+              title="Nuevo vehículo"
+              subtitle="Publica tu coche en pocos minutos. Después podrás añadir fotos y fechas."
+              onBack={() => void handleBack()}
+              backLabel="Mis vehículos"
+            />
+          }
+        >
+          {formFields}
+        </Screen>
+      );
+    }
+
+    const isActive = editingVehicle.status === 'active';
+    const retiredByAdmin = !!editingVehicle.disabledByAdmin;
+
+    return (
+      <Screen
+        {...formScreenProps}
+        refreshing={refreshing}
+        onRefresh={() => void handleRefresh()}
+        header={
+          <ScreenHeader
+            title={`${editingVehicle.brand} ${editingVehicle.model}`}
+            eyebrow="Editar vehículo"
+            onBack={() => void handleBack()}
+            backLabel="Mis vehículos"
+          />
+        }
+      >
+        <Card>
+          <View style={styles.summaryRow}>
+            <AppImage uri={primaryImageUrl} style={styles.summaryImage} fallbackLabel="Sin portada" />
+            <View style={styles.summaryInfo}>
+              <StatusChip
+                label={retiredByAdmin ? 'Retirado' : isActive ? 'Publicado' : 'Oculto'}
+                tone={retiredByAdmin ? 'danger' : isActive ? 'success' : 'neutral'}
+                dot
+                compact
+              />
+              <Text style={styles.summaryPrice}>{formatPriceCompact(editingVehicle.pricePerDay)} / día</Text>
+              <Text style={styles.caption} numberOfLines={2}>
+                {editingVehicle.locationAddress}
+              </Text>
+            </View>
           </View>
+          <View style={styles.switchRow}>
+            <View style={styles.flex1}>
+              <Text style={styles.switchTitle}>Visible en Explorar</Text>
+              <Text style={styles.caption}>
+                {retiredByAdmin
+                  ? 'La administración ha retirado este anuncio. Contacta con soporte para volver a publicarlo.'
+                  : 'Desactívalo para pausar el anuncio sin borrarlo.'}
+              </Text>
+            </View>
+            <Switch
+              value={isActive}
+              onValueChange={(value) => void handleToggleStatus(value)}
+              disabled={statusSaving || vehiclesSaving || retiredByAdmin}
+              trackColor={{ false: colorTokens.borderStrong, true: colorTokens.success }}
+              thumbColor={Platform.OS === 'android' ? colorTokens.white : undefined}
+              accessibilityLabel="Visible en Explorar"
+            />
+          </View>
+        </Card>
+
+        <View style={isCompact ? styles.stack : styles.formRow}>
+          <ManageTile
+            icon="images-outline"
+            title="Fotos"
+            subtitle={
+              vehicleImagesLoading && vehicleImages.length === 0
+                ? 'Cargando…'
+                : vehicleImages.length === 0
+                  ? 'Añade la primera foto'
+                  : pluralize(vehicleImages.length, 'foto', 'fotos')
+            }
+            warning={!vehicleImagesLoading && vehicleImages.length === 0}
+            onPress={() => setScreenMode('images')}
+          />
+          <ManageTile
+            icon="calendar-outline"
+            title="Disponibilidad"
+            subtitle={
+              availabilityWindowsLoading && availabilityWindows.length === 0
+                ? 'Cargando…'
+                : futureWindows.length === 0
+                  ? 'Sin fechas abiertas'
+                  : pluralize(futureWindows.length, 'periodo abierto', 'periodos abiertos')
+            }
+            warning={!availabilityWindowsLoading && futureWindows.length === 0}
+            onPress={handleOpenAvailabilityScreen}
+          />
         </View>
-      </ScrollView>
+
+        {formFields}
+
+        <Card variant="outlined">
+          <CardHeader title="Zona de peligro" icon="warning-outline" subtitle="Eliminar el anuncio no se puede deshacer." />
+          <Button
+            label="Eliminar vehículo"
+            icon="trash-outline"
+            variant="dangerGhost"
+            onPress={() => void handleDeleteVehicle()}
+            disabled={vehiclesSaving}
+            style={styles.alignStart}
+          />
+        </Card>
+      </Screen>
+    );
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Listado                                                                  */
+  /* ------------------------------------------------------------------------ */
+
+  const showSkeletons = vehiclesLoading && !vehiclesLoaded;
+  const openCreate = () => {
+    setForm(EMPTY_FORM);
+    setFormErrors({});
+    setFormError(null);
+    setScreenMode('create');
+  };
+
+  if (showEarnings) {
+    return (
+      <EarningsScreen
+        topPadding={topPadding}
+        bottomPadding={bottomPadding}
+        onBack={() => setShowEarnings(false)}
+        onPublishVehicle={() => {
+          setShowEarnings(false);
+          openCreate();
+        }}
+      />
     );
   }
 
   return (
-    <View style={localStyles.screenScroll}>
-      <ScrollView
-        style={localStyles.screenScroll}
-        contentContainerStyle={[
-          localStyles.screenContent,
-          {
-            paddingTop: topPadding,
-            paddingBottom: bottomPadding + spacingTokens.lg,
-            paddingHorizontal: spacingTokens.lg
-          }
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
-        <SectionHeader
-          title="Mis vehiculos"
-          subtitle="Gestiona anuncios, fotos y disponibilidad desde un panel preparado para la app real."
-          centered={isDesktopWeb}
+    <Screen
+      topPadding={topPadding}
+      bottomPadding={bottomPadding + (isCompact ? 72 : 0)}
+      refreshing={refreshing}
+      onRefresh={() => void handleRefresh()}
+      header={
+        <ScreenHeader
+          title="Mis vehículos"
+          subtitle="Gestiona tus anuncios, fotos y fechas disponibles."
+          right={!isCompact && myVehicles.length > 0 ? <Button label="Nuevo vehículo" icon="add" onPress={openCreate} /> : null}
         />
+      }
+      overlay={
+        isCompact && myVehicles.length > 0 ? (
+          <Pressable
+            onPress={openCreate}
+            accessibilityRole="button"
+            accessibilityLabel="Publicar nuevo vehículo"
+            android_ripple={{ color: 'rgba(255,255,255,0.2)' }}
+            style={({ pressed }) => [
+              styles.fab,
+              { bottom: bottomPadding + spacingTokens.md },
+              pressed && Platform.OS !== 'android' ? styles.fabPressed : null
+            ]}
+          >
+            <Ionicons name="add" size={22} color={colorTokens.white} />
+            <Text style={styles.fabLabel}>Nuevo vehículo</Text>
+          </Pressable>
+        ) : null
+      }
+    >
+      {vehiclesError && myVehicles.length > 0 ? (
+        <InlineMessage tone="error" message={vehiclesError} actionLabel="Reintentar" onAction={() => void fetchMyVehicles()} />
+      ) : null}
 
-        {vehiclesLoading || vehiclesCreating ? <ActivityIndicator size="small" /> : null}
-        {vehiclesError ? <Text style={[styles.error, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesError}</Text> : null}
-        {vehiclesMutationMessage ? <Text style={[styles.info, { textAlign: isDesktopWeb ? 'center' : 'left' }]}>{vehiclesMutationMessage}</Text> : null}
+      {!showSkeletons ? (
+        <Card
+          onPress={() => setShowEarnings(true)}
+          padding={spacingTokens.lg}
+          accessibilityLabel="Mis ingresos"
+          accessibilityHint="Abre el panel de ingresos de tus vehículos"
+          style={styles.earningsEntry}
+        >
+          <View style={styles.earningsEntryIcon}>
+            <Ionicons name="wallet-outline" size={20} color={colorTokens.primary} />
+          </View>
+          <View style={styles.flex1}>
+            <Text style={styles.earningsEntryTitle}>Mis ingresos</Text>
+            <Text style={styles.caption}>Resumen por mes, por vehículo y por reserva.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colorTokens.textMuted} />
+        </Card>
+      ) : null}
 
-        <View style={[localStyles.vehicleGrid, isDesktopWeb ? localStyles.vehicleGridDesktop : undefined]}>
-          {myVehicles.map((vehicle) => {
-            const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
+      <View style={[styles.grid, { gap: spacingTokens.lg }]}>
+        {showSkeletons
+          ? Array.from({ length: columns }).map((_, index) => (
+              <VehicleCardSkeleton key={index} style={{ width: cardWidth }} />
+            ))
+          : myVehicles.map((vehicle) => {
+              const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
+              const isActive = vehicle.status === 'active';
+              const statusLabel = vehicle.disabledByAdmin ? 'Retirado' : isActive ? 'Publicado' : 'Oculto';
+              const details = [
+                String(vehicle.year),
+                translateFuelType(vehicle.fuelType),
+                translateTransmission(vehicle.transmission)
+              ]
+                .filter(Boolean)
+                .join(' · ');
 
-            return (
-              <Pressable
-                key={vehicle.id}
-                style={[styles.card, localStyles.vehicleCard, isDesktopWeb ? localStyles.desktopListCard : undefined]}
-                onPress={() => handleOpenVehicleEditor(vehicle.id)}
-              >
-                <View style={localStyles.vehicleCardMediaWrap}>
-                  {primaryImageUrl ? (
-                    <Image
-                      source={{ uri: primaryImageUrl }}
-                      style={localStyles.vehicleCardMedia}
-                      resizeMode="cover"
+              return (
+                <Card
+                  key={vehicle.id}
+                  padding={0}
+                  onPress={() => handleOpenVehicleEditor(vehicle.id)}
+                  accessibilityLabel={`${vehicle.brand} ${vehicle.model}, ${statusLabel.toLowerCase()}`}
+                  accessibilityHint="Abre la edición del vehículo"
+                  style={[styles.vehicleCard, { width: cardWidth }]}
+                >
+                  <View>
+                    <AppImage
+                      uri={primaryImageUrl}
+                      style={styles.vehicleImage}
+                      fallbackIcon="camera-outline"
+                      fallbackLabel="Añade fotos para destacar tu anuncio"
                     />
-                  ) : (
-                    <View style={localStyles.vehicleCardMediaPlaceholder}>
-                      <Text style={localStyles.vehicleCardMediaPlaceholderText}>Añade una foto para destacar el anuncio</Text>
+                    <View style={styles.statusBadge}>
+                      <StatusChip
+                        label={statusLabel}
+                        tone={vehicle.disabledByAdmin ? 'danger' : isActive ? 'success' : 'neutral'}
+                        dot
+                        compact
+                      />
                     </View>
-                  )}
-                </View>
-
-                <View style={localStyles.vehicleCardBody}>
-                  <View style={localStyles.vehicleCardHeaderRow}>
-                    <View style={localStyles.vehicleCardTitleWrap}>
-                      <Text style={localStyles.vehicleCardTitle}>{vehicle.brand} {vehicle.model}</Text>
-                      <Text style={localStyles.vehicleCardSubtitle}>{vehicle.locationAddress}</Text>
+                  </View>
+                  <View style={styles.vehicleBody}>
+                    <View style={styles.vehicleTitleRow}>
+                      <Text style={styles.vehicleTitle} numberOfLines={1}>
+                        {vehicle.brand} {vehicle.model}
+                      </Text>
+                      <Text style={styles.vehiclePrice}>{formatPriceCompact(vehicle.pricePerDay)}/día</Text>
                     </View>
-                    <Text style={localStyles.vehiclePrice}>{vehicle.pricePerDay.toFixed(2)} EUR/dia</Text>
+                    <Text style={styles.caption} numberOfLines={1}>
+                      {details}
+                    </Text>
+                    <View style={styles.metaRow}>
+                      <Ionicons name="location-outline" size={14} color={colorTokens.textMuted} />
+                      <Text style={[styles.caption, styles.flex1]} numberOfLines={1}>
+                        {vehicle.locationAddress}
+                      </Text>
+                    </View>
+                    <View style={styles.plate}>
+                      <Text style={styles.plateText}>{vehicle.licensePlate}</Text>
+                    </View>
                   </View>
+                </Card>
+              );
+            })}
+      </View>
 
-                  <View style={localStyles.vehicleMetaRow}>
-                    <View style={localStyles.vehicleMetaChip}><Text style={localStyles.vehicleMetaChipText}>{vehicle.year}</Text></View>
-                  </View>
+      {!vehiclesLoading && vehiclesError && myVehicles.length === 0 ? (
+        <ErrorState message={vehiclesError} onRetry={() => void fetchMyVehicles()} />
+      ) : null}
 
-                  <View style={localStyles.actionRow}>
-                    <ActionButton label="Editar vehiculo" onPress={() => handleOpenVehicleEditor(vehicle.id)} />
-                  </View>
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {!vehiclesLoading && !vehiclesError && myVehicles.length === 0 ? (
-          <EmptyState title="Sin vehiculos" description="Este usuario no tiene vehiculos asociados." />
-        ) : null}
-      </ScrollView>
-
-      <Pressable onPress={handleOpenCreateVehicleScreen} style={[localStyles.fab, { bottom: fabBottomOffset }]}>
-        <Text style={localStyles.fabIcon}>+</Text>
-        <Text style={localStyles.fabLabel}>Nuevo vehiculo</Text>
-      </Pressable>
-    </View>
+      {vehiclesLoaded && !vehiclesLoading && !vehiclesError && myVehicles.length === 0 ? (
+        <EmptyState
+          icon="car-sport-outline"
+          title="Publica tu primer vehículo"
+          description="Gana dinero alquilando tu coche cuando no lo uses. Solo necesitas unos datos básicos, fotos y fechas."
+          actionLabel="Publicar vehículo"
+          onAction={openCreate}
+          secondaryActionLabel={onNavigateToTab ? 'Ver cómo lo hacen otros' : undefined}
+          onSecondaryAction={onNavigateToTab ? () => onNavigateToTab('explore') : undefined}
+        />
+      ) : null}
+    </Screen>
   );
 }
 
-const localStyles = StyleSheet.create({
-  screenScroll: {
+function ManageTile({
+  icon,
+  title,
+  subtitle,
+  warning,
+  onPress
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  warning?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Card onPress={onPress} style={styles.flex1} padding={spacingTokens.md} accessibilityLabel={`${title}: ${subtitle}`}>
+      <View style={styles.manageRow}>
+        <View style={[styles.manageIcon, warning ? styles.manageIconWarning : null]}>
+          <Ionicons name={icon} size={20} color={warning ? colorTokens.accent2Pressed : colorTokens.primary} />
+        </View>
+        <View style={styles.flex1}>
+          <Text style={styles.switchTitle}>{title}</Text>
+          <Text style={[styles.caption, warning ? styles.warningText : null]}>{subtitle}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colorTokens.textMuted} />
+      </View>
+    </Card>
+  );
+}
+
+const styles = StyleSheet.create({
+  earningsEntry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.md
+  },
+  earningsEntryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.warningSoft,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  earningsEntryTitle: {
+    color: colorTokens.primary,
+    ...typographyTokens.bodyStrong
+  },
+  flex1: {
     flex: 1
   },
-  screenContent: {
+  stack: {
     gap: spacingTokens.md
   },
-  desktopCard: {
-    width: '100%',
-    maxWidth: 860,
-    alignSelf: 'center'
+  alignStart: {
+    alignSelf: 'flex-start'
   },
-  vehicleGrid: {
-    width: '100%',
+  caption: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
+  },
+  warningText: {
+    color: colorTokens.accent2Pressed
+  },
+  unit: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.bodyStrong
+  },
+  formRow: {
+    flexDirection: 'row',
     gap: spacingTokens.md
   },
-  vehicleGridDesktop: {
-    maxWidth: 1100,
-    alignSelf: 'center',
+  rowActions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center'
+    gap: spacingTokens.sm
   },
-  desktopListCard: {
-    width: '31%',
-    minWidth: 250,
-    maxWidth: 320
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap'
   },
-  imageGrid: {
+  vehicleCard: {
+    overflow: 'hidden',
+    gap: 0
+  },
+  vehicleImage: {
     width: '100%',
-    gap: spacingTokens.md
+    aspectRatio: 16 / 10
   },
-  imageGridDesktop: {
-    maxWidth: 1100,
-    alignSelf: 'center',
+  statusBadge: {
+    position: 'absolute',
+    top: spacingTokens.md,
+    left: spacingTokens.md
+  },
+  vehicleBody: {
+    padding: spacingTokens.lg,
+    gap: spacingTokens.xs
+  },
+  vehicleTitleRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center'
-  },
-  imageGridCard: {
-    gap: spacingTokens.sm
-  },
-  imageGridDesktopCard: {
-    width: '31%',
-    minWidth: 250,
-    maxWidth: 320
-  },
-  actionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacingTokens.sm
-  },
-  imagesActionRow: {
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    alignSelf: 'center',
-    justifyContent: 'center',
-    width: 'auto',
-    gap: spacingTokens.sm
-  },
-  centeredActionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: spacingTokens.sm
-  },
-  actionButton: {
-    minHeight: 48,
-    paddingHorizontal: spacingTokens.lg,
-    paddingVertical: spacingTokens.sm,
-    borderRadius: radiusTokens.input,
     alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colorTokens.primary,
-    backgroundColor: colorTokens.primary
+    gap: spacingTokens.sm
   },
-  actionButtonPrimary: {
-    backgroundColor: colorTokens.primary,
-    borderColor: colorTokens.primary
+  vehicleTitle: {
+    flex: 1,
+    color: colorTokens.primary,
+    ...typographyTokens.h3
   },
-  actionButtonGhost: {
-    backgroundColor: colorTokens.white,
-    borderColor: colorTokens.border
+  vehiclePrice: {
+    color: colorTokens.primary,
+    ...typographyTokens.sectionLabel
   },
-  actionButtonDanger: {
-    backgroundColor: colorTokens.alert,
-    borderColor: colorTokens.alert
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4
   },
-  actionButtonDisabled: {
-    opacity: 0.55
+  plate: {
+    alignSelf: 'flex-start',
+    marginTop: spacingTokens.xs,
+    paddingHorizontal: spacingTokens.sm,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: colorTokens.secondary,
+    backgroundColor: colorTokens.white
   },
-  actionButtonText: {
-    color: colorTokens.white,
-    ...typographyTokens.caption,
-    fontWeight: '700'
-  },
-  actionButtonGhostText: {
-    color: colorTokens.secondary
-  },
-  actionButtonDangerText: {
-    color: colorTokens.white
+  plateText: {
+    color: colorTokens.secondary,
+    ...typographyTokens.captionStrong,
+    letterSpacing: 1
   },
   fab: {
     position: 'absolute',
@@ -1269,274 +1473,101 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacingTokens.sm,
-    paddingHorizontal: spacingTokens.lg,
-    paddingVertical: spacingTokens.md,
+    minHeight: 52,
+    paddingHorizontal: spacingTokens.xl,
     borderRadius: radiusTokens.pill,
     backgroundColor: colorTokens.accent2,
-    ...shadowTokens.card
+    overflow: 'hidden',
+    ...shadowTokens.raised
   },
-  fabIcon: {
-    color: colorTokens.white,
-    fontSize: 18,
-    fontWeight: '700'
+  fabPressed: {
+    backgroundColor: colorTokens.accent2Pressed
   },
   fabLabel: {
     color: colorTokens.white,
-    ...typographyTokens.caption,
-    fontWeight: '700'
+    ...typographyTokens.captionStrong,
+    fontSize: 15
   },
-  fieldWrap: {
-    gap: spacingTokens.xs
-  },
-  fieldLabel: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption,
-    fontWeight: '700'
-  },
-  selectTrigger: {
-    minHeight: 50,
-    paddingHorizontal: spacingTokens.md,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.input,
-    backgroundColor: colorTokens.white,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacingTokens.sm
-  },
-  selectValueText: {
-    color: colorTokens.primary,
-    ...typographyTokens.body,
-    fontWeight: '600',
-    flex: 1
-  },
-  selectPlaceholderText: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.body,
-    flex: 1
-  },
-  selectChevron: {
-    color: colorTokens.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    minWidth: 16,
-    textAlign: 'center'
-  },
-  selectOptions: {
-    marginTop: spacingTokens.xs,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.white,
-    overflow: 'hidden'
-  },
-  selectOptionItem: {
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colorTokens.border
-  },
-  selectOptionItemLast: {
-    borderBottomWidth: 0
-  },
-  multilineInput: {
-    minHeight: 108,
-    textAlignVertical: 'top'
-  },
-  readOnlyFieldWrap: {
-    gap: spacingTokens.xs
-  },
-  readOnlyFieldValueWrap: {
-    minHeight: 50,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.md,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.input,
-    backgroundColor: colorTokens.bgLight,
-    justifyContent: 'center'
-  },
-  readOnlyFieldValueText: {
-    color: colorTokens.secondary,
-    ...typographyTokens.body,
-    fontWeight: '700'
-  },
-  formGrid: {
-    gap: spacingTokens.md
-  },
-  formGridRow: {
-    flexDirection: 'row',
-    gap: spacingTokens.sm
-  },
-  vehicleSummaryCard: {
+  summaryRow: {
     flexDirection: 'row',
     gap: spacingTokens.md,
-    alignItems: 'center',
-    marginBottom: spacingTokens.md,
-    padding: spacingTokens.md,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.bgLight
+    alignItems: 'center'
   },
-  vehicleSummaryImage: {
-    width: 88,
-    height: 88,
-    borderRadius: radiusTokens.input,
-    backgroundColor: colorTokens.bgLight
+  summaryImage: {
+    width: 112,
+    height: 80,
+    borderRadius: radiusTokens.input
   },
-  vehicleSummaryImagePlaceholder: {
-    width: 88,
-    height: 88,
-    borderRadius: radiusTokens.input,
-    backgroundColor: colorTokens.white,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  vehicleSummaryImagePlaceholderText: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption,
-    textAlign: 'center'
-  },
-  vehicleSummaryContent: {
+  summaryInfo: {
     flex: 1,
-    gap: spacingTokens.xs
+    gap: 4
   },
-  vehicleSummaryTitle: {
+  summaryPrice: {
     color: colorTokens.primary,
     ...typographyTokens.sectionLabel
   },
-  summaryMetaRow: {
+  switchRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacingTokens.xs
+    alignItems: 'center',
+    gap: spacingTokens.md,
+    paddingTop: spacingTokens.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colorTokens.border
   },
-  summaryMetaText: {
-    color: colorTokens.secondary,
-    ...typographyTokens.caption,
-    fontWeight: '700'
+  switchTitle: {
+    color: colorTokens.primary,
+    ...typographyTokens.bodyStrong
   },
-  vehicleCard: {
+  manageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacingTokens.md
   },
-  vehicleCardMediaWrap: {
-    borderRadius: radiusTokens.input,
-    overflow: 'hidden'
-  },
-  vehicleCardMedia: {
-    width: '100%',
-    height: 190,
-    backgroundColor: colorTokens.bgLight
-  },
-  vehicleCardMediaPlaceholder: {
-    width: '100%',
-    height: 190,
-    borderRadius: radiusTokens.input,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    backgroundColor: colorTokens.bgLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacingTokens.md
-  },
-  vehicleCardMediaPlaceholderText: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption,
-    textAlign: 'center'
-  },
-  vehicleCardBody: {
-    gap: spacingTokens.sm
-  },
-  vehicleCardHeaderRow: {
-    flexDirection: 'row',
-    gap: spacingTokens.sm,
-    alignItems: 'flex-start',
-    justifyContent: 'space-between'
-  },
-  vehicleCardTitleWrap: {
-    flex: 1,
-    gap: 2
-  },
-  vehicleCardTitle: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  vehicleCardSubtitle: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  vehiclePrice: {
-    color: colorTokens.secondary,
-    ...typographyTokens.sectionLabel,
-    textAlign: 'right'
-  },
-  vehicleMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacingTokens.xs
-  },
-  vehicleMetaChip: {
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.xs,
-    borderRadius: radiusTokens.pill,
-    backgroundColor: colorTokens.bgLight,
-    borderWidth: 1,
-    borderColor: colorTokens.border
-  },
-  vehicleMetaChipText: {
-    color: colorTokens.secondary,
-    ...typographyTokens.caption,
-    fontWeight: '700'
-  },
-  imageCardMediaWrap: {
-    position: 'relative',
-    borderRadius: radiusTokens.input,
-    overflow: 'hidden'
-  },
-  primaryStarButton: {
-    position: 'absolute',
-    top: spacingTokens.sm,
-    right: spacingTokens.sm,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    backgroundColor: 'rgba(255,255,255,0.92)',
+  manageIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colorTokens.infoSoft,
     alignItems: 'center',
     justifyContent: 'center'
   },
-  primaryStarButtonActive: {
-    borderColor: colorTokens.accent1,
-    backgroundColor: colorTokens.accent1
+  manageIconWarning: {
+    backgroundColor: colorTokens.accentSoft
   },
-  primaryStarText: {
-    color: colorTokens.secondary,
-    fontSize: 16,
-    lineHeight: 18,
-    fontWeight: '700'
+  photoSkeletons: {
+    flexDirection: 'row',
+    gap: spacingTokens.sm
   },
-  primaryStarTextActive: {
-    color: colorTokens.primary
+  tipRow: {
+    flexDirection: 'row',
+    gap: spacingTokens.sm,
+    alignItems: 'flex-start'
   },
-  suggestionsList: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.white,
-    overflow: 'hidden'
+  windowEditing: {
+    borderColor: colorTokens.primary,
+    borderWidth: 1.5
   },
-  suggestionItem: {
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colorTokens.border
+  windowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.md
   },
-  suggestionLabel: {
-    color: colorTokens.primary,
-    ...typographyTokens.caption
+  windowIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colorTokens.infoSoft,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  windowText: {
+    color: colorTokens.textMain,
+    ...typographyTokens.bodyStrong,
+    fontSize: 14
+  },
+  windowActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacingTokens.sm
   }
 });

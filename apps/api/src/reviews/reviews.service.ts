@@ -6,7 +6,7 @@ import {
   NotFoundException
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { IsNull, QueryFailedError, Repository } from 'typeorm';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { ReviewResponseDto } from './dto/review-response.dto';
 import { UpdateReviewDto } from './dto/update-review.dto';
@@ -31,15 +31,19 @@ export class ReviewsService {
       await this.ensureBookingParticipant(bookingId, userId);
     }
 
-    const where = bookingId ? { bookingId } : undefined;
-    const reviews = await this.reviewsRepository.find({
+    // Sin bookingId: solo las reseñas donde el usuario participa (autor o destinatario),
+    // filtradas en BD. Las ocultas por moderación solo las sigue viendo su autor (evita que
+    // la app le ofrezca reseñar de nuevo y choque con la unicidad).
+    const where = bookingId
+      ? [
+          { bookingId, hiddenAt: IsNull() },
+          { bookingId, reviewerId: userId }
+        ]
+      : [{ reviewerId: userId }, { revieweeId: userId, hiddenAt: IsNull() }];
+    const visible = await this.reviewsRepository.find({
       where,
       order: { createdAt: 'DESC' }
     });
-
-    const visible = bookingId
-      ? reviews
-      : await this.filterReviewsByParticipation(reviews, userId);
 
     return visible.map((item) => this.toResponseDto(item));
   }
@@ -59,7 +63,7 @@ export class ReviewsService {
     const booking = await this.ensureBookingParticipant(createReviewDto.bookingId, userId);
 
     if (booking.status !== 'completed') {
-      throw new BadRequestException('Review can be created only when booking is completed');
+      throw new BadRequestException('Solo puedes valorar reservas completadas');
     }
 
     if (createReviewDto.revieweeId === userId) {
@@ -92,7 +96,7 @@ export class ReviewsService {
         error.driverError !== null &&
         (error.driverError as { code?: string }).code === '23505'
       ) {
-        throw new ConflictException('This reviewer already created a review for this booking');
+        throw new ConflictException('Ya has valorado esta reserva');
       }
 
       throw error;
@@ -163,34 +167,6 @@ export class ReviewsService {
     }
 
     return booking;
-  }
-
-  private async filterReviewsByParticipation(
-    reviews: ReviewEntity[],
-    userId: string
-  ): Promise<ReviewEntity[]> {
-    if (reviews.length === 0) {
-      return [];
-    }
-
-    const bookingIds = Array.from(new Set(reviews.map((review) => review.bookingId)));
-    const rows = await this.reviewsRepository.query(
-      `
-        SELECT b.id AS booking_id, v.owner_id, b.driver_id
-        FROM bookings b
-        INNER JOIN vehicles v ON v.id = b.vehicle_id
-        WHERE b.id = ANY($1::uuid[])
-      `,
-      [bookingIds]
-    );
-
-    const allowedBookingIds = new Set(
-      (rows as Array<{ booking_id: string; owner_id: string; driver_id: string }>)
-        .filter((row) => row.owner_id === userId || row.driver_id === userId)
-        .map((row) => row.booking_id)
-    );
-
-    return reviews.filter((review) => allowedBookingIds.has(review.bookingId));
   }
 
   private validateRating(rating: number): void {

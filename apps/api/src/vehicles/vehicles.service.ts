@@ -1,11 +1,12 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { HANDOVER_BUFFER_HOURS } from '../common/booking-rules';
 import { UserEntity } from '../users/entities/user.entity';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { GetVehiclesFiltersDto } from './dto/get-vehicles-filters.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
-import { VehicleResponseDto } from './dto/vehicle-response.dto';
+import { PublicVehicleResponseDto, VehicleResponseDto } from './dto/vehicle-response.dto';
 import { VehicleEntity } from './entities/vehicle.entity';
 
 type VehicleRow = {
@@ -25,6 +26,7 @@ type VehicleRow = {
   seats: number | null;
   status: 'active' | 'inactive';
   created_at: Date;
+  disabled_by_admin_at?: Date | null;
 };
 
 @Injectable()
@@ -36,8 +38,9 @@ export class VehiclesService {
     private readonly usersRepository: Repository<UserEntity>
   ) {}
 
-  async findAll(filters: GetVehiclesFiltersDto = {}): Promise<VehicleResponseDto[]> {
-    const whereParts: string[] = ['deleted_at IS NULL'];
+  // Listado público de Explorar: solo anuncios activos y sin datos privados (matrícula).
+  async findAll(filters: GetVehiclesFiltersDto = {}): Promise<PublicVehicleResponseDto[]> {
+    const whereParts: string[] = ['deleted_at IS NULL', `status = 'active'`];
     const params: Array<string | number> = [];
 
     if (typeof filters.maxPrice === 'number' && !Number.isNaN(filters.maxPrice)) {
@@ -60,9 +63,20 @@ export class VehiclesService {
       whereParts.push(`seats >= $${params.length}`);
     }
 
-    if (filters.status) {
-      params.push(filters.status);
-      whereParts.push(`status = $${params.length}`);
+    const hasPoint =
+      typeof filters.lat === 'number' &&
+      typeof filters.lng === 'number' &&
+      !Number.isNaN(filters.lat) &&
+      !Number.isNaN(filters.lng);
+    let orderBy = 'created_at DESC';
+
+    if (hasPoint) {
+      params.push(filters.lng as number);
+      const lngIndex = params.length;
+      params.push(filters.lat as number);
+      const latIndex = params.length;
+      // Con punto de referencia se ordena por cercanía (el índice GiST cubre el filtro de radio).
+      orderBy = `location::geography <-> ST_SetSRID(ST_MakePoint($${lngIndex}, $${latIndex}), 4326)::geography, created_at DESC`;
     }
 
     const hasGeoFilter =
@@ -86,6 +100,30 @@ export class VehiclesService {
       );
     }
 
+    if (filters.from && filters.to) {
+      params.push(filters.from);
+      const fromIndex = params.length;
+      params.push(filters.to);
+      const toIndex = params.length;
+      params.push(HANDOVER_BUFFER_HOURS);
+      const bufferIndex = params.length;
+      // Mismas reglas que al crear la reserva: el rango cabe en una ventana de disponibilidad y no
+      // choca con reservas confirmadas (colchón de entrega a ambos lados). Las pending no bloquean.
+      whereParts.push(`EXISTS (
+        SELECT 1 FROM vehicle_availability_windows w
+        WHERE w.vehicle_id = vehicles.id
+          AND w.start_datetime <= $${fromIndex}::timestamptz
+          AND w.end_datetime >= $${toIndex}::timestamptz
+      )`);
+      whereParts.push(`NOT EXISTS (
+        SELECT 1 FROM bookings b
+        WHERE b.vehicle_id = vehicles.id
+          AND b.status IN ('accepted', 'paid_confirmed', 'in_progress', 'completed')
+          AND b.start_datetime < $${toIndex}::timestamptz + make_interval(hours => $${bufferIndex})
+          AND b.end_datetime + make_interval(hours => $${bufferIndex}) > $${fromIndex}::timestamptz
+      )`);
+    }
+
     const query = `
       SELECT
         id,
@@ -106,12 +144,12 @@ export class VehiclesService {
         created_at
       FROM vehicles
       WHERE ${whereParts.join(' AND ')}
-      ORDER BY created_at DESC
+      ORDER BY ${orderBy}
     `;
 
     const rows = await this.vehiclesRepository.query(query, params);
 
-    return rows.map((row: VehicleRow) => this.toResponseDto(row));
+    return rows.map((row: VehicleRow) => this.toPublicDto(this.toResponseDto(row)));
   }
 
   async findMine(ownerId: string): Promise<VehicleResponseDto[]> {
@@ -133,7 +171,8 @@ export class VehiclesService {
           transmission,
           seats,
           status,
-          created_at
+          created_at,
+          disabled_by_admin_at
         FROM vehicles
         WHERE owner_id = $1 AND deleted_at IS NULL
         ORDER BY created_at DESC
@@ -273,9 +312,11 @@ export class VehiclesService {
     const nextLocationLat = updateVehicleDto.locationLat ?? current.locationLat;
     const nextLocationLng = updateVehicleDto.locationLng ?? current.locationLng;
     const nextLocationAddress = updateVehicleDto.locationAddress ?? current.locationAddress;
-    const nextFuelType = updateVehicleDto.fuelType ?? current.fuelType;
-    const nextTransmission = updateVehicleDto.transmission ?? current.transmission;
-    const nextSeats = updateVehicleDto.seats ?? current.seats;
+    // En los campos opcionales `undefined` conserva y `null` borra (misma regla que PUT /users/me).
+    const nextFuelType = updateVehicleDto.fuelType === undefined ? current.fuelType : updateVehicleDto.fuelType;
+    const nextTransmission =
+      updateVehicleDto.transmission === undefined ? current.transmission : updateVehicleDto.transmission;
+    const nextSeats = updateVehicleDto.seats === undefined ? current.seats : updateVehicleDto.seats;
     const nextStatus = updateVehicleDto.status ?? current.status;
 
     await this.vehiclesRepository.query(
@@ -330,12 +371,25 @@ export class VehiclesService {
       throw new ForbiddenException('You do not own this vehicle');
     }
 
+    if (updateVehicleDto.status === 'active' && (await this.isDisabledByAdmin(id))) {
+      throw new ForbiddenException('Vehículo desactivado por la administración: contacta con soporte para reactivarlo');
+    }
+
     const sanitizedUpdate = {
       ...updateVehicleDto,
       ownerId
     };
 
     return this.update(id, sanitizedUpdate);
+  }
+
+  private async isDisabledByAdmin(id: string): Promise<boolean> {
+    const rows = await this.vehiclesRepository.query(
+      `SELECT disabled_by_admin_at FROM vehicles WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+
+    return Boolean((rows[0] as { disabled_by_admin_at: Date | null } | undefined)?.disabled_by_admin_at);
   }
 
   async softDelete(id: string): Promise<void> {
@@ -384,8 +438,18 @@ export class VehiclesService {
     const existingVehicle = await query.getOne();
 
     if (existingVehicle) {
-      throw new ConflictException(`License plate ${licensePlate} already exists`);
+      throw new ConflictException(`Ya hay un vehículo con la matrícula ${licensePlate}`);
     }
+  }
+
+  async findPublicById(id: string): Promise<PublicVehicleResponseDto> {
+    return this.toPublicDto(await this.findById(id));
+  }
+
+  private toPublicDto(vehicle: VehicleResponseDto): PublicVehicleResponseDto {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { licensePlate, ...publicFields } = vehicle;
+    return publicFields;
   }
 
   private toResponseDto(row: VehicleRow): VehicleResponseDto {
@@ -405,7 +469,9 @@ export class VehiclesService {
       transmission: row.transmission,
       seats: row.seats,
       status: row.status,
-      createdAt: new Date(row.created_at)
+      createdAt: new Date(row.created_at),
+      // Solo en el listado del propietario (mine/list): anuncio retirado por la administración.
+      ...(row.disabled_by_admin_at !== undefined ? { disabledByAdmin: !!row.disabled_by_admin_at } : {})
     };
   }
 }

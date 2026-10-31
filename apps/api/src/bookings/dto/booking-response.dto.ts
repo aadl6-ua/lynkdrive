@@ -1,8 +1,9 @@
 import { BookingStatus } from './update-booking-status.dto';
+import type { BookingResponse, PayoutStatus } from '@lynkdrive/shared';
 
-export type PayoutStatus = 'pending' | 'processing' | 'paid' | 'failed';
+export type { PayoutStatus };
 
-export class BookingResponseDto {
+export class BookingResponseDto implements BookingResponse<Date> {
   id!: string;
   vehicleId!: string;
   ownerId!: string;

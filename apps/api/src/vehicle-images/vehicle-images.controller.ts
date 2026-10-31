@@ -23,7 +23,7 @@ export class VehicleImagesController {
   constructor(private readonly vehicleImagesService: VehicleImagesService) {}
 
   @Get()
-  async findAll(@Query('vehicleId') vehicleId?: string) {
+  async findAll(@Query('vehicleId', new ParseUUIDPipe({ optional: true })) vehicleId?: string) {
     return this.vehicleImagesService.findAll(vehicleId);
   }
 

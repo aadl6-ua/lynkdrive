@@ -1,3 +1,4 @@
+import { Throttle } from '@nestjs/throttler';
 import { Controller, Get, Query } from '@nestjs/common';
 import { GeocodingService } from './geocoding.service';
 
@@ -19,6 +20,7 @@ function parseOptionalPositiveInt(value?: string): number | undefined {
 export class GeocodingController {
   constructor(private readonly geocodingService: GeocodingService) {}
 
+  @Throttle({ default: { ttl: 60_000, limit: 60 } })
   @Get('search')
   async searchAddress(@Query() query: Record<string, string | undefined>) {
     const text = query.query?.trim() ?? '';

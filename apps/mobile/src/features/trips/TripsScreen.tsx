@@ -1,38 +1,66 @@
-import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions
-} from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import axios from 'axios';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { httpClient } from '../../api/http';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
 import { uploadImageToApi } from '../../api/uploads';
-import { EmptyState } from '../../app/components/ui/EmptyState';
-import { SectionHeader } from '../../app/components/ui/SectionHeader';
-import { styles } from '../../app/styles';
-import { colorTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import { colorTokens, layoutTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 import { AppTabKey } from '../../app/types';
+import {
+  BOOKING_STATUS_LABEL,
+  BOOKING_STATUS_TONE,
+  BOOKING_TIMELINE,
+  BookingStatus,
+  PAYOUT_STATUS_LABEL,
+  isBookingActive,
+  isBookingBillable
+} from '../../shared/booking';
 import { UserOverviewModal } from '../../shared/components/UserOverviewModal';
+import { getApiErrorMessage } from '../../shared/errors';
+import {
+  formatCurrencyEUR,
+  formatDateRangeMadrid,
+  formatDateTimeMadrid,
+  formatRelativeFromNow,
+  getBillableDays,
+  getDisplayName,
+  pluralize
+} from '../../shared/format';
+import { ImagePermissionError, ImageSource, pickImages } from '../../shared/imagePicker';
+import {
+  Avatar,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  ErrorState,
+  InlineMessage,
+  KeyValueRow,
+  ListItemSkeleton,
+  PhotoGrid,
+  PhotoItem,
+  Screen,
+  ScreenHeader,
+  SectionTitle,
+  SegmentedControl,
+  Skeleton,
+  StarRating,
+  StatusChip,
+  TextField,
+  VerificationGate,
+  confirmAction,
+  toast
+} from '../../shared/ui';
+import { PaymentAction } from '../payments/PaymentAction';
+import { BookingChatScreen } from './BookingChatScreen';
+import { fetchUnreadMessages } from './messagesApi';
+import { useBackHandler } from '../../shared/useBackHandler';
 import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
+import { usePushNotificationsStore } from '../../store/usePushNotificationsStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
-
-type BookingStatus =
-  | 'pending'
-  | 'accepted'
-  | 'rejected'
-  | 'paid_confirmed'
-  | 'in_progress'
-  | 'completed'
-  | 'cancelled';
 
 type BookingItem = {
   id: string;
@@ -81,8 +109,7 @@ type ReviewItem = {
 };
 
 type TripsRoleView = 'driver' | 'owner';
-type TripsScreenMode = 'list' | 'detail' | 'checklistEditor' | 'reviewComposer';
-type ButtonVariant = 'primary' | 'ghost' | 'danger';
+type TripsScreenMode = 'list' | 'detail' | 'checklistEditor' | 'reviewComposer' | 'chat';
 
 type ChecklistDraft = {
   mileage: string;
@@ -90,12 +117,17 @@ type ChecklistDraft = {
   notes: string;
 };
 
-type PendingChecklistImage = {
+/** Foto de evidencia local: se comprime al añadirla y se sube al enviar. */
+type DraftPhoto = {
+  key: string;
   previewUri: string;
   fileUri: string;
   fileName: string;
   mimeType: string;
   webFile?: File;
+  status: 'processing' | 'ready' | 'uploading' | 'error' | 'done';
+  progress?: number;
+  errorMessage?: string;
 };
 
 type UserMiniProfile = {
@@ -113,126 +145,52 @@ type VehicleMiniInfo = {
 };
 
 type TripsScreenProps = {
+  topPadding?: number;
+  bottomPadding?: number;
   onNavigateToTab?: (tab: AppTabKey) => void;
 };
 
-const STATUS_LABEL: Record<BookingStatus, string> = {
-  pending: 'Pendiente',
-  accepted: 'Aceptada',
-  rejected: 'Rechazada',
-  paid_confirmed: 'Pago confirmado',
-  in_progress: 'En curso',
-  completed: 'Completada',
-  cancelled: 'Cancelada'
+const CHECKLIST_LABEL: Record<BookingChecklistType, string> = {
+  check_in: 'Entrega (check-in)',
+  check_out: 'Devolución (check-out)'
 };
 
-const STATUS_COLORS: Record<BookingStatus, { background: string; text: string }> = {
-  pending: { background: '#fff4cc', text: '#7a5a00' },
-  accepted: { background: '#dff2ff', text: '#0e4670' },
-  rejected: { background: '#fde2e2', text: '#7a1f1f' },
-  paid_confirmed: { background: '#e6f5e8', text: '#1f6a2d' },
-  in_progress: { background: '#e4ecff', text: '#1f3f8a' },
-  completed: { background: '#e3f7ef', text: '#125238' },
-  cancelled: { background: '#f1f3f5', text: '#495057' }
-};
+const FUEL_PRESETS = ['0', '25', '50', '75', '100'];
+const MAX_CHECKLIST_PHOTOS = 12;
+const REVIEW_MAX_LENGTH = 500;
+
+let photoSeq = 0;
 
 function emptyChecklistDraft(): ChecklistDraft {
   return { mileage: '', fuelLevel: '', notes: '' };
 }
 
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString('es-ES', {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  });
-}
-
-function formatCurrency(value: number): string {
-  return `${value.toFixed(2)} EUR`;
-}
-
-function getDurationDays(startDatetime: string, endDatetime: string): number {
-  const start = new Date(startDatetime).getTime();
-  const end = new Date(endDatetime).getTime();
-  const diffMs = Math.max(0, end - start);
-  return Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-}
-
 function getShortId(id: string): string {
-  return id.slice(0, 8);
-}
-
-function getUserDisplayName(profile?: UserMiniProfile): string {
-  if (!profile) {
-    return 'Usuario';
-  }
-
-  return `${profile.firstName} ${profile.lastName}`.trim();
-}
-
-function getUserInitials(profile?: UserMiniProfile): string {
-  if (!profile) {
-    return 'U';
-  }
-
-  const first = profile.firstName?.[0] ?? '';
-  const last = profile.lastName?.[0] ?? '';
-  const initials = `${first}${last}`.toUpperCase();
-
-  return initials || 'U';
+  return id.slice(0, 8).toUpperCase();
 }
 
 function getVehicleLabel(vehicle?: VehicleMiniInfo): string {
-  if (!vehicle) {
-    return 'Vehiculo';
-  }
-
-  return `${vehicle.brand} ${vehicle.model} (${vehicle.year})`;
+  return vehicle ? `${vehicle.brand} ${vehicle.model}` : 'Vehículo';
 }
 
-function getApiErrorMessage(error: unknown): string | null {
-  if (!error || typeof error !== 'object') {
-    return null;
-  }
-
-  const response = (error as { response?: { data?: { message?: string | string[] } } }).response;
-  const message = response?.data?.message;
-
-  if (Array.isArray(message)) {
-    return message.join('. ');
-  }
-
-  if (typeof message === 'string' && message.trim()) {
-    return message;
-  }
-
-  return null;
-}
-
-function parseChecklistDraft(draft: ChecklistDraft): { mileage: number; fuelLevel: number; notes: string | null } | null {
-  const mileage = Number(draft.mileage);
+function validateChecklistDraft(draft: ChecklistDraft): { mileage?: string; fuelLevel?: string } {
+  const errors: { mileage?: string; fuelLevel?: string } = {};
+  const mileage = Number(draft.mileage.replace(/\./g, '').replace(',', '.'));
   const fuelLevel = Number(draft.fuelLevel);
 
-  if (!Number.isFinite(mileage) || mileage < 0) {
-    return null;
+  if (!draft.mileage.trim()) {
+    errors.mileage = 'Indica los kilómetros del cuentakilómetros.';
+  } else if (!Number.isInteger(mileage) || mileage < 0) {
+    errors.mileage = 'Usa un número entero de kilómetros (sin decimales).';
   }
 
-  if (!Number.isFinite(fuelLevel) || fuelLevel < 0 || fuelLevel > 100) {
-    return null;
+  if (!draft.fuelLevel.trim()) {
+    errors.fuelLevel = 'Indica el nivel de combustible.';
+  } else if (!Number.isInteger(fuelLevel) || fuelLevel < 0 || fuelLevel > 100) {
+    errors.fuelLevel = 'Debe ser un número entero entre 0 y 100.';
   }
 
-  const notes = draft.notes.trim() ? draft.notes.trim() : null;
-
-  return {
-    mileage,
-    fuelLevel,
-    notes
-  };
-}
-
-function canCancelBooking(booking: BookingItem): boolean {
-  const cancellableStatuses: BookingStatus[] = ['pending', 'accepted', 'paid_confirmed'];
-  return cancellableStatuses.includes(booking.status) && new Date(booking.startDatetime).getTime() > Date.now();
+  return errors;
 }
 
 function canOpenChecklist(type: BookingChecklistType, status: BookingStatus): boolean {
@@ -248,132 +206,96 @@ function canCreateChecklistByRole(booking: BookingItem, authUserId: string | nul
 }
 
 function getChecklistBlockReason(type: BookingChecklistType, status: BookingStatus): string {
+  if (status === 'rejected' || status === 'cancelled') {
+    return 'La reserva fue cancelada o rechazada.';
+  }
+
   if (type === 'check_in') {
-    if (status === 'pending' || status === 'accepted') {
-      return 'Checklist de entrada bloqueado: la reserva aun no esta en fase de inicio (requiere pago confirmado).';
-    }
-
-    if (status === 'rejected' || status === 'cancelled') {
-      return 'Checklist de entrada bloqueado: la reserva fue cancelada o rechazada.';
-    }
+    return 'Disponible cuando el pago esté confirmado.';
   }
 
-  if (type === 'check_out') {
-    if (status === 'pending' || status === 'accepted' || status === 'paid_confirmed') {
-      return 'Checklist de salida bloqueado: solo disponible cuando el viaje esta en curso o completado.';
-    }
+  return 'Disponible cuando el viaje esté en curso.';
+}
 
-    if (status === 'rejected' || status === 'cancelled') {
-      return 'Checklist de salida bloqueado: la reserva fue cancelada o rechazada.';
-    }
+/** Política de cancelación Demo 1 (informativa; el backend aplica la regla). */
+function getCancellationNote(booking: BookingItem): string {
+  if (booking.status === 'pending' || booking.status === 'accepted') {
+    return 'Todavía no hay pago: la cancelación no tiene coste.';
   }
 
-  return 'Checklist no disponible para el estado actual de la reserva.';
+  const hoursToStart = (new Date(booking.startDatetime).getTime() - Date.now()) / 3_600_000;
+
+  if (hoursToStart >= 48) {
+    return 'Faltan más de 48 h para el inicio: cancelación gratuita con reembolso completo.';
+  }
+
+  if (hoursToStart >= 24) {
+    return 'Faltan menos de 48 h: se reembolsará el 50% del importe.';
+  }
+
+  return 'Faltan menos de 24 h: la cancelación no tiene reembolso.';
 }
 
-function ActionButton({
-  label,
-  onPress,
-  disabled = false,
-  variant = 'primary'
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  variant?: ButtonVariant;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[
-        localStyles.actionButton,
-        variant === 'primary'
-          ? localStyles.actionButtonPrimary
-          : variant === 'danger'
-            ? localStyles.actionButtonDanger
-            : localStyles.actionButtonGhost,
-        disabled ? localStyles.actionButtonDisabled : undefined
-      ]}
-    >
-      <Text
-        style={[
-          localStyles.actionButtonText,
-          variant === 'ghost' ? localStyles.actionButtonGhostText : undefined,
-          variant === 'danger' ? localStyles.actionButtonDangerText : undefined
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
-  const { width } = useWindowDimensions();
-  const isDesktopWeb = Platform.OS === 'web' && width >= 1024;
-  const desktopCardStyle = isDesktopWeb ? localStyles.desktopCard : undefined;
-
+export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab }: TripsScreenProps) {
   const { userId: authUserId } = useAuthStore();
   const { profile } = useUserProfileStore();
+  const { width: windowWidth } = useWindowDimensions();
 
   const hasRequiredProfileData = hasMinimumProfileData(profile);
   const canTransact = canUseTransactionalFlows(profile);
+  const goToProfile = onNavigateToTab ? () => onNavigateToTab('profile') : undefined;
 
   const [screenMode, setScreenMode] = useState<TripsScreenMode>('list');
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [editingChecklistType, setEditingChecklistType] = useState<BookingChecklistType | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lookupError, setLookupError] = useState<string | null>(null);
   const [driverBookings, setDriverBookings] = useState<BookingItem[]>([]);
   const [ownerBookings, setOwnerBookings] = useState<BookingItem[]>([]);
   const [roleView, setRoleView] = useState<TripsRoleView>('driver');
+  // Mensajes del chat sin leer por reserva (solo aparecen las que tienen alguno).
+  const [unreadByBooking, setUnreadByBooking] = useState<Record<string, number>>({});
+  /** La vista inicial se elige una sola vez; después manda la elección del usuario. */
+  const roleViewChosenRef = useRef(false);
   const [userById, setUserById] = useState<Record<string, UserMiniProfile>>({});
   const [vehicleById, setVehicleById] = useState<Record<string, VehicleMiniInfo>>({});
 
-  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState<BookingStatus | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [mutationError, setMutationError] = useState<string | null>(null);
-  const [mutationMessage, setMutationMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [ownerContactMethodInput, setOwnerContactMethodInput] = useState('');
+  const [contactError, setContactError] = useState<string | null>(null);
 
   const [checklists, setChecklists] = useState<BookingChecklistItem[]>([]);
-  const [checklistDrafts, setChecklistDrafts] = useState<Record<BookingChecklistType, ChecklistDraft>>({
-    check_in: emptyChecklistDraft(),
-    check_out: emptyChecklistDraft()
-  });
-  const [checklistSavingType, setChecklistSavingType] = useState<BookingChecklistType | null>(null);
-
-  const [checklistImages, setChecklistImages] = useState<ChecklistImageItem[]>([]);
-  const [checklistImagesLoading, setChecklistImagesLoading] = useState(false);
-  const [checklistImageUploading, setChecklistImageUploading] = useState(false);
-  const [checklistImageDeletingId, setChecklistImageDeletingId] = useState<string | null>(null);
-  const [pendingChecklistImages, setPendingChecklistImages] = useState<Record<BookingChecklistType, PendingChecklistImage[]>>({
-    check_in: [],
-    check_out: []
-  });
+  const [checklistImageCount, setChecklistImageCount] = useState<Record<string, number>>({});
+  const [checklistDraft, setChecklistDraft] = useState<ChecklistDraft>(emptyChecklistDraft());
+  const [checklistErrors, setChecklistErrors] = useState<{ mileage?: string; fuelLevel?: string; photos?: string }>({});
+  const [checklistSaving, setChecklistSaving] = useState(false);
+  const [draftPhotos, setDraftPhotos] = useState<DraftPhoto[]>([]);
+  /** Checklist ya creado en esta sesión de edición (para reintentar fotos sin duplicarlo). */
+  const [createdChecklistId, setCreatedChecklistId] = useState<string | null>(null);
 
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [reviewSaving, setReviewSaving] = useState(false);
-  const [reviewRatingInput, setReviewRatingInput] = useState(5);
+  const [reviewRatingInput, setReviewRatingInput] = useState(0);
   const [reviewCommentInput, setReviewCommentInput] = useState('');
-  const [overviewUser, setOverviewUser] = useState<{ id: string; displayName: string; avatarUrl: string | null } | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [overviewUser, setOverviewUser] = useState<{ id: string; displayName: string; avatarUrl: string | null } | null>(
+    null
+  );
 
-  useEffect(() => {
-    if (!mutationMessage) {
-      return;
+  const loadUnread = useCallback(async () => {
+    try {
+      setUnreadByBooking(await fetchUnreadMessages());
+    } catch {
+      // El contador es informativo: si falla no se bloquea Mis Viajes.
     }
-
-    const timeoutId = setTimeout(() => {
-      setMutationMessage(null);
-    }, 3800);
-
-    return () => clearTimeout(timeoutId);
-  }, [mutationMessage]);
+  }, []);
 
   const loadBookings = useCallback(async () => {
     if (!authUserId) {
@@ -394,52 +316,68 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
 
       setDriverBookings(driverResponse.data);
       setOwnerBookings(ownerResponse.data);
-    } catch {
-      setError('No se pudieron cargar las reservas. Revisa token y backend.');
+      setLoaded(true);
+      void loadUnread();
+
+      if (!roleViewChosenRef.current) {
+        roleViewChosenRef.current = true;
+        // Abre en Propietario si ahí hay solicitudes por responder y como conductor no hay nada pendiente.
+        const ownerHasPending = ownerResponse.data.some((booking) => booking.status === 'pending');
+        const driverHasAction = driverResponse.data.some((booking) => booking.status === 'accepted');
+
+        if ((ownerHasPending && !driverHasAction) || (driverResponse.data.length === 0 && ownerResponse.data.length > 0)) {
+          setRoleView('owner');
+        }
+      }
+    } catch (loadError: unknown) {
+      setError(getApiErrorMessage(loadError, 'No se pudieron cargar tus reservas.'));
     } finally {
       setLoading(false);
     }
-  }, [authUserId]);
+  }, [authUserId, loadUnread]);
 
   useEffect(() => {
     void loadBookings();
   }, [loadBookings]);
 
+  const allBookings = useMemo(() => [...driverBookings, ...ownerBookings], [driverBookings, ownerBookings]);
   const activeBookings = roleView === 'driver' ? driverBookings : ownerBookings;
 
-  const bookingSummary = useMemo(() => {
-    const total = activeBookings.length;
-    const pendingOrInProgress = activeBookings.filter((booking) =>
-      ['pending', 'accepted', 'paid_confirmed', 'in_progress'].includes(booking.status)
-    ).length;
-    const completed = activeBookings.filter((booking) => booking.status === 'completed').length;
-    const totalAmount = activeBookings.reduce((sum, booking) => sum + booking.totalPrice, 0);
+  const sortedBookings = useMemo(
+    () => [...activeBookings].sort((a, b) => new Date(b.startDatetime).getTime() - new Date(a.startDatetime).getTime()),
+    [activeBookings]
+  );
+  const upcomingBookings = useMemo(
+    () =>
+      sortedBookings
+        .filter((booking) => isBookingActive(booking.status))
+        .sort((a, b) => new Date(a.startDatetime).getTime() - new Date(b.startDatetime).getTime()),
+    [sortedBookings]
+  );
+  const pastBookings = useMemo(
+    () => sortedBookings.filter((booking) => !isBookingActive(booking.status)),
+    [sortedBookings]
+  );
 
+  const bookingSummary = useMemo(() => {
+    const billable = activeBookings.filter((booking) => isBookingBillable(booking.status));
     return {
-      total,
-      pendingOrInProgress,
-      completed,
-      totalAmount
+      active: activeBookings.filter((booking) => isBookingActive(booking.status)).length,
+      completed: activeBookings.filter((booking) => booking.status === 'completed').length,
+      totalAmount: billable.reduce((sum, booking) => sum + Number(booking.totalPrice), 0)
     };
   }, [activeBookings]);
 
-  const sortedBookings = useMemo(() => {
-    return [...activeBookings].sort(
-      (a, b) => new Date(b.startDatetime).getTime() - new Date(a.startDatetime).getTime()
-    );
-  }, [activeBookings]);
-
-  const allBookings = useMemo(() => [...driverBookings, ...ownerBookings], [driverBookings, ownerBookings]);
+  // Reservas que esperan una acción del usuario (para el contador de las pestañas).
+  const ownerPendingCount = ownerBookings.filter((booking) => booking.status === 'pending').length;
+  const driverPendingCount = driverBookings.filter((booking) => booking.status === 'accepted').length;
 
   const selectedBooking = useMemo(
     () => allBookings.find((booking) => booking.id === selectedBookingId) ?? null,
     [allBookings, selectedBookingId]
   );
 
-  const selectedBookingIsOwnerView = useMemo(
-    () => !!selectedBooking && selectedBooking.ownerId === authUserId,
-    [selectedBooking, authUserId]
-  );
+  const selectedBookingIsOwnerView = !!selectedBooking && selectedBooking.ownerId === authUserId;
 
   const selectedBookingCounterpartId = useMemo(() => {
     if (!selectedBooking || !authUserId) {
@@ -449,94 +387,60 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
     return selectedBooking.ownerId === authUserId ? selectedBooking.driverId : selectedBooking.ownerId;
   }, [selectedBooking, authUserId]);
 
-  const relatedUserIds = useMemo(
-    () => Array.from(new Set(allBookings.flatMap((booking) => [booking.ownerId, booking.driverId]))).sort(),
-    [allBookings]
-  );
-
-  const relatedVehicleIds = useMemo(
-    () => Array.from(new Set(allBookings.map((booking) => booking.vehicleId))).sort(),
-    [allBookings]
-  );
+  const relatedKey = useMemo(() => {
+    const users = Array.from(new Set(allBookings.flatMap((booking) => [booking.ownerId, booking.driverId]))).sort();
+    const vehicles = Array.from(new Set(allBookings.map((booking) => booking.vehicleId))).sort();
+    return `${users.join('|')}#${vehicles.join('|')}`;
+  }, [allBookings]);
 
   useEffect(() => {
-    if (relatedUserIds.length === 0 && relatedVehicleIds.length === 0) {
-      setUserById({});
-      setVehicleById({});
-      setLookupError(null);
+    const [usersPart, vehiclesPart] = relatedKey.split('#');
+    const userIds = usersPart ? usersPart.split('|') : [];
+    const vehicleIds = vehiclesPart ? vehiclesPart.split('|') : [];
+
+    if (userIds.length === 0 && vehicleIds.length === 0) {
       return;
     }
 
     let isCancelled = false;
 
-    const loadRelatedData = async () => {
-      try {
-        const [users, vehicles] = await Promise.all([
-          Promise.all(
-            relatedUserIds.map(async (userId) => {
-              const response = await httpClient.get<UserMiniProfile>(`/users/${userId}`);
-              return response.data;
-            })
-          ),
-          Promise.all(
-            relatedVehicleIds.map(async (vehicleId) => {
-              const response = await httpClient.get<VehicleMiniInfo>(`/vehicles/${vehicleId}`);
-              return response.data;
-            })
-          )
-        ]);
+    void (async () => {
+      const [users, vehicles] = await Promise.all([
+        Promise.allSettled(userIds.map(async (id) => (await httpClient.get<UserMiniProfile>(`/users/${id}`)).data)),
+        Promise.allSettled(vehicleIds.map(async (id) => (await httpClient.get<VehicleMiniInfo>(`/vehicles/${id}`)).data))
+      ]);
 
-        if (isCancelled) {
-          return;
-        }
-
-        setUserById(users.reduce<Record<string, UserMiniProfile>>((acc, user) => ({ ...acc, [user.id]: user }), {}));
-        setVehicleById(
-          vehicles.reduce<Record<string, VehicleMiniInfo>>((acc, vehicle) => ({ ...acc, [vehicle.id]: vehicle }), {})
-        );
-        setLookupError(null);
-      } catch {
-        if (!isCancelled) {
-          setLookupError('No se pudo cargar toda la informacion de usuarios o vehiculos.');
-        }
+      if (isCancelled) {
+        return;
       }
-    };
 
-    void loadRelatedData();
+      setUserById((current) => {
+        const next = { ...current };
+        users.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            next[result.value.id] = result.value;
+          } else if (axios.isAxiosError(result.reason) && result.reason.response?.status === 404) {
+            // La otra parte borró su cuenta (RGPD): la reserva se conserva sin sus datos.
+            next[userIds[index]] = { id: userIds[index], firstName: 'Usuario', lastName: 'eliminado', avatarUrl: null };
+          }
+        });
+        return next;
+      });
+      setVehicleById((current) => {
+        const next = { ...current };
+        vehicles.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            next[result.value.id] = result.value;
+          }
+        });
+        return next;
+      });
+    })();
 
     return () => {
       isCancelled = true;
     };
-  }, [relatedUserIds.join('|'), relatedVehicleIds.join('|')]);
-
-  const openBookingDetail = (bookingId: string) => {
-    setScreenMode('detail');
-    setSelectedBookingId(bookingId);
-    setMutationError(null);
-    setMutationMessage(null);
-    setDetailError(null);
-    setEditingChecklistType(null);
-  };
-
-  const backToList = () => {
-    setScreenMode('list');
-    setSelectedBookingId(null);
-    setEditingChecklistType(null);
-    setChecklists([]);
-    setChecklistImages([]);
-    setReviews([]);
-    setChecklistDrafts({ check_in: emptyChecklistDraft(), check_out: emptyChecklistDraft() });
-    setPendingChecklistImages({ check_in: [], check_out: [] });
-    setReviewCommentInput('');
-    setReviewRatingInput(5);
-    setOwnerContactMethodInput('');
-  };
-
-  const backToDetail = () => {
-    setScreenMode('detail');
-    setEditingChecklistType(null);
-    setChecklistImages([]);
-  };
+  }, [relatedKey]);
 
   const loadDetailData = useCallback(async () => {
     if (!selectedBookingId) {
@@ -548,83 +452,140 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
 
     try {
       const [checklistsResponse, reviewsResponse, bookingResponse] = await Promise.all([
-        httpClient.get<BookingChecklistItem[]>(`/booking-checklists?bookingId=${selectedBookingId}`),
-        httpClient.get<ReviewItem[]>(`/reviews?bookingId=${selectedBookingId}`),
+        httpClient.get<BookingChecklistItem[]>('/booking-checklists', { params: { bookingId: selectedBookingId } }),
+        httpClient.get<ReviewItem[]>('/reviews', { params: { bookingId: selectedBookingId } }),
         httpClient.get<BookingItem>(`/bookings/${selectedBookingId}`)
       ]);
 
       setChecklists(checklistsResponse.data);
       setReviews(reviewsResponse.data);
-      setOwnerContactMethodInput(bookingResponse.data.ownerContactMethod ?? '');
+      setOwnerContactMethodInput((current) => current || bookingResponse.data.ownerContactMethod || '');
 
-      const nextDrafts: Record<BookingChecklistType, ChecklistDraft> = {
-        check_in: emptyChecklistDraft(),
-        check_out: emptyChecklistDraft()
-      };
-
-      for (const checklist of checklistsResponse.data) {
-        nextDrafts[checklist.type] = {
-          mileage: String(checklist.mileage),
-          fuelLevel: String(checklist.fuelLevel),
-          notes: checklist.notes ?? ''
-        };
-      }
-
-      setChecklistDrafts(nextDrafts);
-    } catch (error: unknown) {
-      setDetailError(getApiErrorMessage(error) ?? 'No se pudo cargar el detalle transaccional de la reserva.');
+      const counts = await Promise.allSettled(
+        checklistsResponse.data.map(async (checklist) => {
+          const response = await httpClient.get<ChecklistImageItem[]>('/checklist-images', {
+            params: { checklistId: checklist.id }
+          });
+          return [checklist.id, response.data.length] as const;
+        })
+      );
+      setChecklistImageCount(
+        Object.fromEntries(
+          counts.filter((result) => result.status === 'fulfilled').map((result) => (result as PromiseFulfilledResult<readonly [string, number]>).value)
+        )
+      );
+    } catch (loadError: unknown) {
+      setDetailError(getApiErrorMessage(loadError, 'No se pudo cargar el detalle de la reserva.'));
     } finally {
       setDetailLoading(false);
     }
   }, [selectedBookingId]);
 
   useEffect(() => {
-    if ((screenMode !== 'detail' && screenMode !== 'checklistEditor' && screenMode !== 'reviewComposer') || !selectedBookingId) {
+    if (screenMode === 'list' || !selectedBookingId) {
       return;
     }
 
     void loadDetailData();
   }, [screenMode, selectedBookingId, loadDetailData]);
 
-  const loadChecklistImages = useCallback(async (checklistId: string) => {
-    setChecklistImagesLoading(true);
-    try {
-      const response = await httpClient.get<ChecklistImageItem[]>(`/checklist-images?checklistId=${checklistId}`);
-      setChecklistImages(response.data);
-    } catch (error: unknown) {
-      setMutationError(getApiErrorMessage(error) ?? 'No se pudieron cargar las imagenes del checklist.');
-    } finally {
-      setChecklistImagesLoading(false);
-    }
-  }, []);
-
-  const openChecklistEditor = async (type: BookingChecklistType) => {
-    if (!selectedBooking) {
-      return;
-    }
-
-    if (!canCreateChecklistByRole(selectedBooking, authUserId)) {
-      setMutationError('Solo el conductor de la reserva puede crear y enviar checklists.');
-      return;
-    }
-
-    if (!canOpenChecklist(type, selectedBooking.status)) {
-      setMutationError(getChecklistBlockReason(type, selectedBooking.status));
-      return;
-    }
-
-    setScreenMode('checklistEditor');
-    setEditingChecklistType(type);
-    setMutationError(null);
-
-    const existingChecklist = checklists.find((item) => item.type === type);
-    if (existingChecklist) {
-      setMutationError('Este checklist ya fue enviado y no puede volver a editarse.');
-      return;
-    }
-
-    setChecklistImages([]);
+  const openBookingDetail = (bookingId: string) => {
+    setScreenMode('detail');
+    setSelectedBookingId(bookingId);
+    setActionError(null);
+    setContactError(null);
+    setDetailError(null);
+    setChecklists([]);
+    setReviews([]);
+    setChecklistImageCount({});
+    setOwnerContactMethodInput('');
+    setEditingChecklistType(null);
   };
+
+  // Al tocar una notificación push se abre el detalle de esa reserva (recargando la lista primero).
+  const pendingPushBooking = usePushNotificationsStore((state) => state.pendingBooking);
+  const consumePendingPushBooking = usePushNotificationsStore((state) => state.consumePendingBooking);
+  const [pushOpenedBookingId, setPushOpenedBookingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const pending = pendingPushBooking ? consumePendingPushBooking() : null;
+
+    if (!pending) {
+      return;
+    }
+
+    void loadBookings().then(() => {
+      openBookingDetail(pending.bookingId);
+      setPushOpenedBookingId(pending.bookingId);
+
+      // Notificación de mensaje: directamente a la conversación.
+      if (pending.openMessages) {
+        setScreenMode('chat');
+      }
+    });
+  }, [pendingPushBooking, consumePendingPushBooking, loadBookings]);
+
+  useEffect(() => {
+    const booking = pushOpenedBookingId ? allBookings.find((item) => item.id === pushOpenedBookingId) : null;
+
+    if (booking) {
+      setRoleView(booking.ownerId === authUserId ? 'owner' : 'driver');
+      setPushOpenedBookingId(null);
+    }
+  }, [pushOpenedBookingId, allBookings, authUserId]);
+
+  const backToList = () => {
+    setScreenMode('list');
+    setSelectedBookingId(null);
+    setEditingChecklistType(null);
+    setChecklists([]);
+    setReviews([]);
+    setDraftPhotos([]);
+    setChecklistDraft(emptyChecklistDraft());
+    setReviewCommentInput('');
+    setReviewRatingInput(0);
+    setOwnerContactMethodInput('');
+  };
+
+  const backToDetail = async () => {
+    const hasUnsent =
+      screenMode === 'checklistEditor' &&
+      !createdChecklistId &&
+      (draftPhotos.length > 0 || checklistDraft.mileage.trim() || checklistDraft.notes.trim());
+
+    if (hasUnsent) {
+      const confirmed = await confirmAction({
+        title: '¿Descartar el checklist?',
+        message: 'Perderás los datos y las fotos que has añadido.',
+        confirmLabel: 'Descartar',
+        destructive: true
+      });
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setScreenMode('detail');
+    setEditingChecklistType(null);
+    setDraftPhotos([]);
+    setCreatedChecklistId(null);
+  };
+
+  const closeChat = () => {
+    setScreenMode('detail');
+    void loadUnread();
+  };
+
+  useBackHandler(screenMode !== 'list', () => {
+    if (screenMode === 'chat') {
+      closeChat();
+    } else if (screenMode === 'detail') {
+      backToList();
+    } else {
+      void backToDetail();
+    }
+  });
 
   const refreshAll = async () => {
     await loadBookings();
@@ -633,210 +594,297 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
     }
   };
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await refreshAll();
+    setRefreshing(false);
+  };
+
+  const openChecklistEditor = (type: BookingChecklistType) => {
+    if (!selectedBooking) {
+      return;
+    }
+
+    setChecklistDraft(emptyChecklistDraft());
+    setChecklistErrors({});
+    setDraftPhotos([]);
+    setCreatedChecklistId(null);
+    setEditingChecklistType(type);
+    setScreenMode('checklistEditor');
+  };
+
   const handleUpdateBookingStatus = async (nextStatus: BookingStatus) => {
     if (!selectedBooking) {
       return;
     }
 
     if (!canTransact) {
-      setMutationError('Necesitas perfil verificado para operar estados transaccionales. Ve a Perfil.');
+      setActionError('Necesitas el perfil verificado para gestionar reservas.');
       return;
     }
 
-    setStatusUpdating(true);
-    setMutationError(null);
-    setMutationMessage(null);
+    const payload: { status: BookingStatus; ownerContactMethod?: string } = { status: nextStatus };
+
+    if (selectedBookingIsOwnerView && nextStatus === 'accepted') {
+      const contact = ownerContactMethodInput.trim();
+      if (!contact) {
+        setContactError('Indica cómo te contactará el conductor (teléfono, email…).');
+        return;
+      }
+      payload.ownerContactMethod = contact;
+    }
+
+    const confirmations: Partial<Record<BookingStatus, Parameters<typeof confirmAction>[0]>> = {
+      rejected: {
+        title: '¿Rechazar la solicitud?',
+        message: 'El conductor recibirá la respuesta y no podrá deshacerse.',
+        confirmLabel: 'Rechazar',
+        destructive: true
+      },
+      cancelled: {
+        title: selectedBooking.status === 'pending' ? '¿Cancelar la solicitud?' : '¿Cancelar la reserva?',
+        message: getCancellationNote(selectedBooking),
+        confirmLabel: 'Sí, cancelar',
+        cancelLabel: 'Volver',
+        destructive: true
+      },
+      paid_confirmed: {
+        title: 'Confirmar pago',
+        // Este camino solo se usa en modo prototipo (con Stripe paga el PaymentSheet).
+        message: `Modo demostración: no se hará ningún cargo real. La reserva de ${formatCurrencyEUR(selectedBooking.totalPrice)} quedará confirmada.`,
+        confirmLabel: 'Pagar'
+      },
+      in_progress: {
+        title: '¿Iniciar el viaje?',
+        message: 'Confirma que has entregado las llaves al conductor.',
+        confirmLabel: 'Iniciar viaje'
+      },
+      completed: {
+        title: '¿Marcar como completada?',
+        message: 'Confirma que el vehículo ha sido devuelto.',
+        confirmLabel: 'Completar'
+      }
+    };
+
+    const confirmation = confirmations[nextStatus];
+    if (confirmation && !(await confirmAction(confirmation))) {
+      return;
+    }
+
+    setStatusUpdating(nextStatus);
+    setActionError(null);
+    setContactError(null);
 
     try {
-      const payload: { status: BookingStatus; ownerContactMethod?: string } = { status: nextStatus };
-
-      if (selectedBookingIsOwnerView && nextStatus === 'accepted') {
-        const contact = ownerContactMethodInput.trim();
-        if (!contact) {
-          setMutationError('Para aceptar la reserva debes indicar metodo de contacto del propietario.');
-          setStatusUpdating(false);
-          return;
-        }
-        payload.ownerContactMethod = contact;
-      }
-
       await httpClient.put(`/bookings/${selectedBooking.id}/status`, payload);
-      setMutationMessage(`Estado actualizado a: ${STATUS_LABEL[nextStatus]}.`);
+      toast.success(`Reserva actualizada: ${BOOKING_STATUS_LABEL[nextStatus].toLowerCase()}.`);
       await refreshAll();
-    } catch (error: unknown) {
-      setMutationError(getApiErrorMessage(error) ?? 'No se pudo actualizar el estado de la reserva.');
+    } catch (updateError: unknown) {
+      setActionError(getApiErrorMessage(updateError, 'No se pudo actualizar el estado de la reserva.'));
     } finally {
-      setStatusUpdating(false);
+      setStatusUpdating(null);
     }
   };
 
-  const handleSaveChecklist = async (type: BookingChecklistType): Promise<BookingChecklistItem | null> => {
-    if (!selectedBooking) {
-      return null;
-    }
+  /* ---------------------------- Fotos del checklist ---------------------------- */
 
-    if (!authUserId) {
-      setMutationError('Sesion no valida para enviar checklist.');
-      return null;
-    }
-
-    if (!canCreateChecklistByRole(selectedBooking, authUserId)) {
-      setMutationError('Solo el conductor de la reserva puede crear y enviar checklists.');
-      return null;
-    }
-
-    if (!canTransact) {
-      setMutationError('Necesitas perfil verificado para gestionar checklists. Ve a Perfil.');
-      return null;
-    }
-
-    const parsed = parseChecklistDraft(checklistDrafts[type]);
-    const pendingImagesForType = pendingChecklistImages[type];
-
-    if (!parsed) {
-      setMutationError('Checklist invalido: kilometraje >= 0 y combustible entre 0 y 100.');
-      return null;
-    }
-
-    if (pendingImagesForType.length === 0) {
-      setMutationError('Debes añadir al menos una evidencia fotografica antes de enviar el checklist.');
-      return null;
-    }
-
-    setChecklistSavingType(type);
-    setMutationError(null);
-    setMutationMessage(null);
-
+  const handleAddChecklistPhotos = async (source: ImageSource) => {
     try {
-      const existing = checklists.find((item) => item.type === type);
-      if (existing) {
-        setMutationError('Este checklist ya fue enviado y no puede modificarse.');
-        return null;
-      }
-
-      const created = await httpClient.post<BookingChecklistItem>('/booking-checklists', {
-        bookingId: selectedBooking.id,
-        type,
-        mileage: parsed.mileage,
-        fuelLevel: parsed.fuelLevel,
-        notes: parsed.notes ?? undefined
+      const assets = await pickImages(source, {
+        multiple: true,
+        selectionLimit: MAX_CHECKLIST_PHOTOS - draftPhotos.length
       });
 
-      const checklistId = created.data.id;
+      if (assets.length === 0) {
+        return;
+      }
 
+      const allowed = assets.slice(0, MAX_CHECKLIST_PHOTOS - draftPhotos.length);
+      const placeholders: DraftPhoto[] = allowed.map((asset) => ({
+        key: `photo-${++photoSeq}`,
+        previewUri: asset.uri,
+        fileUri: asset.uri,
+        fileName: asset.fileName ?? 'evidencia.jpg',
+        mimeType: 'image/jpeg',
+        status: 'processing'
+      }));
+
+      setDraftPhotos((current) => [...current, ...placeholders]);
+      setChecklistErrors((current) => ({ ...current, photos: undefined }));
+
+      // Comprimimos cada foto en segundo plano mostrando su estado individual.
       await Promise.all(
-        pendingImagesForType.map(async (image) => {
-          const uploaded = await uploadImageToApi({
-            target: 'checklist_image',
-            fileUri: image.fileUri,
-            fileName: image.fileName,
-            mimeType: image.mimeType,
-            ownerId: authUserId,
-            webFile: image.webFile
-          });
-
-          await httpClient.post('/checklist-images', {
-            checklistId,
-            imageUrl: uploaded.persistedValue
-          });
+        allowed.map(async (asset, index) => {
+          const key = placeholders[index].key;
+          try {
+            const prepared = await prepareUploadImage(asset, 'checklist_image');
+            setDraftPhotos((current) =>
+              current.map((photo) =>
+                photo.key === key
+                  ? {
+                      ...photo,
+                      previewUri: prepared.fileUri,
+                      fileUri: prepared.fileUri,
+                      fileName: prepared.fileName,
+                      mimeType: prepared.mimeType,
+                      webFile: prepared.webFile,
+                      status: 'ready'
+                    }
+                  : photo
+              )
+            );
+          } catch {
+            setDraftPhotos((current) =>
+              current.map((photo) =>
+                photo.key === key ? { ...photo, status: 'error', errorMessage: 'No se pudo optimizar' } : photo
+              )
+            );
+          }
         })
       );
-
-      setMutationMessage(`Checklist ${type === 'check_in' ? 'entrada' : 'salida'} enviado correctamente.`);
-      await loadDetailData();
-
-      const refreshed = (await httpClient.get<ChecklistImageItem[]>(`/checklist-images?checklistId=${checklistId}`)).data;
-      setChecklistImages(refreshed);
-      setPendingChecklistImages((prev) => ({
-        ...prev,
-        [type]: []
-      }));
-      setScreenMode('detail');
-      setEditingChecklistType(null);
-
-      return created.data;
-    } catch (error: unknown) {
-      setMutationError(getApiErrorMessage(error) ?? 'No se pudo guardar el checklist.');
-      return null;
-    } finally {
-      setChecklistSavingType(null);
+    } catch (pickError: unknown) {
+      toast.error(
+        pickError instanceof ImagePermissionError ? pickError.message : 'No se pudo abrir el selector de fotos.'
+      );
     }
   };
 
-  const handleUploadChecklistImage = async () => {
+  const handleRemoveDraftPhoto = async (item: PhotoItem) => {
+    const confirmed = await confirmAction({
+      title: '¿Quitar esta foto?',
+      message: 'Se eliminará del checklist antes de enviarlo.',
+      confirmLabel: 'Quitar',
+      destructive: true
+    });
+
+    if (confirmed) {
+      setDraftPhotos((current) => current.filter((photo) => photo.key !== item.key));
+    }
+  };
+
+  const uploadDraftPhoto = async (photo: DraftPhoto, checklistId: string): Promise<boolean> => {
+    if (!authUserId) {
+      return false;
+    }
+
+    const update = (patch: Partial<DraftPhoto>) =>
+      setDraftPhotos((current) => current.map((item) => (item.key === photo.key ? { ...item, ...patch } : item)));
+
+    update({ status: 'uploading', progress: 0, errorMessage: undefined });
+
+    try {
+      const uploaded = await uploadImageToApi({
+        target: 'checklist_image',
+        fileUri: photo.fileUri,
+        fileName: photo.fileName,
+        mimeType: photo.mimeType,
+        ownerId: authUserId,
+        webFile: photo.webFile,
+        onProgress: (fraction) => update({ progress: fraction })
+      });
+
+      await httpClient.post('/checklist-images', { checklistId, imageUrl: uploaded.persistedValue });
+      update({ status: 'done', progress: 1 });
+      return true;
+    } catch (uploadError: unknown) {
+      update({ status: 'error', errorMessage: getApiErrorMessage(uploadError, 'Error al subir') });
+      return false;
+    }
+  };
+
+  const finishChecklist = async () => {
+    toast.success('Checklist enviado correctamente.');
+    setDraftPhotos([]);
+    setCreatedChecklistId(null);
+    setEditingChecklistType(null);
+    setScreenMode('detail');
+    await loadDetailData();
+  };
+
+  // Cuando el checklist está creado y todas sus fotos subidas, cerramos el editor.
+  const allPhotosUploaded =
+    !!createdChecklistId && draftPhotos.length > 0 && draftPhotos.every((photo) => photo.status === 'done');
+
+  useEffect(() => {
+    if (!allPhotosUploaded || checklistSaving) {
+      return;
+    }
+
+    toast.success('Checklist enviado correctamente.');
+    setDraftPhotos([]);
+    setCreatedChecklistId(null);
+    setEditingChecklistType(null);
+    setActionError(null);
+    setScreenMode('detail');
+  }, [allPhotosUploaded, checklistSaving]);
+
+  const handleSaveChecklist = async () => {
     if (!selectedBooking || !editingChecklistType || !authUserId) {
       return;
     }
 
     if (!canCreateChecklistByRole(selectedBooking, authUserId)) {
-      setMutationError('Solo el conductor de la reserva puede subir evidencias de checklist.');
+      setActionError('Solo el conductor de la reserva puede enviar checklists.');
       return;
     }
 
     if (!canTransact) {
-      setMutationError('Necesitas perfil verificado para subir evidencias del checklist. Ve a Perfil.');
+      setActionError('Necesitas el perfil verificado para gestionar checklists.');
       return;
     }
 
-    setChecklistImageUploading(true);
-    setMutationError(null);
+    const errors: typeof checklistErrors = validateChecklistDraft(checklistDraft);
+    const pending = draftPhotos.filter((photo) => photo.status !== 'done');
+
+    if (draftPhotos.length === 0) {
+      errors.photos = 'Añade al menos una foto de evidencia.';
+    } else if (draftPhotos.some((photo) => photo.status === 'processing')) {
+      errors.photos = 'Espera a que terminen de optimizarse las fotos.';
+    } else if (!createdChecklistId && draftPhotos.some((photo) => photo.status === 'error')) {
+      errors.photos = 'Quita las fotos con error antes de enviar.';
+    }
+
+    setChecklistErrors(errors);
+
+    if (Object.values(errors).some(Boolean)) {
+      return;
+    }
+
+    setChecklistSaving(true);
+    setActionError(null);
 
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        quality: 1,
-        allowsEditing: true,
-        allowsMultipleSelection: false
-      });
+      let checklistId = createdChecklistId;
 
-      if (result.canceled || !result.assets[0]) {
-        setChecklistImageUploading(false);
-        return;
+      if (!checklistId) {
+        const created = await httpClient.post<BookingChecklistItem>('/booking-checklists', {
+          bookingId: selectedBooking.id,
+          type: editingChecklistType,
+          mileage: Number(checklistDraft.mileage.replace(/\./g, '').replace(',', '.')),
+          fuelLevel: Number(checklistDraft.fuelLevel),
+          notes: checklistDraft.notes.trim() || undefined
+        });
+        checklistId = created.data.id;
+        setCreatedChecklistId(checklistId);
       }
 
-      const prepared = await prepareUploadImage(result.assets[0], 'checklist_image');
-      setPendingChecklistImages((prev) => ({
-        ...prev,
-        [editingChecklistType]: [
-          ...prev[editingChecklistType],
-          {
-            previewUri: prepared.fileUri,
-            fileUri: prepared.fileUri,
-            fileName: prepared.fileName,
-            mimeType: prepared.mimeType,
-            webFile: prepared.webFile
-          }
-        ]
-      }));
+      const results = await Promise.all(pending.map((photo) => uploadDraftPhoto(photo, checklistId as string)));
+      const failed = results.filter((ok) => !ok).length;
 
-      setMutationMessage('Imagen añadida al borrador y previsualizada. Se subira al enviar el checklist.');
-    } catch (error: unknown) {
-      setMutationError(getApiErrorMessage(error) ?? 'No se pudo preparar la imagen del checklist.');
+      // Si todo sube bien, el efecto de "checklist completo" cierra el editor.
+      if (failed > 0) {
+        setActionError(
+          `Checklist guardado, pero ${pluralize(failed, 'foto no se ha', 'fotos no se han')} podido subir. Reintenta o termina sin ellas.`
+        );
+      }
+    } catch (saveError: unknown) {
+      setActionError(getApiErrorMessage(saveError, 'No se pudo guardar el checklist.'));
     } finally {
-      setChecklistImageUploading(false);
+      setChecklistSaving(false);
     }
   };
 
-  const handleRemovePendingChecklistImage = (type: BookingChecklistType, imageIndex: number) => {
-    setPendingChecklistImages((prev) => ({
-      ...prev,
-      [type]: prev[type].filter((_, index) => index !== imageIndex)
-    }));
-  };
-
-  const handleDeleteChecklistImage = async (imageId: string, checklistId: string) => {
-    setChecklistImageDeletingId(imageId);
-
-    try {
-      await httpClient.delete(`/checklist-images/${imageId}`);
-      await loadChecklistImages(checklistId);
-      setMutationMessage('Imagen eliminada del checklist.');
-    } catch (error: unknown) {
-      setMutationError(getApiErrorMessage(error) ?? 'No se pudo eliminar la imagen del checklist.');
-    } finally {
-      setChecklistImageDeletingId(null);
-    }
-  };
+  /* --------------------------------- Reseña --------------------------------- */
 
   const handleCreateReview = async () => {
     if (!selectedBooking || !selectedBookingCounterpartId || !authUserId) {
@@ -844,23 +892,22 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
     }
 
     if (!canTransact) {
-      setMutationError('Necesitas perfil verificado para publicar resenas. Ve a Perfil.');
+      setReviewError('Necesitas el perfil verificado para publicar reseñas.');
       return;
     }
 
     if (selectedBooking.status !== 'completed') {
-      setMutationError('Solo puedes valorar reservas completadas.');
+      setReviewError('Solo puedes valorar reservas completadas.');
       return;
     }
 
     if (reviewRatingInput < 1 || reviewRatingInput > 5) {
-      setMutationError('La valoracion debe estar entre 1 y 5.');
+      setReviewError('Elige una puntuación de 1 a 5 estrellas.');
       return;
     }
 
     setReviewSaving(true);
-    setMutationError(null);
-    setMutationMessage(null);
+    setReviewError(null);
 
     try {
       await httpClient.post('/reviews', {
@@ -870,12 +917,13 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
         comment: reviewCommentInput.trim() || undefined
       });
 
-      setMutationMessage('Resena enviada correctamente. Puedes verla desde Perfil.');
+      toast.success('Reseña publicada. Puedes consultarla desde Perfil.');
       setReviewCommentInput('');
-      await loadDetailData();
+      setReviewRatingInput(0);
       setScreenMode('detail');
-    } catch (error: unknown) {
-      setMutationError(getApiErrorMessage(error) ?? 'No se pudo crear la resena.');
+      await loadDetailData();
+    } catch (saveError: unknown) {
+      setReviewError(getApiErrorMessage(saveError, 'No se pudo publicar la reseña.'));
     } finally {
       setReviewSaving(false);
     }
@@ -888,757 +936,1072 @@ export function TripsScreen({ onNavigateToTab }: TripsScreenProps) {
 
     setOverviewUser({
       id: userId,
-      displayName: getUserDisplayName(profileData),
+      displayName: getDisplayName(profileData?.firstName, profileData?.lastName),
       avatarUrl: profileData?.avatarUrl ?? null
     });
   };
 
-  if (!authUserId) {
-    return (
-      <View style={styles.sectionCard}>
-        <SectionHeader
-          title="Mis Viajes"
-          subtitle="Inicia sesion para ver reservas como conductor y propietario."
-          centered={isDesktopWeb}
-        />
-      </View>
-    );
-  }
+  const overviewModal = (
+    <UserOverviewModal
+      visible={!!overviewUser}
+      userId={overviewUser?.id ?? null}
+      displayName={overviewUser?.displayName ?? 'Usuario'}
+      avatarUrl={overviewUser?.avatarUrl ?? null}
+      onClose={() => setOverviewUser(null)}
+    />
+  );
+
+  const screenProps = { topPadding, bottomPadding, maxWidth: layoutTokens.formMaxWidth };
+
+  /* ------------------------------------------------------------------------ */
+  /* Editor de checklist                                                      */
+  /* ------------------------------------------------------------------------ */
 
   if (screenMode === 'checklistEditor' && selectedBooking && editingChecklistType) {
-    const currentChecklist = checklists.find((item) => item.type === editingChecklistType) ?? null;
-    const draft = checklistDrafts[editingChecklistType];
-    const pendingImagesForType = pendingChecklistImages[editingChecklistType];
+    const alreadySent = checklists.some((item) => item.type === editingChecklistType) && !createdChecklistId;
+    const photoItems: PhotoItem[] = draftPhotos.map((photo) => ({
+      key: photo.key,
+      uri: photo.previewUri,
+      status: photo.status === 'ready' ? 'done' : photo.status,
+      progress: photo.progress,
+      errorMessage: photo.errorMessage
+    }));
+    const failedUploads = createdChecklistId ? draftPhotos.filter((photo) => photo.status === 'error').length : 0;
 
     return (
-      <View style={styles.sectionCard}>
-        <SectionHeader
-          title={editingChecklistType === 'check_in' ? 'Checklist de entrada' : 'Checklist de salida'}
-          subtitle={`Reserva #${getShortId(selectedBooking.id)} · Evidencias y datos verificables`}
-          centered={isDesktopWeb}
-        />
-
-        <View style={[styles.actionsRow, desktopCardStyle]}>
-          <ActionButton label="Volver al detalle" onPress={backToDetail} variant="ghost" />
-          {!currentChecklist ? (
-            <ActionButton
-              label={checklistSavingType === editingChecklistType ? 'Enviando...' : 'Enviar checklist'}
-              onPress={() => void handleSaveChecklist(editingChecklistType)}
-              disabled={checklistSavingType === editingChecklistType || !canTransact}
-            />
-          ) : null}
-        </View>
-
-        <View style={[styles.card, desktopCardStyle]}>
-          <Text style={styles.switcherTitle}>Datos del checklist</Text>
-          <TextInput
-            value={draft.mileage}
-            onChangeText={(value) =>
-              setChecklistDrafts((prev) => ({
-                ...prev,
-                [editingChecklistType]: { ...prev[editingChecklistType], mileage: value }
-              }))
-            }
-            placeholder="Kilometraje"
-            keyboardType="numeric"
-            style={styles.input}
+      <Screen
+        {...screenProps}
+        header={
+          <ScreenHeader
+            title={CHECKLIST_LABEL[editingChecklistType]}
+            eyebrow={`Reserva #${getShortId(selectedBooking.id)}`}
+            subtitle="Deja constancia del estado del coche con datos y fotos."
+            onBack={() => void backToDetail()}
+            backLabel="Volver a la reserva"
           />
-          <TextInput
-            value={draft.fuelLevel}
-            onChangeText={(value) =>
-              setChecklistDrafts((prev) => ({
-                ...prev,
-                [editingChecklistType]: { ...prev[editingChecklistType], fuelLevel: value }
-              }))
-            }
-            placeholder="Combustible (0-100)"
-            keyboardType="numeric"
-            style={styles.input}
-          />
-          <TextInput
-            value={draft.notes}
-            onChangeText={(value) =>
-              setChecklistDrafts((prev) => ({
-                ...prev,
-                [editingChecklistType]: { ...prev[editingChecklistType], notes: value }
-              }))
-            }
-            placeholder="Observaciones"
-            style={styles.input}
-            multiline
-          />
-          <Text style={styles.linkHint}>Recomendacion: sube fotos claras de 4 lados, cuadro, kilometraje, daños visibles e interior.</Text>
-          <Text style={styles.error}>Aviso legal: si faltan evidencias, la plataforma no asume responsabilidad ante reclamaciones no demostrables.</Text>
-          {currentChecklist ? <Text style={styles.linkHint}>Checklist enviado: ya no se permite acceso ni edicion posterior.</Text> : null}
-        </View>
-
-        <View style={[styles.card, desktopCardStyle]}>
-          <Text style={styles.switcherTitle}>Evidencias fotograficas</Text>
-
-          <View style={styles.buttonContainer}>
-            <ActionButton
-              label={checklistImageUploading ? 'Procesando...' : 'Añadir imagen (previsualizar)'}
-              onPress={() => void handleUploadChecklistImage()}
-              disabled={checklistImageUploading || !canTransact || !!currentChecklist}
-            />
-          </View>
-
-          {!currentChecklist ? (
-            <Text style={styles.linkHint}>Las imagenes se previsualizan ahora y se suben definitivamente al enviar el checklist.</Text>
-          ) : null}
-
-          {checklistImagesLoading ? <ActivityIndicator size="small" /> : null}
-
-          <View style={[localStyles.imageEvidenceGrid, isDesktopWeb ? localStyles.imageEvidenceGridDesktop : undefined]}>
-            {pendingImagesForType.map((image, index) => {
-              return (
-                <View
-                  key={`${image.fileName}-${index}`}
-                  style={[localStyles.imageEvidenceCard, isDesktopWeb ? localStyles.imageEvidenceCardDesktop : undefined]}
-                >
-                  <Image source={{ uri: image.previewUri }} style={localStyles.imageEvidence} resizeMode="cover" />
-                  <View style={styles.actionsRow}>
-                    <ActionButton
-                      label="Quitar del borrador"
-                      onPress={() => handleRemovePendingChecklistImage(editingChecklistType, index)}
-                      variant="danger"
-                      disabled={!!currentChecklist}
-                    />
-                  </View>
+        }
+      >
+        {alreadySent ? (
+          <InlineMessage tone="info" message="Este checklist ya se envió y no puede modificarse." />
+        ) : (
+          <>
+            <Card>
+              <CardHeader title="Datos del vehículo" icon="speedometer-outline" />
+              <TextField
+                label="Kilometraje"
+                required
+                value={checklistDraft.mileage}
+                onChangeText={(value) => {
+                  setChecklistDraft((current) => ({ ...current, mileage: value.replace(/[^0-9]/g, '') }));
+                  setChecklistErrors((current) => ({ ...current, mileage: undefined }));
+                }}
+                placeholder="Ej. 45210"
+                keyboardType="number-pad"
+                returnKeyType="next"
+                right={<Text style={styles.unit}>km</Text>}
+                error={checklistErrors.mileage}
+                editable={!createdChecklistId}
+              />
+              <View style={styles.fuelBlock}>
+                <TextField
+                  label="Nivel de combustible / batería"
+                  required
+                  value={checklistDraft.fuelLevel}
+                  onChangeText={(value) => {
+                    setChecklistDraft((current) => ({ ...current, fuelLevel: value.replace(/[^0-9]/g, '').slice(0, 3) }));
+                    setChecklistErrors((current) => ({ ...current, fuelLevel: undefined }));
+                  }}
+                  placeholder="0 - 100"
+                  keyboardType="number-pad"
+                  right={<Text style={styles.unit}>%</Text>}
+                  error={checklistErrors.fuelLevel}
+                  editable={!createdChecklistId}
+                />
+                <View style={styles.presetRow}>
+                  {FUEL_PRESETS.map((preset) => {
+                    const active = checklistDraft.fuelLevel === preset;
+                    return (
+                      <Button
+                        key={preset}
+                        label={`${preset}%`}
+                        size="sm"
+                        variant={active ? 'primary' : 'secondary'}
+                        disabled={!!createdChecklistId}
+                        onPress={() => {
+                          setChecklistDraft((current) => ({ ...current, fuelLevel: preset }));
+                          setChecklistErrors((current) => ({ ...current, fuelLevel: undefined }));
+                        }}
+                        style={styles.presetButton}
+                      />
+                    );
+                  })}
                 </View>
-              );
-            })}
-          </View>
+              </View>
+              <TextField
+                label="Observaciones"
+                value={checklistDraft.notes}
+                onChangeText={(value) => setChecklistDraft((current) => ({ ...current, notes: value }))}
+                placeholder="Rayones, golpes, limpieza, objetos olvidados…"
+                multiline
+                maxLength={1000}
+                editable={!createdChecklistId}
+              />
+            </Card>
 
-          {!checklistImagesLoading && pendingImagesForType.length === 0 ? (
-            <Text style={styles.linkHint}>Todavia no hay evidencias en el borrador.</Text>
-          ) : null}
-        </View>
+            <Card>
+              <CardHeader
+                title="Fotos de evidencia"
+                icon="camera-outline"
+                subtitle={`${draftPhotos.length}/${MAX_CHECKLIST_PHOTOS} fotos · se guardan de forma privada`}
+              />
+              <InlineMessage
+                tone="warning"
+                title="Recomendación"
+                message="Fotografía los 4 laterales, el cuadro con el kilometraje, el nivel de combustible, el interior y cualquier daño visible. Sin evidencias, la plataforma no podrá mediar en reclamaciones."
+              />
+              <PhotoGrid
+                items={photoItems}
+                onAdd={createdChecklistId ? undefined : (source) => void handleAddChecklistPhotos(source)}
+                onRemove={(item) => void handleRemoveDraftPhoto(item)}
+                onRetry={
+                  createdChecklistId
+                    ? (item) => {
+                        const photo = draftPhotos.find((entry) => entry.key === item.key);
+                        if (photo) {
+                          void uploadDraftPhoto(photo, createdChecklistId);
+                        }
+                      }
+                    : undefined
+                }
+                maxItems={MAX_CHECKLIST_PHOTOS}
+                disabled={checklistSaving}
+                addLabel="Añadir fotos"
+                columns={windowWidth < 768 ? 3 : 4}
+              />
+              {checklistErrors.photos ? <InlineMessage tone="error" message={checklistErrors.photos} /> : null}
+            </Card>
 
-        {mutationError ? <Text style={styles.error}>{mutationError}</Text> : null}
-        {mutationMessage ? (
-          <View style={[localStyles.feedbackBanner, isDesktopWeb ? localStyles.feedbackBannerDesktop : undefined]}>
-            <Text style={[styles.info, localStyles.feedbackBannerText]}>{mutationMessage}</Text>
-          </View>
-        ) : null}
-      </View>
+            <VerificationGate
+              missingProfile={!hasRequiredProfileData}
+              missingVerification={!canTransact}
+              onGoToProfile={goToProfile}
+              action="enviar checklists"
+            />
+            {actionError ? <InlineMessage tone="error" message={actionError} /> : null}
+
+            {failedUploads > 0 ? (
+              <View style={styles.actions}>
+                <Button
+                  label="Reintentar fotos fallidas"
+                  icon="refresh"
+                  onPress={() => void handleSaveChecklist()}
+                  loading={checklistSaving}
+                  fullWidth
+                />
+                <Button label="Terminar sin esas fotos" variant="secondary" onPress={() => void finishChecklist()} fullWidth />
+              </View>
+            ) : (
+              <Button
+                label={createdChecklistId ? 'Reintentar subida' : 'Enviar checklist'}
+                icon="checkmark-circle-outline"
+                onPress={() => void handleSaveChecklist()}
+                loading={checklistSaving}
+                disabled={!canTransact}
+                fullWidth
+              />
+            )}
+          </>
+        )}
+      </Screen>
     );
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* Reseña                                                                   */
+  /* ------------------------------------------------------------------------ */
 
   if (screenMode === 'reviewComposer' && selectedBooking) {
+    const counterpart = selectedBookingCounterpartId ? userById[selectedBookingCounterpartId] : undefined;
+    const counterpartName = getDisplayName(counterpart?.firstName, counterpart?.lastName);
+
     return (
-      <View style={styles.sectionCard}>
-        <SectionHeader
-          title={`Valorar reserva #${getShortId(selectedBooking.id)}`}
-          subtitle="Tu reseña quedara visible en Perfil, no en esta reserva."
-          centered={isDesktopWeb}
-        />
-
-        <View style={[styles.actionsRow, desktopCardStyle]}>
-          <ActionButton label="Volver al detalle" onPress={backToDetail} variant="ghost" />
-        </View>
-
-        <View style={[styles.card, desktopCardStyle]}>
-          <Text style={styles.switcherTitle}>Tu puntuacion</Text>
-          <View style={localStyles.starsRow}>
-            {[1, 2, 3, 4, 5].map((star) => {
-              const active = star <= reviewRatingInput;
-              return (
-                <Pressable
-                  key={`star-${star}`}
-                  onPress={() => setReviewRatingInput(star)}
-                  style={[localStyles.starButton, active ? localStyles.starButtonActive : undefined]}
-                >
-                  <Text style={[localStyles.starButtonText, active ? localStyles.starButtonTextActive : undefined]}>
-                    {active ? '★' : '☆'}
-                  </Text>
-                </Pressable>
-              );
-            })}
+      <Screen
+        {...screenProps}
+        header={
+          <ScreenHeader
+            title="Valorar el viaje"
+            eyebrow={`Reserva #${getShortId(selectedBooking.id)}`}
+            subtitle="Tu reseña ayuda a la comunidad y será visible en el perfil."
+            onBack={() => setScreenMode('detail')}
+            backLabel="Volver a la reserva"
+          />
+        }
+      >
+        <Card>
+          <View style={styles.reviewTarget}>
+            <Avatar uri={resolveStoredImageUrl(counterpart?.avatarUrl ?? null)} name={counterpartName} size={56} />
+            <Text style={styles.reviewTargetName}>{counterpartName}</Text>
+            <Text style={styles.caption}>
+              {selectedBookingIsOwnerView ? 'Conductor' : 'Propietario'} · {getVehicleLabel(vehicleById[selectedBooking.vehicleId])}
+            </Text>
           </View>
-          <TextInput
+          <StarRating value={reviewRatingInput} onChange={(value) => {
+            setReviewRatingInput(value);
+            setReviewError(null);
+          }} size={36} />
+          <TextField
+            label="Comentario (opcional)"
             value={reviewCommentInput}
             onChangeText={setReviewCommentInput}
-            placeholder="Comentario"
-            style={styles.input}
+            placeholder="¿Qué tal fue la experiencia?"
             multiline
+            maxLength={REVIEW_MAX_LENGTH}
+            hint={`${reviewCommentInput.length}/${REVIEW_MAX_LENGTH}`}
           />
-          <View style={styles.buttonContainer}>
-            <ActionButton
-              label={reviewSaving ? 'Publicando...' : 'Enviar reseña'}
-              onPress={() => void handleCreateReview()}
-              disabled={reviewSaving || !canTransact}
-            />
-          </View>
-        </View>
-
-        {mutationError ? <Text style={styles.error}>{mutationError}</Text> : null}
-        {mutationMessage ? (
-          <View style={[localStyles.feedbackBanner, isDesktopWeb ? localStyles.feedbackBannerDesktop : undefined]}>
-            <Text style={[styles.info, localStyles.feedbackBannerText]}>{mutationMessage}</Text>
-          </View>
-        ) : null}
-      </View>
+          {reviewError ? <InlineMessage tone="error" message={reviewError} /> : null}
+          <VerificationGate
+            missingProfile={!hasRequiredProfileData}
+            missingVerification={!canTransact}
+            onGoToProfile={goToProfile}
+            action="publicar reseñas"
+          />
+          <Button
+            label="Publicar reseña"
+            icon="star-outline"
+            onPress={() => void handleCreateReview()}
+            loading={reviewSaving}
+            disabled={!canTransact || reviewRatingInput === 0}
+            fullWidth
+          />
+        </Card>
+      </Screen>
     );
   }
 
-  if (screenMode === 'detail' && selectedBooking) {
-    const statusColors = STATUS_COLORS[selectedBooking.status];
-    const ownerProfile = userById[selectedBooking.ownerId];
-    const driverProfile = userById[selectedBooking.driverId];
-    const ownerAvatarUrl = resolveStoredImageUrl(ownerProfile?.avatarUrl ?? null);
-    const driverAvatarUrl = resolveStoredImageUrl(driverProfile?.avatarUrl ?? null);
-    const vehicleLabel = getVehicleLabel(vehicleById[selectedBooking.vehicleId]);
+  /* ------------------------------------------------------------------------ */
+  /* Mensajes                                                                 */
+  /* ------------------------------------------------------------------------ */
 
-    const checkInChecklist = checklists.find((item) => item.type === 'check_in') ?? null;
-    const checkOutChecklist = checklists.find((item) => item.type === 'check_out') ?? null;
-    const myReview = reviews.find((review) => review.reviewerId === authUserId) ?? null;
-
-    const blockedReasons = [
-      !canCreateChecklistByRole(selectedBooking, authUserId)
-        ? 'Checklist bloqueado: solo el conductor de esta reserva puede crearlo y enviarlo.'
-        : null,
-      !canOpenChecklist('check_in', selectedBooking.status)
-        ? getChecklistBlockReason('check_in', selectedBooking.status)
-        : null,
-      !canOpenChecklist('check_out', selectedBooking.status)
-        ? getChecklistBlockReason('check_out', selectedBooking.status)
-        : null,
-      selectedBooking.status !== 'completed'
-        ? 'Reseña bloqueada: solo disponible cuando la reserva este completada.'
-        : null
-    ].filter(Boolean) as string[];
+  if (screenMode === 'chat' && selectedBooking) {
+    const counterpart = selectedBookingCounterpartId ? userById[selectedBookingCounterpartId] : undefined;
 
     return (
-      <View style={styles.sectionCard}>
-        <SectionHeader
-          title={`Reserva #${getShortId(selectedBooking.id)}`}
-          subtitle="Detalle transaccional con acciones por estado y rol."
-          centered={isDesktopWeb}
-        />
-
-        <View style={[styles.actionsRow, desktopCardStyle]}>
-          <ActionButton label="Volver a lista" onPress={backToList} variant="ghost" />
-        </View>
-
-        {!hasRequiredProfileData ? (
-          <View style={[styles.card, desktopCardStyle]}>
-            <Text style={styles.error}>Completa nombre, apellidos y telefono en Perfil para operar flujos transaccionales.</Text>
-            {onNavigateToTab ? (
-              <View style={styles.buttonContainer}>
-                <ActionButton label="Ir a Perfil" onPress={() => onNavigateToTab('profile')} />
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-
-        {!canTransact ? (
-          <View style={[styles.card, desktopCardStyle]}>
-            <Text style={styles.error}>Necesitas verificacion documental para ejecutar acciones transaccionales.</Text>
-            {onNavigateToTab ? (
-              <View style={styles.buttonContainer}>
-                <ActionButton label="Ir a Perfil > Documentacion" onPress={() => onNavigateToTab('profile')} />
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-
-        <View style={[styles.card, desktopCardStyle]}>
-          <View style={localStyles.bookingHeaderRow}>
-            <Text style={styles.cardTitle}>{vehicleLabel}</Text>
-            <View style={[localStyles.statusPill, { backgroundColor: statusColors.background }]}> 
-              <Text style={[localStyles.statusPillText, { color: statusColors.text }]}>{STATUS_LABEL[selectedBooking.status]}</Text>
-            </View>
-          </View>
-
-          <Text style={styles.row}><Text style={styles.label}>Periodo:</Text> {formatDateTime(selectedBooking.startDatetime)} - {formatDateTime(selectedBooking.endDatetime)}</Text>
-          <Text style={styles.row}><Text style={styles.label}>Duracion:</Text> {getDurationDays(selectedBooking.startDatetime, selectedBooking.endDatetime)} dias</Text>
-          <Text style={styles.row}><Text style={styles.label}>Total:</Text> {formatCurrency(selectedBooking.totalPrice)}</Text>
-          <Text style={styles.row}><Text style={styles.label}>Comision:</Text> {formatCurrency(selectedBooking.platformFee)}</Text>
-          <Text style={styles.row}><Text style={styles.label}>Payout:</Text> {selectedBooking.payoutStatus}</Text>
-          <Text style={styles.row}><Text style={styles.label}>Contacto owner:</Text> {selectedBooking.ownerContactMethod ?? 'No definido'}</Text>
-          <Text style={styles.linkHint}>Creada el {formatDateTime(selectedBooking.createdAt)}</Text>
-
-          <View style={localStyles.peopleSection}>
-            <Pressable style={localStyles.personRow} onPress={() => handleOpenUserOverview(selectedBooking.ownerId, ownerProfile)}>
-              {ownerAvatarUrl ? (
-                <Image source={{ uri: ownerAvatarUrl }} style={localStyles.personAvatar} resizeMode="cover" />
-              ) : (
-                <View style={localStyles.personAvatarFallback}>
-                  <Text style={localStyles.personAvatarFallbackText}>{getUserInitials(ownerProfile)}</Text>
-                </View>
-              )}
-              <View style={localStyles.personInfo}>
-                <Text style={localStyles.personRoleLabel}>Propietario</Text>
-                <Text style={localStyles.personName}>{getUserDisplayName(ownerProfile)}</Text>
-              </View>
-            </Pressable>
-
-            <Pressable style={localStyles.personRow} onPress={() => handleOpenUserOverview(selectedBooking.driverId, driverProfile)}>
-              {driverAvatarUrl ? (
-                <Image source={{ uri: driverAvatarUrl }} style={localStyles.personAvatar} resizeMode="cover" />
-              ) : (
-                <View style={localStyles.personAvatarFallback}>
-                  <Text style={localStyles.personAvatarFallbackText}>{getUserInitials(driverProfile)}</Text>
-                </View>
-              )}
-              <View style={localStyles.personInfo}>
-                <Text style={localStyles.personRoleLabel}>Conductor</Text>
-                <Text style={localStyles.personName}>{getUserDisplayName(driverProfile)}</Text>
-              </View>
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={[styles.card, desktopCardStyle]}>
-          <Text style={styles.switcherTitle}>Siguientes acciones</Text>
-
-          {selectedBookingIsOwnerView && selectedBooking.status === 'pending' ? (
-            <>
-              <TextInput
-                value={ownerContactMethodInput}
-                onChangeText={setOwnerContactMethodInput}
-                placeholder="Metodo de contacto del propietario"
-                style={styles.input}
-              />
-              <View style={styles.actionsRow}>
-                <ActionButton label="Aceptar" onPress={() => void handleUpdateBookingStatus('accepted')} disabled={statusUpdating || !canTransact} />
-                <ActionButton label="Rechazar" variant="danger" onPress={() => void handleUpdateBookingStatus('rejected')} disabled={statusUpdating || !canTransact} />
-                <ActionButton label="Cancelar" variant="ghost" onPress={() => void handleUpdateBookingStatus('cancelled')} disabled={statusUpdating || !canTransact} />
-              </View>
-            </>
-          ) : null}
-
-          {selectedBookingIsOwnerView && selectedBooking.status === 'accepted' ? (
-            <View style={styles.actionsRow}>
-              <ActionButton label="Cancelar" variant="ghost" onPress={() => void handleUpdateBookingStatus('cancelled')} disabled={statusUpdating || !canTransact} />
-            </View>
-          ) : null}
-
-          {selectedBookingIsOwnerView && selectedBooking.status === 'paid_confirmed' ? (
-            <View style={styles.actionsRow}>
-              <ActionButton label="Iniciar viaje" onPress={() => void handleUpdateBookingStatus('in_progress')} disabled={statusUpdating || !canTransact} />
-              <ActionButton label="Cancelar" variant="ghost" onPress={() => void handleUpdateBookingStatus('cancelled')} disabled={statusUpdating || !canTransact} />
-            </View>
-          ) : null}
-
-          {selectedBookingIsOwnerView && selectedBooking.status === 'in_progress' ? (
-            <View style={styles.actionsRow}>
-              <ActionButton label="Marcar completada" onPress={() => void handleUpdateBookingStatus('completed')} disabled={statusUpdating || !canTransact} />
-            </View>
-          ) : null}
-
-          {!selectedBookingIsOwnerView && selectedBooking.status === 'pending' ? (
-            <View style={styles.actionsRow}>
-              <ActionButton label="Cancelar solicitud" variant="ghost" onPress={() => void handleUpdateBookingStatus('cancelled')} disabled={statusUpdating || !canTransact} />
-            </View>
-          ) : null}
-
-          {!selectedBookingIsOwnerView && selectedBooking.status === 'accepted' ? (
-            <>
-              <View style={styles.actionsRow}>
-                <ActionButton label="Pago (a implementar en el futuro)" variant="ghost" onPress={() => {}} disabled />
-              </View>
-              <View style={styles.actionsRow}>
-                <ActionButton label="Marcar pago confirmado (demo)" onPress={() => void handleUpdateBookingStatus('paid_confirmed')} disabled={statusUpdating || !canTransact} />
-                <ActionButton label="Cancelar" variant="ghost" onPress={() => void handleUpdateBookingStatus('cancelled')} disabled={statusUpdating || !canTransact} />
-              </View>
-            </>
-          ) : null}
-
-          {!selectedBookingIsOwnerView && selectedBooking.status === 'paid_confirmed' ? (
-            <View style={styles.actionsRow}>
-              <ActionButton label="Cancelar" variant="ghost" onPress={() => void handleUpdateBookingStatus('cancelled')} disabled={statusUpdating || !canTransact} />
-            </View>
-          ) : null}
-
-          {(selectedBooking.status === 'rejected' || selectedBooking.status === 'cancelled' || selectedBooking.status === 'completed') && (
-            <Text style={styles.linkHint}>No hay transiciones adicionales disponibles para este estado.</Text>
-          )}
-        </View>
-
-        <View style={[styles.card, desktopCardStyle]}>
-          <Text style={styles.switcherTitle}>Checklists</Text>
-
-          <View style={localStyles.checklistSummaryCard}>
-            <Text style={styles.row}><Text style={styles.label}>Entrada:</Text> {checkInChecklist ? 'Guardado' : 'Pendiente'}</Text>
-            <Text style={styles.row}><Text style={styles.label}>Salida:</Text> {checkOutChecklist ? 'Guardado' : 'Pendiente'}</Text>
-
-            <View style={styles.actionsRow}>
-              {canCreateChecklistByRole(selectedBooking, authUserId) && canOpenChecklist('check_in', selectedBooking.status) && !checkInChecklist ? (
-                <ActionButton
-                  label="Crear checklist entrada"
-                  onPress={() => void openChecklistEditor('check_in')}
-                  disabled={!canTransact}
-                />
-              ) : null}
-
-              {canCreateChecklistByRole(selectedBooking, authUserId) && canOpenChecklist('check_out', selectedBooking.status) && !checkOutChecklist ? (
-                <ActionButton
-                  label="Crear checklist salida"
-                  onPress={() => void openChecklistEditor('check_out')}
-                  disabled={!canTransact}
-                  variant="ghost"
-                />
-              ) : null}
-            </View>
-
-            {blockedReasons.map((reason, index) => (
-              <Text key={`block-${index}`} style={styles.linkHint}>• {reason}</Text>
-            ))}
-          </View>
-        </View>
-
-        <View style={[styles.card, desktopCardStyle]}>
-          <Text style={styles.switcherTitle}>Reseña</Text>
-
-          {selectedBooking.status !== 'completed' ? (
-            <Text style={styles.linkHint}>Aun no puedes emitir reseña: la reserva no esta completada.</Text>
-          ) : null}
-
-          {selectedBooking.status === 'completed' && myReview ? (
-            <Text style={styles.linkHint}>Ya emitiste tu reseña. Esta visible desde Perfil.</Text>
-          ) : null}
-
-          {selectedBooking.status === 'completed' && !myReview ? (
-            <View style={styles.buttonContainer}>
-              <ActionButton
-                label="Emitir reseña"
-                onPress={() => {
-                  setScreenMode('reviewComposer');
-                  setMutationError(null);
-                }}
-                disabled={!canTransact}
-              />
-            </View>
-          ) : null}
-        </View>
-
-        {detailLoading ? <ActivityIndicator size="small" /> : null}
-        {detailError ? <Text style={styles.error}>{detailError}</Text> : null}
-        {lookupError ? <Text style={styles.error}>{lookupError}</Text> : null}
-        {mutationError ? <Text style={styles.error}>{mutationError}</Text> : null}
-        {mutationMessage ? (
-          <View style={[localStyles.feedbackBanner, isDesktopWeb ? localStyles.feedbackBannerDesktop : undefined]}>
-            <Text style={[styles.info, localStyles.feedbackBannerText]}>{mutationMessage}</Text>
-          </View>
-        ) : null}
-
-        <UserOverviewModal
-          visible={!!overviewUser}
-          userId={overviewUser?.id ?? null}
-          displayName={overviewUser?.displayName ?? 'Usuario'}
-          avatarUrl={overviewUser?.avatarUrl ?? null}
-          onClose={() => setOverviewUser(null)}
-        />
-      </View>
+      <BookingChatScreen
+        bookingId={selectedBooking.id}
+        authUserId={authUserId}
+        title={`${getVehicleLabel(vehicleById[selectedBooking.vehicleId])} · #${getShortId(selectedBooking.id)}`}
+        subtitle={`Con ${getDisplayName(counterpart?.firstName, counterpart?.lastName)} (${selectedBookingIsOwnerView ? 'conductor' : 'propietario'})`}
+        topPadding={topPadding}
+        bottomPadding={bottomPadding}
+        onBack={closeChat}
+        onRead={() => setUnreadByBooking(({ [selectedBooking.id]: _read, ...rest }) => rest)}
+      />
     );
   }
 
-  return (
-    <View style={styles.sectionCard}>
-      <SectionHeader
-        title="Mis Viajes"
-        subtitle="Consulta tus reservas y entra al detalle transaccional de cada una."
-        centered={isDesktopWeb}
-      />
+  /* ------------------------------------------------------------------------ */
+  /* Detalle                                                                  */
+  /* ------------------------------------------------------------------------ */
 
-      <View style={[styles.card, desktopCardStyle]}>
-        <Text style={styles.switcherTitle}>Vista</Text>
-        <View style={styles.actionsRow}>
-          <Pressable
-            style={[localStyles.roleButton, roleView === 'driver' ? localStyles.roleButtonActive : undefined]}
-            onPress={() => setRoleView('driver')}
-          >
-            <Text style={[localStyles.roleButtonText, roleView === 'driver' ? localStyles.roleButtonTextActive : undefined]}>
-              Como conductor
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[localStyles.roleButton, roleView === 'owner' ? localStyles.roleButtonActive : undefined]}
-            onPress={() => setRoleView('owner')}
-          >
-            <Text style={[localStyles.roleButtonText, roleView === 'owner' ? localStyles.roleButtonTextActive : undefined]}>
-              Como propietario
-            </Text>
-          </Pressable>
-        </View>
-      </View>
+  if (screenMode === 'detail' && selectedBooking) {
+    const ownerProfile = userById[selectedBooking.ownerId];
+    const driverProfile = userById[selectedBooking.driverId];
+    const vehicle = vehicleById[selectedBooking.vehicleId];
+    const status = selectedBooking.status;
+    const isOwner = selectedBookingIsOwnerView;
+    const isDriver = canCreateChecklistByRole(selectedBooking, authUserId);
+    const myReview = reviews.find((review) => review.reviewerId === authUserId) ?? null;
+    const days = getBillableDays(selectedBooking.startDatetime, selectedBooking.endDatetime);
+    const unreadCount = unreadByBooking[selectedBooking.id] ?? 0;
+    const busy = statusUpdating !== null;
+    const isClosed = status === 'rejected' || status === 'cancelled';
 
-      <View style={[styles.card, desktopCardStyle]}>
-        <Text style={styles.switcherTitle}>Resumen rapido</Text>
-        <Text style={styles.row}><Text style={styles.label}>Total reservas:</Text> {bookingSummary.total}</Text>
-        <Text style={styles.row}><Text style={styles.label}>Activas/Pendientes:</Text> {bookingSummary.pendingOrInProgress}</Text>
-        <Text style={styles.row}><Text style={styles.label}>Completadas:</Text> {bookingSummary.completed}</Text>
-        <Text style={styles.row}><Text style={styles.label}>Importe acumulado:</Text> {formatCurrency(bookingSummary.totalAmount)}</Text>
-      </View>
+    const actionButtons: Array<{ status: BookingStatus; label: string; variant?: 'primary' | 'accent' | 'dangerGhost' | 'secondary'; icon?: keyof typeof Ionicons.glyphMap; blockedReason?: string }> = [];
+    // La API exige el checklist correspondiente antes de iniciar o completar el viaje.
+    const hasChecklist = (type: BookingChecklistType) => checklists.some((item) => item.type === type);
 
-      <View style={[styles.buttonContainer, desktopCardStyle]}>
-        <ActionButton label="Recargar reservas" onPress={() => void loadBookings()} variant="ghost" />
-      </View>
+    if (isOwner && status === 'pending') {
+      actionButtons.push(
+        { status: 'accepted', label: 'Aceptar solicitud', icon: 'checkmark' },
+        { status: 'rejected', label: 'Rechazar', variant: 'dangerGhost', icon: 'close' },
+        { status: 'cancelled', label: 'Cancelar', variant: 'secondary' }
+      );
+    }
+    if (isOwner && status === 'accepted') {
+      actionButtons.push({ status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' });
+    }
+    if (isOwner && status === 'paid_confirmed') {
+      actionButtons.push(
+        {
+          status: 'in_progress',
+          label: 'Iniciar viaje',
+          icon: 'key-outline',
+          blockedReason: hasChecklist('check_in') ? undefined : 'Podrás iniciar el viaje cuando el conductor envíe el checklist de entrega.'
+        },
+        { status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' }
+      );
+    }
+    if (isOwner && status === 'in_progress') {
+      actionButtons.push({
+        status: 'completed',
+        label: 'Marcar como completada',
+        icon: 'flag-outline',
+        blockedReason: hasChecklist('check_out')
+          ? undefined
+          : 'Podrás completarla cuando el conductor envíe el checklist de devolución.'
+      });
+    }
+    if (!isOwner && status === 'pending') {
+      actionButtons.push({ status: 'cancelled', label: 'Cancelar solicitud', variant: 'dangerGhost' });
+    }
+    if (!isOwner && status === 'accepted') {
+      actionButtons.push({ status: 'paid_confirmed', label: `Pagar ${formatCurrencyEUR(selectedBooking.totalPrice)}`, variant: 'accent', icon: 'card-outline' });
+      actionButtons.push({ status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' });
+    }
+    if (!isOwner && status === 'paid_confirmed') {
+      actionButtons.push({ status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' });
+    }
 
-      {loading ? <ActivityIndicator size="small" /> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {lookupError ? <Text style={styles.error}>{lookupError}</Text> : null}
-      {mutationError ? <Text style={styles.error}>{mutationError}</Text> : null}
-      {mutationMessage ? (
-        <View style={[localStyles.feedbackBanner, isDesktopWeb ? localStyles.feedbackBannerDesktop : undefined]}>
-          <Text style={[styles.info, localStyles.feedbackBannerText]}>{mutationMessage}</Text>
-        </View>
-      ) : null}
+    const nextStepText: Partial<Record<BookingStatus, string>> = isOwner
+      ? {
+          pending: 'El conductor espera tu respuesta. Al aceptar compartirás tu método de contacto.',
+          accepted: 'Esperando a que el conductor realice el pago.',
+          paid_confirmed: 'Pago confirmado. Entrega las llaves e inicia el viaje.',
+          in_progress: 'Viaje en curso. Márcalo como completado cuando recuperes el vehículo.'
+        }
+      : {
+          pending: 'Tu solicitud está pendiente de respuesta del propietario.',
+          accepted: '¡Aceptada! Realiza el pago para confirmar la reserva.',
+          paid_confirmed: hasChecklist('check_in')
+            ? 'Checklist de entrega enviado. El propietario iniciará el viaje al darte las llaves.'
+            : 'Reserva confirmada. Rellena el checklist de entrega al recoger el coche.',
+          in_progress: hasChecklist('check_out')
+            ? 'Checklist de devolución enviado. El propietario completará la reserva.'
+            : 'Disfruta del viaje. Al devolver el coche rellena el checklist de devolución.'
+        };
 
-      {sortedBookings.map((booking) => {
-        const statusColors = STATUS_COLORS[booking.status];
-        const vehicleLabel = getVehicleLabel(vehicleById[booking.vehicleId]);
+    return (
+      <Screen
+        {...screenProps}
+        refreshing={refreshing}
+        onRefresh={() => void handleRefresh()}
+        header={
+          <ScreenHeader
+            title={getVehicleLabel(vehicle)}
+            eyebrow={`Reserva #${getShortId(selectedBooking.id)}`}
+            onBack={backToList}
+            backLabel="Mis viajes"
+            right={<StatusChip label={BOOKING_STATUS_LABEL[status]} tone={BOOKING_STATUS_TONE[status]} dot />}
+          />
+        }
+      >
+        <VerificationGate
+          missingProfile={!hasRequiredProfileData}
+          missingVerification={!canTransact}
+          onGoToProfile={goToProfile}
+          action="gestionar reservas"
+        />
 
-        return (
-          <Pressable key={booking.id} onPress={() => openBookingDetail(booking.id)}>
-            <View style={[styles.card, desktopCardStyle]}>
-              <View style={localStyles.bookingHeaderRow}>
-                <Text style={styles.cardTitle}>Reserva #{getShortId(booking.id)}</Text>
-                <View style={[localStyles.statusPill, { backgroundColor: statusColors.background }]}> 
-                  <Text style={[localStyles.statusPillText, { color: statusColors.text }]}>{STATUS_LABEL[booking.status]}</Text>
-                </View>
-              </View>
+        <Card>
+          <Timeline status={status} />
+          {nextStepText[status] ? <Text style={styles.nextStep}>{nextStepText[status]}</Text> : null}
 
-              <Text style={styles.row}><Text style={styles.label}>Vehiculo:</Text> {vehicleLabel}</Text>
-              <Text style={styles.row}><Text style={styles.label}>Periodo:</Text> {formatDateTime(booking.startDatetime)} - {formatDateTime(booking.endDatetime)}</Text>
-              <Text style={styles.row}><Text style={styles.label}>Total:</Text> {formatCurrency(booking.totalPrice)}</Text>
-              <Text style={styles.linkHint}>Toca para ver acciones y flujo transaccional.</Text>
-              {canCancelBooking(booking) ? <Text style={styles.linkHint}>Cancelable antes de inicio.</Text> : null}
+          {actionButtons.length > 0 ? (
+            <View style={styles.actions}>
+              {isOwner && status === 'pending' ? (
+                <TextField
+                  label="Método de contacto para el conductor"
+                  required
+                  value={ownerContactMethodInput}
+                  onChangeText={(value) => {
+                    setOwnerContactMethodInput(value);
+                    setContactError(null);
+                  }}
+                  placeholder="Ej. WhatsApp 600 123 123"
+                  leftIcon="chatbubble-ellipses-outline"
+                  error={contactError}
+                  hint="Solo lo verá el conductor cuando aceptes."
+                />
+              ) : null}
+              {actionButtons.map((action) =>
+                !isOwner && action.status === 'paid_confirmed' ? (
+                  <PaymentAction
+                    key={action.status}
+                    bookingId={selectedBooking.id}
+                    disabled={busy || !canTransact}
+                    renderButton={(buttonProps) => (
+                      <Button
+                        label={buttonProps.label === 'Pagar' ? action.label : buttonProps.label}
+                        icon={action.icon}
+                        variant={action.variant ?? 'primary'}
+                        onPress={buttonProps.onPress}
+                        loading={statusUpdating === action.status}
+                        disabled={buttonProps.disabled}
+                        fullWidth
+                      />
+                    )}
+                    onDemoConfirm={() => void handleUpdateBookingStatus('paid_confirmed')}
+                    onPaid={refreshAll}
+                  />
+                ) : (
+                  <View key={action.status} style={styles.actionWithHint}>
+                    <Button
+                      label={action.label}
+                      icon={action.icon}
+                      variant={action.variant ?? 'primary'}
+                      onPress={() => void handleUpdateBookingStatus(action.status)}
+                      loading={statusUpdating === action.status}
+                      disabled={busy || !canTransact || !!action.blockedReason}
+                      fullWidth
+                    />
+                    {action.blockedReason ? <Text style={styles.caption}>{action.blockedReason}</Text> : null}
+                  </View>
+                )
+              )}
+              {['accepted', 'paid_confirmed'].includes(status) ? (
+                <Text style={styles.caption}>Política de cancelación: {getCancellationNote(selectedBooking)}</Text>
+              ) : null}
             </View>
-          </Pressable>
-        );
-      })}
+          ) : isClosed ? (
+            <Text style={styles.caption}>Esta reserva está cerrada y no admite más cambios.</Text>
+          ) : null}
 
-      {!loading && !error && sortedBookings.length === 0 ? (
-        <View style={desktopCardStyle}>
-          <EmptyState
-            title="Sin reservas"
-            description={
-              roleView === 'driver'
-                ? 'No tienes reservas como conductor todavia.'
-                : 'No tienes reservas como propietario todavia.'
+          {actionError ? <InlineMessage tone="error" message={actionError} /> : null}
+        </Card>
+
+        <Card
+          onPress={() => setScreenMode('chat')}
+          accessibilityLabel={`Mensajes${unreadCount > 0 ? `, ${pluralize(unreadCount, 'mensaje sin leer', 'mensajes sin leer')}` : ''}`}
+          accessibilityHint="Abre la conversación de esta reserva"
+        >
+          <CardHeader
+            title="Mensajes"
+            subtitle={
+              unreadCount > 0
+                ? pluralize(unreadCount, 'mensaje sin leer', 'mensajes sin leer')
+                : `Habla con ${isOwner ? 'el conductor' : 'el propietario'} sin compartir tu teléfono.`
+            }
+            icon="chatbubbles-outline"
+            right={
+              <View style={styles.messagesRight}>
+                {unreadCount > 0 ? (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                  </View>
+                ) : null}
+                <Ionicons name="chevron-forward" size={18} color={colorTokens.textMuted} />
+              </View>
             }
           />
-        </View>
-      ) : null}
+        </Card>
 
-      <UserOverviewModal
-        visible={!!overviewUser}
-        userId={overviewUser?.id ?? null}
-        displayName={overviewUser?.displayName ?? 'Usuario'}
-        avatarUrl={overviewUser?.avatarUrl ?? null}
-        onClose={() => setOverviewUser(null)}
-      />
+        <Card>
+          <CardHeader title="Resumen" icon="receipt-outline" />
+          <View>
+            <KeyValueRow label="Recogida" value={formatDateTimeMadrid(selectedBooking.startDatetime)} />
+            <KeyValueRow label="Devolución" value={formatDateTimeMadrid(selectedBooking.endDatetime)} />
+            <KeyValueRow label="Duración" value={pluralize(days, 'día', 'días')} />
+            <KeyValueRow label="Precio por día" value={formatCurrencyEUR(selectedBooking.pricePerDayAtBooking)} />
+            {/* Sin comisión guardada en la reserva no se muestra un 0,00 € engañoso (Mis ingresos la estima). */}
+            {Number(selectedBooking.platformFee) > 0 ? (
+              <KeyValueRow label="Comisión de servicio" value={formatCurrencyEUR(selectedBooking.platformFee)} />
+            ) : null}
+            {isOwner ? <KeyValueRow label="Cobro al propietario" value={PAYOUT_STATUS_LABEL[selectedBooking.payoutStatus]} /> : null}
+            <KeyValueRow label="Total" value={formatCurrencyEUR(selectedBooking.totalPrice)} emphasis last />
+          </View>
+          <Text style={styles.caption}>Solicitada el {formatDateTimeMadrid(selectedBooking.createdAt)}</Text>
+        </Card>
+
+        {/* Tras cancelar ya no hay entrega que coordinar: el contacto deja de mostrarse. */}
+        {selectedBooking.ownerContactMethod && status !== 'cancelled' ? (
+          <Card variant="muted">
+            <CardHeader title="Contacto del propietario" icon="call-outline" />
+            <Text style={styles.contactValue} selectable>
+              {selectedBooking.ownerContactMethod}
+            </Text>
+          </Card>
+        ) : null}
+
+        <Card>
+          <CardHeader title="Participantes" icon="people-outline" />
+          {[
+            { id: selectedBooking.ownerId, role: 'Propietario', data: ownerProfile },
+            { id: selectedBooking.driverId, role: 'Conductor', data: driverProfile }
+          ].map((person) => {
+            const name = getDisplayName(person.data?.firstName, person.data?.lastName);
+            const isMe = person.id === authUserId;
+            return (
+              <Card
+                key={person.role}
+                variant="outlined"
+                padding={spacingTokens.md}
+                onPress={isMe ? undefined : () => handleOpenUserOverview(person.id, person.data)}
+                accessibilityLabel={`${person.role}: ${name}`}
+              >
+                <View style={styles.personRow}>
+                  <Avatar uri={resolveStoredImageUrl(person.data?.avatarUrl ?? null)} name={name} size={40} />
+                  <View style={styles.flex1}>
+                    <Text style={styles.caption}>{person.role}</Text>
+                    <Text style={styles.personName}>{isMe ? `${name} (tú)` : name}</Text>
+                  </View>
+                  {!isMe ? <Ionicons name="chevron-forward" size={18} color={colorTokens.textMuted} /> : null}
+                </View>
+              </Card>
+            );
+          })}
+        </Card>
+
+        <Card>
+          <CardHeader title="Checklists" icon="clipboard-outline" subtitle="Estado del coche en la entrega y la devolución" />
+          {detailLoading && checklists.length === 0 ? (
+            <View style={styles.skeletons}>
+              <Skeleton height={56} radius={radiusTokens.input} />
+              <Skeleton height={56} radius={radiusTokens.input} />
+            </View>
+          ) : (
+            (['check_in', 'check_out'] as BookingChecklistType[]).map((type) => {
+              const checklist = checklists.find((item) => item.type === type) ?? null;
+              const available = canOpenChecklist(type, status);
+              const imageCount = checklist ? checklistImageCount[checklist.id] : undefined;
+
+              return (
+                <View key={type} style={styles.checklistRow}>
+                  <View style={styles.checklistHead}>
+                    <Text style={styles.checklistTitle}>{CHECKLIST_LABEL[type]}</Text>
+                    <StatusChip
+                      compact
+                      label={checklist ? 'Enviado' : available ? 'Pendiente' : 'Bloqueado'}
+                      tone={checklist ? 'success' : available ? 'warning' : 'neutral'}
+                      icon={checklist ? 'checkmark' : available ? 'time-outline' : 'lock-closed-outline'}
+                    />
+                  </View>
+                  {checklist ? (
+                    <View style={styles.checklistData}>
+                      <Text style={styles.bodyText}>
+                        {checklist.mileage.toLocaleString('es-ES')} km · Combustible {checklist.fuelLevel}%
+                      </Text>
+                      {checklist.notes ? <Text style={styles.caption}>“{checklist.notes}”</Text> : null}
+                      <Text style={styles.caption}>
+                        Enviado el {formatDateTimeMadrid(checklist.createdAt)}
+                        {typeof imageCount === 'number' ? ` · ${pluralize(imageCount, 'foto', 'fotos')} privadas` : ''}
+                      </Text>
+                    </View>
+                  ) : !available ? (
+                    <Text style={styles.caption}>{getChecklistBlockReason(type, status)}</Text>
+                  ) : isDriver ? (
+                    <Button
+                      label={`Rellenar ${type === 'check_in' ? 'entrega' : 'devolución'}`}
+                      icon="create-outline"
+                      size="sm"
+                      onPress={() => openChecklistEditor(type)}
+                      disabled={!canTransact}
+                      style={styles.alignStart}
+                    />
+                  ) : (
+                    <Text style={styles.caption}>Lo rellena el conductor al {type === 'check_in' ? 'recoger' : 'devolver'} el coche.</Text>
+                  )}
+                </View>
+              );
+            })
+          )}
+        </Card>
+
+        <Card>
+          <CardHeader title="Reseña" icon="star-outline" />
+          {status !== 'completed' ? (
+            <Text style={styles.caption}>Podrás valorar a la otra parte cuando la reserva esté completada.</Text>
+          ) : myReview ? (
+            <View style={styles.reviewDone}>
+              <StarRating value={myReview.rating} size={18} />
+              <Text style={styles.caption}>Ya has enviado tu reseña. Puedes consultarla en Perfil.</Text>
+            </View>
+          ) : (
+            <Button
+              label="Escribir reseña"
+              icon="create-outline"
+              onPress={() => {
+                setReviewError(null);
+                setScreenMode('reviewComposer');
+              }}
+              disabled={!canTransact}
+              style={styles.alignStart}
+            />
+          )}
+        </Card>
+
+        {detailError ? (
+          <InlineMessage tone="error" message={detailError} actionLabel="Reintentar" onAction={() => void loadDetailData()} />
+        ) : null}
+
+        {overviewModal}
+      </Screen>
+    );
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Lista                                                                    */
+  /* ------------------------------------------------------------------------ */
+
+  const renderBookingCard = (booking: BookingItem) => {
+    const vehicle = vehicleById[booking.vehicleId];
+    const counterpartId = roleView === 'driver' ? booking.ownerId : booking.driverId;
+    const counterpart = userById[counterpartId];
+    const counterpartName = getDisplayName(counterpart?.firstName, counterpart?.lastName);
+    const needsAction =
+      (roleView === 'owner' && booking.status === 'pending') || (roleView === 'driver' && booking.status === 'accepted');
+
+    return (
+      <Card
+        key={booking.id}
+        onPress={() => openBookingDetail(booking.id)}
+        accessibilityLabel={`${getVehicleLabel(vehicle)}, ${BOOKING_STATUS_LABEL[booking.status]}`}
+        accessibilityHint="Abre el detalle de la reserva"
+      >
+        <View style={styles.bookingHead}>
+          <View style={styles.flex1}>
+            <Text style={styles.bookingTitle} numberOfLines={1}>
+              {getVehicleLabel(vehicle)}
+            </Text>
+            <Text style={styles.caption}>Reserva #{getShortId(booking.id)}</Text>
+          </View>
+          <StatusChip label={BOOKING_STATUS_LABEL[booking.status]} tone={BOOKING_STATUS_TONE[booking.status]} compact dot />
+        </View>
+        <View style={styles.metaRow}>
+          <Ionicons name="calendar-outline" size={16} color={colorTokens.textMuted} />
+          <Text style={styles.metaText}>{formatDateRangeMadrid(booking.startDatetime, booking.endDatetime)}</Text>
+        </View>
+        <View style={styles.bookingFoot}>
+          <View style={styles.counterpart}>
+            <Avatar uri={resolveStoredImageUrl(counterpart?.avatarUrl ?? null)} name={counterpartName} size={28} />
+            <Text style={styles.counterpartName} numberOfLines={1}>
+              {counterpartName}
+            </Text>
+          </View>
+          <Text style={styles.bookingPrice}>{formatCurrencyEUR(booking.totalPrice)}</Text>
+        </View>
+        {unreadByBooking[booking.id] ? (
+          <View style={styles.actionHint}>
+            <Ionicons name="chatbubbles" size={16} color={colorTokens.accent2} />
+            <Text style={styles.actionHintText}>
+              {pluralize(unreadByBooking[booking.id], 'mensaje sin leer', 'mensajes sin leer')}
+            </Text>
+          </View>
+        ) : null}
+        {needsAction ? (
+          <View style={styles.actionHint}>
+            <Ionicons name="alert-circle" size={16} color={colorTokens.accent2} />
+            <Text style={styles.actionHintText}>
+              {roleView === 'owner' ? 'Responde a la solicitud' : 'Pendiente de pago'} ·{' '}
+              {formatRelativeFromNow(booking.startDatetime)}
+            </Text>
+          </View>
+        ) : null}
+      </Card>
+    );
+  };
+
+  const showSkeletons = loading && !loaded;
+
+  return (
+    <Screen
+      {...screenProps}
+      refreshing={refreshing}
+      onRefresh={() => void handleRefresh()}
+      header={<ScreenHeader title="Mis viajes" subtitle="Tus reservas como conductor y como propietario." />}
+      stickyHeader={
+        <SegmentedControl
+          options={[
+            { value: 'driver', label: 'Conductor', icon: 'car-outline', badge: driverPendingCount || undefined },
+            { value: 'owner', label: 'Propietario', icon: 'key-outline', badge: ownerPendingCount || undefined }
+          ]}
+          value={roleView}
+          onChange={(value) => {
+            roleViewChosenRef.current = true;
+            setRoleView(value);
+          }}
+        />
+      }
+    >
+      {showSkeletons ? (
+        <>
+          <Skeleton height={84} radius={radiusTokens.card} />
+          <ListItemSkeleton />
+          <ListItemSkeleton />
+        </>
+      ) : error && allBookings.length === 0 ? (
+        <ErrorState message={error} onRetry={() => void loadBookings()} retrying={loading} />
+      ) : (
+        <>
+          {error ? (
+            <InlineMessage tone="error" message={error} actionLabel="Reintentar" onAction={() => void loadBookings()} />
+          ) : null}
+
+          {activeBookings.length > 0 ? (
+            <View style={styles.stats}>
+              <StatTile label="Activas" value={String(bookingSummary.active)} />
+              <StatTile label="Completadas" value={String(bookingSummary.completed)} />
+              <StatTile
+                label={roleView === 'owner' ? 'Ingresos' : 'Gastado'}
+                value={formatCurrencyEUR(bookingSummary.totalAmount)}
+              />
+            </View>
+          ) : null}
+
+          {upcomingBookings.length > 0 ? (
+            <View style={styles.section}>
+              <SectionTitle title="Próximas y en curso" count={upcomingBookings.length} />
+              {upcomingBookings.map(renderBookingCard)}
+            </View>
+          ) : null}
+
+          {pastBookings.length > 0 ? (
+            <View style={styles.section}>
+              <SectionTitle title="Historial" count={pastBookings.length} />
+              {pastBookings.map(renderBookingCard)}
+            </View>
+          ) : null}
+
+          {activeBookings.length === 0 && !error ? (
+            roleView === 'driver' ? (
+              <EmptyState
+                icon="car-outline"
+                title="Aún no has reservado"
+                description="Encuentra un coche cerca de ti y envía tu primera solicitud."
+                actionLabel={onNavigateToTab ? 'Explorar vehículos' : undefined}
+                onAction={onNavigateToTab ? () => onNavigateToTab('explore') : undefined}
+              />
+            ) : (
+              <EmptyState
+                icon="key-outline"
+                title="Sin solicitudes recibidas"
+                description="Cuando alguien quiera alquilar tu coche, la solicitud aparecerá aquí."
+                actionLabel={onNavigateToTab ? 'Gestionar mis vehículos' : undefined}
+                onAction={onNavigateToTab ? () => onNavigateToTab('myVehicles') : undefined}
+              />
+            )
+          ) : null}
+        </>
+      )}
+
+      {overviewModal}
+    </Screen>
+  );
+}
+
+function StatTile({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.statTile} accessible accessibilityLabel={`${label}: ${value}`}>
+      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      <Text style={styles.caption}>{label}</Text>
     </View>
   );
 }
 
-const localStyles = StyleSheet.create({
-  desktopCard: {
-    width: '100%',
-    maxWidth: 860,
-    alignSelf: 'center'
+/** Línea de tiempo del estado de la reserva (flujo feliz o cierre). */
+// Etiquetas cortas para que quepan en una línea en móviles estrechos.
+const TIMELINE_STEP_LABEL: Partial<Record<BookingStatus, string>> = {
+  paid_confirmed: 'Pagada'
+};
+
+function Timeline({ status }: { status: BookingStatus }) {
+  if (status === 'rejected' || status === 'cancelled') {
+    return (
+      <View style={styles.closedBanner}>
+        <Ionicons name={status === 'rejected' ? 'close-circle' : 'ban-outline'} size={20} color={colorTokens.alertText} />
+        <Text style={styles.closedText}>
+          {status === 'rejected' ? 'Solicitud no aceptada: el propietario la rechazó o confirmó otra reserva en esas fechas.' : 'La reserva fue cancelada.'}
+        </Text>
+      </View>
+    );
+  }
+
+  const currentIndex = BOOKING_TIMELINE.indexOf(status);
+
+  return (
+    <View style={styles.timeline} accessibilityLabel={`Estado: ${BOOKING_STATUS_LABEL[status]}`}>
+      {BOOKING_TIMELINE.map((step, index) => {
+        const done = index < currentIndex || status === 'completed';
+        const current = index === currentIndex && status !== 'completed';
+
+        return (
+          <View key={step} style={styles.timelineStep}>
+            <View style={styles.timelineTrack}>
+              <View style={[styles.timelineLine, index === 0 ? styles.hidden : null, index <= currentIndex ? styles.timelineLineDone : null]} />
+              <View style={[styles.timelineDot, done ? styles.timelineDotDone : null, current ? styles.timelineDotCurrent : null]}>
+                {done ? <Ionicons name="checkmark" size={12} color={colorTokens.white} /> : null}
+              </View>
+              <View
+                style={[
+                  styles.timelineLine,
+                  index === BOOKING_TIMELINE.length - 1 ? styles.hidden : null,
+                  index < currentIndex ? styles.timelineLineDone : null
+                ]}
+              />
+            </View>
+            <Text style={[styles.timelineLabel, current ? styles.timelineLabelCurrent : null]} numberOfLines={1}>
+              {TIMELINE_STEP_LABEL[step] ?? BOOKING_STATUS_LABEL[step]}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1
   },
-  roleButton: {
+  alignStart: {
+    alignSelf: 'flex-start'
+  },
+  hidden: {
+    opacity: 0
+  },
+  caption: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
+  },
+  bodyText: {
+    color: colorTokens.textMain,
+    ...typographyTokens.body
+  },
+  unit: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.bodyStrong
+  },
+  section: {
+    gap: spacingTokens.md
+  },
+  stats: {
+    flexDirection: 'row',
+    gap: spacingTokens.sm
+  },
+  statTile: {
     flex: 1,
+    gap: 2,
+    padding: spacingTokens.md,
+    borderRadius: radiusTokens.card,
     borderWidth: 1,
     borderColor: colorTokens.border,
-    borderRadius: radiusTokens.input,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.sm,
     backgroundColor: colorTokens.white
   },
-  roleButtonActive: {
-    backgroundColor: colorTokens.primary,
-    borderColor: colorTokens.primary
+  statValue: {
+    color: colorTokens.primary,
+    ...typographyTokens.h3
   },
-  roleButtonText: {
-    textAlign: 'center',
-    color: colorTokens.secondary,
-    ...typographyTokens.caption,
-    fontWeight: '600'
-  },
-  roleButtonTextActive: {
-    color: colorTokens.white,
-    fontWeight: '700'
-  },
-  bookingHeaderRow: {
+  bookingHead: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacingTokens.sm
+  },
+  bookingTitle: {
+    color: colorTokens.primary,
+    ...typographyTokens.h3
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.xs
+  },
+  metaText: {
+    flex: 1,
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption,
+    fontSize: 14
+  },
+  bookingFoot: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacingTokens.sm
+  },
+  counterpart: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     gap: spacingTokens.sm
   },
-  statusPill: {
+  counterpartName: {
+    flex: 1,
+    color: colorTokens.secondary,
+    ...typographyTokens.captionStrong
+  },
+  bookingPrice: {
+    color: colorTokens.primary,
+    ...typographyTokens.sectionLabel
+  },
+  messagesRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.xs
+  },
+  unreadBadge: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
     borderRadius: radiusTokens.pill,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.xs
+    backgroundColor: colorTokens.accent2,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  statusPillText: {
-    ...typographyTokens.caption,
-    fontWeight: '700'
+  unreadBadgeText: {
+    ...typographyTokens.captionStrong,
+    fontSize: 12,
+    lineHeight: 16,
+    color: colorTokens.white
   },
-  peopleSection: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.input,
-    padding: spacingTokens.md,
-    gap: spacingTokens.sm,
-    backgroundColor: colorTokens.white
+  actionHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.xs,
+    paddingTop: spacingTokens.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colorTokens.border
+  },
+  actionHintText: {
+    color: colorTokens.accent2Pressed,
+    ...typographyTokens.captionStrong
+  },
+  nextStep: {
+    color: colorTokens.secondary,
+    ...typographyTokens.body
+  },
+  actions: {
+    gap: spacingTokens.sm
+  },
+  contactValue: {
+    color: colorTokens.primary,
+    ...typographyTokens.bodyL
   },
   personRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacingTokens.sm
-  },
-  personAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colorTokens.bgLight
-  },
-  personAvatarFallback: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colorTokens.bgLight
-  },
-  personAvatarFallbackText: {
-    ...typographyTokens.caption,
-    fontWeight: '700',
-    color: colorTokens.secondary
-  },
-  personInfo: {
-    flex: 1
-  },
-  personRoleLabel: {
-    ...typographyTokens.caption,
-    color: colorTokens.textMuted
+    gap: spacingTokens.md
   },
   personName: {
-    ...typographyTokens.body,
-    fontWeight: '700',
-    color: colorTokens.primary
+    color: colorTokens.primary,
+    ...typographyTokens.bodyStrong
   },
-  checklistSummaryCard: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.input,
-    padding: spacingTokens.md,
-    gap: spacingTokens.sm,
-    backgroundColor: colorTokens.white
-  },
-  imageEvidenceCard: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.input,
-    padding: spacingTokens.sm,
-    gap: spacingTokens.sm,
-    marginTop: spacingTokens.sm,
-    backgroundColor: colorTokens.white
-  },
-  imageEvidenceGrid: {
-    width: '100%',
+  skeletons: {
     gap: spacingTokens.sm
   },
-  imageEvidenceGridDesktop: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between'
-  },
-  imageEvidenceCardDesktop: {
-    width: '49%'
-  },
-  imageEvidence: {
-    width: '100%',
-    height: 180,
-    borderRadius: radiusTokens.input,
-    backgroundColor: colorTokens.bgLight
-  },
-  imageEvidenceFallback: {
-    width: '100%',
-    height: 120,
-    borderRadius: radiusTokens.input,
-    backgroundColor: colorTokens.bgLight,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  actionButton: {
-    minHeight: 46,
-    paddingHorizontal: spacingTokens.lg,
-    paddingVertical: spacingTokens.sm,
+  checklistRow: {
+    gap: spacingTokens.sm,
+    padding: spacingTokens.md,
     borderRadius: radiusTokens.input,
     borderWidth: 1,
-    borderColor: colorTokens.primary,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  actionButtonPrimary: {
-    backgroundColor: colorTokens.primary,
-    borderColor: colorTokens.primary
-  },
-  actionButtonGhost: {
-    backgroundColor: colorTokens.white,
     borderColor: colorTokens.border
   },
-  actionButtonDanger: {
-    backgroundColor: colorTokens.alert,
-    borderColor: colorTokens.alert
+  checklistHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacingTokens.sm
   },
-  actionButtonDisabled: {
-    opacity: 0.6
+  checklistTitle: {
+    flex: 1,
+    color: colorTokens.primary,
+    ...typographyTokens.bodyStrong
   },
-  actionButtonText: {
-    ...typographyTokens.caption,
-    fontWeight: '700',
-    color: colorTokens.white,
-    textAlign: 'center'
+  checklistData: {
+    gap: 2
   },
-  actionButtonGhostText: {
-    color: colorTokens.secondary
+  reviewDone: {
+    gap: spacingTokens.xs
   },
-  actionButtonDangerText: {
-    color: colorTokens.white
+  reviewTarget: {
+    alignItems: 'center',
+    gap: spacingTokens.xs
   },
-  feedbackBanner: {
-    width: '100%',
-    marginTop: spacingTokens.sm,
-    alignItems: 'flex-start'
+  reviewTargetName: {
+    color: colorTokens.primary,
+    ...typographyTokens.h3
   },
-  feedbackBannerDesktop: {
-    alignItems: 'center'
+  fuelBlock: {
+    gap: spacingTokens.sm
   },
-  feedbackBannerText: {
-    textAlign: 'center'
+  presetRow: {
+    flexDirection: 'row',
+    gap: spacingTokens.xs
   },
-  starsRow: {
+  presetButton: {
+    flex: 1,
+    paddingHorizontal: 0
+  },
+  closedBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacingTokens.sm,
-    marginBottom: spacingTokens.sm
-  },
-  starButton: {
-    width: 42,
-    height: 42,
+    padding: spacingTokens.md,
     borderRadius: radiusTokens.input,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
+    backgroundColor: colorTokens.alertSoft
+  },
+  closedText: {
+    flex: 1,
+    color: colorTokens.alertText,
+    ...typographyTokens.bodyStrong
+  },
+  timeline: {
+    flexDirection: 'row'
+  },
+  actionWithHint: {
+    gap: spacingTokens.xs
+  },
+  timelineStep: {
+    flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colorTokens.white
+    gap: 6
   },
-  starButtonActive: {
-    borderColor: '#f4b400',
-    backgroundColor: '#fff7dc'
+  timelineTrack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'stretch'
   },
-  starButtonText: {
-    fontSize: 22,
-    color: '#9aa0a6'
+  timelineLine: {
+    flex: 1,
+    height: 2,
+    backgroundColor: colorTokens.border
   },
-  starButtonTextActive: {
-    color: '#f4b400'
+  timelineLineDone: {
+    backgroundColor: colorTokens.success
+  },
+  timelineDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colorTokens.borderStrong,
+    backgroundColor: colorTokens.white,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  timelineDotDone: {
+    borderColor: colorTokens.success,
+    backgroundColor: colorTokens.success
+  },
+  timelineDotCurrent: {
+    borderColor: colorTokens.accent2,
+    borderWidth: 6
+  },
+  timelineLabel: {
+    // Ancho fijo centrado mayor que la columna para que "Completada" quepa en una línea.
+    width: 84,
+    minWidth: 84,
+    flexShrink: 0,
+    alignSelf: 'center',
+    textAlign: 'center',
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption,
+    fontSize: 11,
+    lineHeight: 14
+  },
+  timelineLabelCurrent: {
+    color: colorTokens.primary,
+    ...typographyTokens.captionStrong,
+    fontSize: 11,
+    lineHeight: 14
   }
 });

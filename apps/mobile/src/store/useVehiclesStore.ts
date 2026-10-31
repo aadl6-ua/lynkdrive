@@ -1,183 +1,168 @@
+import type {
+  CreateVehicleRequest,
+  UpdateVehicleRequest,
+  VehicleResponse,
+  VehicleSearchFilters
+} from '@lynkdrive/shared';
 import { create } from 'zustand';
 import { httpClient } from '../api/http';
+import { getApiErrorMessage } from '../shared/errors';
 
-interface VehicleItem {
-  id: string;
-  ownerId: string;
-  brand: string;
-  model: string;
-  year: number;
-  licensePlate: string;
-  description: string;
-  pricePerDay: number;
-  locationLat: number;
-  locationLng: number;
-  locationAddress: string;
-  fuelType: 'gasoline' | 'diesel' | 'electric' | 'hybrid' | null;
-  transmission: 'manual' | 'automatic' | null;
-  seats: number | null;
-  status: 'active' | 'inactive';
-  createdAt: string;
-}
+export type VehicleItem = VehicleResponse;
 
-interface VehicleFilters {
-  maxPrice?: number;
-  fuelType?: 'gasoline' | 'diesel' | 'electric' | 'hybrid';
-  transmission?: 'manual' | 'automatic';
-  seats?: number;
-  status?: 'active' | 'inactive';
-  lat?: number;
-  lng?: number;
-  radiusKm?: number;
-}
+type VehicleFilters = VehicleSearchFilters;
 
-interface CreateVehicleInput {
-  brand: string;
-  model: string;
-  year: number;
-  licensePlate: string;
-  description: string;
-  pricePerDay: number;
-  locationLat: number;
-  locationLng: number;
-  locationAddress: string;
-  fuelType: 'gasoline' | 'diesel' | 'electric' | 'hybrid' | null;
-  transmission: 'manual' | 'automatic' | null;
-  seats: number | null;
-  status: 'active' | 'inactive';
-}
+/** El formulario envía siempre todos los campos (null si no se informan). */
+type CreateVehicleInput = Required<CreateVehicleRequest>;
 
-interface UpdateVehicleInput {
-  brand: string;
-  model: string;
-  year: number;
-  licensePlate: string;
-  description: string;
-  pricePerDay: number;
-  locationLat: number;
-  locationLng: number;
-  locationAddress: string;
-  fuelType: 'gasoline' | 'diesel' | 'electric' | 'hybrid' | null;
-  transmission: 'manual' | 'automatic' | null;
-  seats: number | null;
-  status: 'active' | 'inactive';
-}
+type UpdateVehicleInput = Required<UpdateVehicleRequest>;
 
 interface VehiclesState {
+  /** Resultados de Explorar (vehículos de otros usuarios). */
   items: VehicleItem[];
   loading: boolean;
-  creating: boolean;
   error: string | null;
+  /** Vehículos del usuario autenticado (Mis Vehículos). Estado separado para no mezclar listados. */
+  myItems: VehicleItem[];
+  myLoading: boolean;
+  myError: string | null;
+  myLoaded: boolean;
+  creating: boolean;
   mutationMessage: string | null;
   fetchVehicles: (filters?: VehicleFilters) => Promise<void>;
   fetchMyVehicles: () => Promise<void>;
-  createVehicle: (payload: CreateVehicleInput) => Promise<void>;
-  updateVehicleById: (vehicleId: string, payload: UpdateVehicleInput) => Promise<void>;
-  deleteVehicleById: (vehicleId: string) => Promise<void>;
+  createVehicle: (payload: CreateVehicleInput) => Promise<boolean>;
+  updateVehicleById: (vehicleId: string, payload: UpdateVehicleInput) => Promise<boolean>;
+  deleteVehicleById: (vehicleId: string) => Promise<boolean>;
+  reset: () => void;
 }
 
-export const useVehiclesStore = create<VehiclesState>((set) => ({
-  items: [],
+const initialState = {
+  items: [] as VehicleItem[],
   loading: false,
+  error: null as string | null,
+  myItems: [] as VehicleItem[],
+  myLoading: false,
+  myError: null as string | null,
+  myLoaded: false,
   creating: false,
-  error: null,
-  mutationMessage: null,
+  mutationMessage: null as string | null
+};
+
+let exploreRequestSeq = 0;
+
+export const useVehiclesStore = create<VehiclesState>((set) => ({
+  ...initialState,
   fetchVehicles: async (filters) => {
-    set({ loading: true, error: null, mutationMessage: null });
+    const requestId = ++exploreRequestSeq;
+    set({ loading: true, error: null });
 
     try {
       const response = await httpClient.get<VehicleItem[]>('/vehicles', {
         params: filters
       });
-      set({ items: response.data, loading: false });
-    } catch {
-      set({
-        loading: false,
-        error: 'No se pudieron cargar vehículos. Revisa backend y datos en DB.'
-      });
+
+      // Ignora respuestas antiguas si el usuario cambió filtros rápido.
+      if (requestId === exploreRequestSeq) {
+        set({ items: response.data, loading: false });
+      }
+    } catch (error: unknown) {
+      if (requestId === exploreRequestSeq) {
+        set({
+          loading: false,
+          error: getApiErrorMessage(error, 'No se pudieron cargar los vehículos.')
+        });
+      }
     }
   },
   fetchMyVehicles: async () => {
-    set({ loading: true, error: null, mutationMessage: null });
+    set({ myLoading: true, myError: null });
 
     try {
       const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
-      set({ items: response.data, loading: false });
-    } catch {
+      set({ myItems: response.data, myLoading: false, myLoaded: true });
+    } catch (error: unknown) {
       set({
-        loading: false,
-        error: 'No se pudieron cargar tus vehiculos. Inicia sesion para continuar.'
+        myLoading: false,
+        myError: getApiErrorMessage(error, 'No se pudieron cargar tus vehículos.')
       });
     }
   },
   createVehicle: async (payload: CreateVehicleInput) => {
-
-    set({ creating: true, error: null, mutationMessage: null });
+    set({ creating: true, mutationMessage: null });
 
     try {
       await httpClient.post('/vehicles', payload);
 
       const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
       set({
-        items: response.data,
-        creating: false,
-        mutationMessage: 'Vehiculo creado correctamente.'
+        myItems: response.data,
+        myLoaded: true,
+        creating: false
       });
-    } catch {
+      return true;
+    } catch (error: unknown) {
       set({
         creating: false,
-        mutationMessage: 'No se pudo crear el vehiculo.'
+        mutationMessage: getApiErrorMessage(error, 'No se pudo crear el vehículo.')
       });
+      return false;
     }
   },
   updateVehicleById: async (vehicleId: string, payload: UpdateVehicleInput) => {
     if (!vehicleId) {
       set({ mutationMessage: 'No hay vehículo seleccionado para actualizar.' });
 
-      return;
+      return false;
     }
 
-    set({ creating: true, error: null, mutationMessage: null });
+    set({ creating: true, mutationMessage: null });
 
     try {
       await httpClient.put(`/vehicles/${vehicleId}`, payload);
 
       const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
       set({
-        items: response.data,
-        creating: false,
-        mutationMessage: 'Vehiculo actualizado correctamente.'
+        myItems: response.data,
+        creating: false
       });
-    } catch {
+      return true;
+    } catch (error: unknown) {
       set({
         creating: false,
-        mutationMessage: 'No se pudo actualizar el vehículo.'
+        mutationMessage: getApiErrorMessage(error, 'No se pudo actualizar el vehículo.')
       });
+      return false;
     }
   },
   deleteVehicleById: async (vehicleId: string) => {
     if (!vehicleId) {
       set({ mutationMessage: 'No hay vehículo seleccionado para eliminar.' });
 
-      return;
+      return false;
     }
 
-    set({ creating: true, error: null, mutationMessage: null });
+    set({ creating: true, mutationMessage: null });
 
     try {
       await httpClient.delete(`/vehicles/${vehicleId}`);
 
       const response = await httpClient.get<VehicleItem[]>('/vehicles/mine/list');
       set({
-        items: response.data,
-        creating: false,
-        mutationMessage: 'Vehiculo eliminado correctamente.'
+        myItems: response.data,
+        creating: false
       });
-    } catch {
+      return true;
+    } catch (error: unknown) {
       set({
         creating: false,
-        mutationMessage: 'No se pudo eliminar el vehículo.'
+        mutationMessage: getApiErrorMessage(
+          error,
+          'No se pudo eliminar el vehículo. Si tiene reservas asociadas no puede borrarse.'
+        )
       });
+      return false;
     }
-  }
+  },
+  reset: () => set({ ...initialState })
 }));

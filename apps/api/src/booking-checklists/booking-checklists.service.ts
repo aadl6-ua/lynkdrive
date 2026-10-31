@@ -8,14 +8,29 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { BookingChecklistResponseDto } from './dto/booking-checklist-response.dto';
-import { CreateBookingChecklistDto } from './dto/create-booking-checklist.dto';
+import { ChecklistType, CreateBookingChecklistDto } from './dto/create-booking-checklist.dto';
 import { UpdateBookingChecklistDto } from './dto/update-booking-checklist.dto';
 import { BookingChecklistEntity } from './entities/booking-checklist.entity';
+
+type BookingStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'paid_confirmed'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled';
 
 type BookingAccessRow = {
   booking_id: string;
   owner_id: string;
   driver_id: string;
+  status: BookingStatus;
+};
+
+const CHECKLIST_ALLOWED_STATUSES: Record<ChecklistType, BookingStatus[]> = {
+  check_in: ['paid_confirmed', 'in_progress', 'completed'],
+  check_out: ['in_progress', 'completed']
 };
 
 @Injectable()
@@ -56,7 +71,8 @@ export class BookingChecklistsService {
     userId: string,
     createBookingChecklistDto: CreateBookingChecklistDto
   ): Promise<BookingChecklistResponseDto> {
-    await this.ensureBookingParticipant(createBookingChecklistDto.bookingId, userId);
+    const booking = await this.ensureBookingParticipant(createBookingChecklistDto.bookingId, userId);
+    this.validateChecklistPhase(createBookingChecklistDto.type, booking.status);
     this.validateFuelLevel(createBookingChecklistDto.fuelLevel);
 
     const checklistToSave = this.bookingChecklistsRepository.create({
@@ -78,7 +94,7 @@ export class BookingChecklistsService {
         error.driverError !== null &&
         (error.driverError as { code?: string }).code === '23505'
       ) {
-        throw new ConflictException('Checklist for this booking and type already exists');
+        throw new ConflictException('Ya se ha enviado este checklist para la reserva');
       }
 
       throw error;
@@ -97,6 +113,7 @@ export class BookingChecklistsService {
     }
 
     await this.ensureBookingParticipant(existing.bookingId, userId);
+    this.ensureSubmitter(existing.submittedBy, userId);
 
     const nextFuelLevel =
       typeof updateBookingChecklistDto.fuelLevel === 'number'
@@ -129,13 +146,20 @@ export class BookingChecklistsService {
     }
 
     await this.ensureBookingParticipant(existing.bookingId, userId);
+    this.ensureSubmitter(existing.submittedBy, userId);
     await this.bookingChecklistsRepository.delete({ id });
   }
 
-  private async ensureBookingParticipant(bookingId: string, userId: string): Promise<void> {
+  private ensureSubmitter(submittedBy: string, userId: string): void {
+    if (submittedBy !== userId) {
+      throw new ForbiddenException('Only the user who submitted this checklist can modify it');
+    }
+  }
+
+  private async ensureBookingParticipant(bookingId: string, userId: string): Promise<BookingAccessRow> {
     const rows = await this.bookingChecklistsRepository.query(
       `
-        SELECT b.id AS booking_id, v.owner_id, b.driver_id
+        SELECT b.id AS booking_id, v.owner_id, b.driver_id, b.status
         FROM bookings b
         INNER JOIN vehicles v ON v.id = b.vehicle_id
         WHERE b.id = $1
@@ -152,6 +176,20 @@ export class BookingChecklistsService {
 
     if (booking.owner_id !== userId && booking.driver_id !== userId) {
       throw new ForbiddenException('You do not have access to this booking');
+    }
+
+    return booking;
+  }
+
+  private validateChecklistPhase(type: ChecklistType, status: BookingStatus): void {
+    const allowedStatuses = CHECKLIST_ALLOWED_STATUSES[type];
+
+    if (!allowedStatuses) {
+      throw new BadRequestException('type must be check_in or check_out');
+    }
+
+    if (!allowedStatuses.includes(status)) {
+      throw new BadRequestException(`Este checklist no se puede enviar con la reserva en estado ${status}`);
     }
   }
 

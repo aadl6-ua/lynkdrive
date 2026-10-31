@@ -23,13 +23,15 @@ login_and_get_token() {
   local password="$2"
 
   local response
-  response="$(curl -sS "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+  # El cuerpo va por stdin para que la contrasena no aparezca en la lista de procesos.
+  response="$(EMAIL="$email" PASSWORD="$password" node -e "process.stdout.write(JSON.stringify({email:process.env.EMAIL,password:process.env.PASSWORD}))" \
+    | curl -sS "$SUPABASE_URL/auth/v1/token?grant_type=password" \
     -H "apikey: $SUPABASE_ANON_KEY" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$email\",\"password\":\"$password\"}")"
+    --data-binary @-)"
 
   local token
-  token="$(printf '%s' "$response" | node -e "const fs=require('fs');const raw=fs.readFileSync(0,'utf8');const j=JSON.parse(raw);if(!j.access_token){process.stderr.write(raw+'\\n');process.exit(1);}process.stdout.write(j.access_token);")"
+  token="$(printf '%s' "$response" | node -e "const fs=require('fs');const raw=fs.readFileSync(0,'utf8');const j=JSON.parse(raw);if(!j.access_token){process.stderr.write('Login fallido: '+(j.error_description||j.msg||j.error||'respuesta sin access_token')+'\\n');process.exit(1);}process.stdout.write(j.access_token);")"
 
   printf '%s' "$token"
 }

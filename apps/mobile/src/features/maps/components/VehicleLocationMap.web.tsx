@@ -30,7 +30,7 @@ export function VehicleLocationMap({ vehicleLocation, userLocation, height = 260
   if (!hasVehicleCoords) {
     return (
       <View style={[styles.fallback, { height }]}>
-        <Text style={styles.fallbackText}>No se pudo renderizar el mapa por coordenadas invalidas del vehiculo.</Text>
+        <Text style={styles.fallbackText}>No se puede mostrar el mapa: la ubicación del vehículo no es válida.</Text>
       </View>
     );
   }

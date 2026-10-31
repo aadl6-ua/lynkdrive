@@ -27,3 +27,6 @@ pnpm-debug.log*
 !**/.env.example
 
 agents.md
+
+*.tsbuildinfo
+e2e-web-output/

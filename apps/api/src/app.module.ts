@@ -1,11 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AdminModule } from './admin/admin.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { BookingsModule } from './bookings/bookings.module';
+import { BookingMessagesModule } from './booking-messages/booking-messages.module';
 import { BookingChecklistsModule } from './booking-checklists/booking-checklists.module';
 import { ChecklistImagesModule } from './checklist-images/checklist-images.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -16,6 +20,9 @@ import { VehicleImagesModule } from './vehicle-images/vehicle-images.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { EarningsModule } from './earnings/earnings.module';
+import { PushNotificationsModule } from './push-notifications/push-notifications.module';
 
 @Module({
   imports: [
@@ -23,6 +30,12 @@ import { GeocodingModule } from './geocoding/geocoding.module';
       isGlobal: true,
       envFilePath: '.env'
     }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60_000,
+        limit: Number(process.env.RATE_LIMIT_PER_MINUTE) || 300
+      }
+    ]),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
@@ -42,10 +55,13 @@ import { GeocodingModule } from './geocoding/geocoding.module';
         };
       }
     }),
+    NotificationsModule,
+    PushNotificationsModule,
     UsersModule,
     AuthModule,
     BookingsModule,
     BookingChecklistsModule,
+    BookingMessagesModule,
     ChecklistImagesModule,
     PaymentsModule,
     ReviewsModule,
@@ -53,9 +69,11 @@ import { GeocodingModule } from './geocoding/geocoding.module';
     VehicleImagesModule,
     VehiclesModule,
     UploadsModule,
-    GeocodingModule
+    GeocodingModule,
+    AdminModule,
+    EarningsModule
   ],
   controllers: [AppController],
-  providers: [AppService]
+  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }]
 })
 export class AppModule {}

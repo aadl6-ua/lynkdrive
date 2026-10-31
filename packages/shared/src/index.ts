@@ -1,26 +1,14 @@
-export type FuelType = 'gasoline' | 'diesel' | 'electric' | 'hybrid';
-export type Transmission = 'manual' | 'automatic';
-
-export type BookingStatus =
-  | 'pending'
-  | 'accepted'
-  | 'rejected'
-  | 'paid_confirmed'
-  | 'in_progress'
-  | 'completed'
-  | 'cancelled';
-
-export interface CreateVehicleDto {
-  brand: string;
-  model: string;
-  year: number;
-  licensePlate: string;
-  description: string;
-  pricePerDay: number;
-  locationLat: number;
-  locationLng: number;
-  locationAddress: string;
-  fuelType?: FuelType;
-  transmission?: Transmission;
-  seats?: number;
-}
+/**
+ * Contratos compartidos entre la API (NestJS) y la app (Expo).
+ * Reflejan el JSON que expone la API; la validación sigue en los DTOs de Nest.
+ */
+export * from './common';
+export * from './vehicles';
+export * from './bookings';
+export * from './checklists';
+export * from './reviews';
+export * from './users';
+export * from './payments';
+export * from './uploads';
+export * from './geocoding';
+export * from './messages';

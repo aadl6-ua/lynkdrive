@@ -3,11 +3,16 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
-  NotFoundException
+  NotFoundException,
+  Optional
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { EntityManager, IsNull, QueryFailedError, Repository } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
+import { HANDOVER_BUFFER_HOURS } from '../common/booking-rules';
+import { BookingEmailEvent, BookingNotificationsService } from '../notifications/booking-notifications.service';
+import { PaymentsService } from '../payments/payments.service';
+import { BookingPushEvent, PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { UserEntity } from '../users/entities/user.entity';
 import { VehicleAvailabilityWindowEntity } from '../vehicle-availability-windows/entities/vehicle-availability-window.entity';
 import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
@@ -15,6 +20,15 @@ import { BookingResponseDto } from './dto/booking-response.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingStatus, UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { BookingEntity } from './entities/booking.entity';
+
+// Colchon operativo (entrega/recogida) que cada reserva bloquea tras su fin real.
+// Debe coincidir con public.booking_blocked_range (migracion 202610310000_bookings_no_overlap_constraint).
+export { HANDOVER_BUFFER_HOURS };
+
+// SQLSTATE de violacion de restriccion EXCLUDE (excl_bookings_no_overlap).
+const EXCLUSION_VIOLATION = '23P01';
+
+const BLOCKING_STATUSES_SQL = `'accepted', 'paid_confirmed', 'in_progress', 'completed'`;
 
 type BookingRow = {
   id: string;
@@ -35,6 +49,16 @@ type BookingRow = {
   updated_at: Date;
 };
 
+type VehicleBookingSlotDto = Pick<
+  BookingResponseDto,
+  'id' | 'vehicleId' | 'startDatetime' | 'endDatetime' | 'status'
+>;
+
+// Estados que generan email al cambiar por PUT /status (accepted y paid_confirmed se notifican aparte).
+const EMAIL_EVENTS: BookingEmailEvent[] = ['rejected', 'paid_confirmed', 'completed', 'cancelled'];
+// Estados que generan push al cambiar por PUT /status (accepted se notifica aparte).
+const PUSH_EVENTS: BookingPushEvent[] = ['rejected', 'paid_confirmed', 'in_progress', 'completed', 'cancelled'];
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -45,7 +69,10 @@ export class BookingsService {
     @InjectRepository(UserEntity)
     private readonly usersRepository: Repository<UserEntity>,
     @InjectRepository(VehicleAvailabilityWindowEntity)
-    private readonly availabilityRepository: Repository<VehicleAvailabilityWindowEntity>
+    private readonly availabilityRepository: Repository<VehicleAvailabilityWindowEntity>,
+    private readonly paymentsService: PaymentsService,
+    @Optional() private readonly notifications?: BookingNotificationsService,
+    @Optional() private readonly push?: PushNotificationsService
   ) {}
 
   async findMineAsDriver(userId: string): Promise<BookingResponseDto[]> {
@@ -143,6 +170,26 @@ export class BookingsService {
     return rows.map((row: BookingRow) => this.toResponseDto(row));
   }
 
+  // Terceros solo ven la ocupacion (fechas y estado); el detalle completo queda para los participantes.
+  async findByVehicleIdForUser(
+    vehicleId: string,
+    userId: string
+  ): Promise<Array<BookingResponseDto | VehicleBookingSlotDto>> {
+    const bookings = await this.findByVehicleId(vehicleId);
+
+    return bookings.map((booking) =>
+      booking.ownerId === userId || booking.driverId === userId
+        ? booking
+        : {
+            id: booking.id,
+            vehicleId: booking.vehicleId,
+            startDatetime: booking.startDatetime,
+            endDatetime: booking.endDatetime,
+            status: booking.status
+          }
+    );
+  }
+
   async findByIdForUser(id: string, userId: string): Promise<BookingResponseDto> {
     const row = await this.findBookingRowById(id);
 
@@ -158,7 +205,7 @@ export class BookingsService {
   }
 
   async createForDriver(driverId: string, createBookingDto: CreateBookingDto): Promise<BookingResponseDto> {
-    await this.ensureUserExists(driverId);
+    await this.ensureVerifiedDriver(driverId);
 
     const startDatetime = this.parseDateOrThrow(createBookingDto.startDatetime, 'startDatetime');
     const endDatetime = this.parseDateOrThrow(createBookingDto.endDatetime, 'endDatetime');
@@ -167,15 +214,19 @@ export class BookingsService {
 
     const vehicle = await this.vehiclesRepository.findOne({
       where: { id: createBookingDto.vehicleId, deletedAt: IsNull() },
-      select: { id: true, ownerId: true, pricePerDay: true }
+      select: { id: true, ownerId: true, pricePerDay: true, status: true }
     });
 
     if (!vehicle) {
       throw new NotFoundException(`Vehicle ${createBookingDto.vehicleId} not found`);
     }
 
+    if (vehicle.status !== 'active') {
+      throw new BadRequestException('Este vehículo no admite reservas ahora mismo');
+    }
+
     if (vehicle.ownerId === driverId) {
-      throw new BadRequestException('Owner cannot create a booking for their own vehicle');
+      throw new BadRequestException('No puedes reservar tu propio vehículo');
     }
 
     await this.ensureInsideAvailabilityWindow(vehicle.id, startDatetime, endDatetime);
@@ -211,6 +262,9 @@ export class BookingsService {
       throw new ConflictException('Booking could not be created');
     }
 
+    this.notifications?.notify('requested', createdId);
+    this.push?.notify('requested', createdId);
+
     return this.findByIdForUser(createdId, driverId);
   }
 
@@ -245,9 +299,47 @@ export class BookingsService {
       throw new BadRequestException('ownerContactMethod is required when accepting a booking');
     }
 
+    if (role === 'driver' && updateStatusDto.status === 'paid_confirmed' && this.paymentsService.isStripeMode()) {
+      // Con Stripe activo el pago solo se confirma vía /payments (webhook o confirm verificado).
+      throw new BadRequestException('Payment must be completed through Stripe (/payments) in stripe mode');
+    }
+
+    // Máquina de estados: el viaje empieza tras el check-in y termina tras el check-out.
+    const requiredChecklist =
+      updateStatusDto.status === 'in_progress' ? 'check_in' : updateStatusDto.status === 'completed' ? 'check_out' : null;
+
+    if (requiredChecklist) {
+      const checklistRows = await this.bookingsRepository.query(
+        `SELECT 1 FROM booking_checklists WHERE booking_id = $1 AND type = $2 LIMIT 1`,
+        [id, requiredChecklist]
+      );
+
+      if (!checklistRows[0]) {
+        throw new BadRequestException(
+          requiredChecklist === 'check_in'
+            ? 'Falta el checklist de entrega (check-in) para iniciar el viaje'
+            : 'Falta el checklist de devolución (check-out) para completar el viaje'
+        );
+      }
+    }
+
+    if (updateStatusDto.status === 'cancelled' && row.status === 'paid_confirmed') {
+      // Reembolso antes de cancelar: si Stripe falla, la reserva no se cancela.
+      await this.paymentsService.refundBookingOnCancellation(id, role);
+    }
+
     const nextOwnerContactMethod = shouldSetOwnerContact
       ? updateStatusDto.ownerContactMethod
       : row.owner_contact_method;
+
+    if (role === 'owner' && updateStatusDto.status === 'accepted') {
+      const autoRejectedIds = await this.acceptAtomically(row, nextOwnerContactMethod ?? null);
+      this.notifications?.notify('accepted', id);
+      autoRejectedIds.forEach((rejectedId) => this.notifications?.notify('rejected', rejectedId));
+      this.push?.notify('accepted', id);
+      autoRejectedIds.forEach((rejectedId) => this.push?.notify('rejected', rejectedId));
+      return this.findByIdForUser(id, user.sub);
+    }
 
     await this.bookingsRepository.query(
       `
@@ -261,7 +353,95 @@ export class BookingsService {
       [updateStatusDto.status, nextOwnerContactMethod ?? null, id]
     );
 
+    if (EMAIL_EVENTS.includes(updateStatusDto.status as BookingEmailEvent)) {
+      this.notifications?.notify(updateStatusDto.status as BookingEmailEvent, id, user.sub);
+    }
+
+    if (PUSH_EVENTS.includes(updateStatusDto.status as BookingPushEvent)) {
+      this.push?.notify(updateStatusDto.status as BookingPushEvent, id, user.sub);
+    }
+
     return this.findByIdForUser(id, user.sub);
+  }
+
+  // Acepta una solicitud y rechaza las pending solapadas del mismo vehiculo en una unica transaccion.
+  // Se bloquea la fila del vehiculo para serializar aceptaciones concurrentes sobre el mismo coche.
+  private async acceptAtomically(row: BookingRow, ownerContactMethod: string | null): Promise<string[]> {
+    try {
+      return await this.acceptInTransaction(row, ownerContactMethod);
+    } catch (error) {
+      // Ultima barrera: la restriccion de BD detecta un solape que la comprobacion previa no vio.
+      if (
+        error instanceof QueryFailedError &&
+        typeof error.driverError === 'object' &&
+        error.driverError !== null &&
+        (error.driverError as { code?: string }).code === EXCLUSION_VIOLATION
+      ) {
+        throw new ConflictException(
+          `Ya hay una reserva que se solapa con esas fechas (incluido el margen de ${HANDOVER_BUFFER_HOURS} h para la entrega)`
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  // Devuelve los ids de las solicitudes pending rechazadas automáticamente.
+  private async acceptInTransaction(row: BookingRow, ownerContactMethod: string | null): Promise<string[]> {
+    return this.bookingsRepository.manager.transaction(async (manager: EntityManager) => {
+      await manager.query(`SELECT id FROM vehicles WHERE id = $1 FOR UPDATE`, [row.vehicle_id]);
+
+      const locked = await manager.query(
+        `SELECT status, start_datetime, end_datetime FROM bookings WHERE id = $1 FOR UPDATE`,
+        [row.id]
+      );
+      const current = locked[0] as Pick<BookingRow, 'status' | 'start_datetime' | 'end_datetime'> | undefined;
+
+      if (!current || current.status !== 'pending') {
+        throw new ConflictException('La solicitud ya no está pendiente');
+      }
+
+      await this.ensureNoConflicts(
+        row.vehicle_id,
+        new Date(current.start_datetime),
+        new Date(current.end_datetime),
+        row.id,
+        manager
+      );
+
+      await manager.query(
+        `
+          UPDATE bookings
+          SET status = 'accepted', owner_contact_method = $2, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `,
+        [row.id, ownerContactMethod]
+      );
+
+      const rejected = await manager.query(
+        `
+          UPDATE bookings
+          SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
+          WHERE vehicle_id = $1
+            AND id <> $2
+            AND status = 'pending'
+            AND start_datetime < $4::timestamptz + make_interval(hours => $5)
+            AND end_datetime + make_interval(hours => $5) > $3::timestamptz
+          RETURNING id
+        `,
+        [
+          row.vehicle_id,
+          row.id,
+          new Date(current.start_datetime).toISOString(),
+          new Date(current.end_datetime).toISOString(),
+          HANDOVER_BUFFER_HOURS
+        ]
+      );
+
+      // UPDATE ... RETURNING con query() devuelve [filas, recuento] en pg.
+      const rejectedRows = (Array.isArray(rejected?.[0]) ? rejected[0] : rejected) as Array<{ id: string }> | undefined;
+      return (rejectedRows ?? []).map((item) => item.id).filter(Boolean);
+    });
   }
 
   private async findBookingRowById(id: string): Promise<BookingRow | null> {
@@ -295,14 +475,19 @@ export class BookingsService {
     return (rows[0] as BookingRow | undefined) ?? null;
   }
 
-  private async ensureUserExists(userId: string): Promise<void> {
+  // La app ya bloquea la solicitud sin verificación; aquí se aplica la misma regla en servidor.
+  private async ensureVerifiedDriver(userId: string): Promise<void> {
     const user = await this.usersRepository.findOne({
       where: { id: userId, deletedAt: IsNull() },
-      select: { id: true }
+      select: { id: true, isVerified: true }
     });
 
     if (!user) {
       throw new NotFoundException(`User ${userId} not found`);
+    }
+
+    if (!user.isVerified) {
+      throw new ForbiddenException('Tu documentación debe estar verificada para solicitar reservas');
     }
   }
 
@@ -330,26 +515,43 @@ export class BookingsService {
       .getOne();
 
     if (!matchingWindow) {
-      throw new BadRequestException('Requested range is outside vehicle availability windows');
+      throw new BadRequestException('Las fechas elegidas no están dentro de la disponibilidad del vehículo');
     }
   }
 
-  private async ensureNoConflicts(vehicleId: string, startDatetime: Date, endDatetime: Date): Promise<void> {
-    const rows = await this.bookingsRepository.query(
+  // Dos reservas chocan si [inicio, fin + colchon] de una se solapa con [inicio, fin + colchon] de la otra.
+  private async ensureNoConflicts(
+    vehicleId: string,
+    startDatetime: Date,
+    endDatetime: Date,
+    excludeBookingId?: string,
+    manager?: EntityManager
+  ): Promise<void> {
+    const runner = manager ?? this.bookingsRepository;
+    const rows = await runner.query(
       `
         SELECT id
         FROM bookings
         WHERE vehicle_id = $1
-          AND status IN ('accepted', 'paid_confirmed', 'in_progress', 'completed')
-          AND start_datetime < $3
-          AND end_datetime > $2
+          AND status IN (${BLOCKING_STATUSES_SQL})
+          AND ($4::uuid IS NULL OR id <> $4::uuid)
+          AND start_datetime < $3::timestamptz + make_interval(hours => $5)
+          AND end_datetime + make_interval(hours => $5) > $2::timestamptz
         LIMIT 1
       `,
-      [vehicleId, startDatetime.toISOString(), endDatetime.toISOString()]
+      [
+        vehicleId,
+        startDatetime.toISOString(),
+        endDatetime.toISOString(),
+        excludeBookingId ?? null,
+        HANDOVER_BUFFER_HOURS
+      ]
     );
 
     if (rows[0]?.id) {
-      throw new ConflictException('There is already a booking that overlaps with the requested range');
+      throw new ConflictException(
+        `Esas fechas chocan con otra reserva confirmada (incluidas las ${HANDOVER_BUFFER_HOURS} h de entrega y recogida)`
+      );
     }
   }
 
@@ -398,7 +600,7 @@ export class BookingsService {
 
       if (!allowedOwnerTransitions[currentStatus].includes(nextStatus)) {
         throw new BadRequestException(
-          `Invalid status transition for owner: ${currentStatus} -> ${nextStatus}`
+          `La reserva no puede pasar de ${currentStatus} a ${nextStatus}`
         );
       }
     }
@@ -416,7 +618,7 @@ export class BookingsService {
 
       if (!allowedDriverTransitions[currentStatus].includes(nextStatus)) {
         throw new BadRequestException(
-          `Invalid status transition for driver: ${currentStatus} -> ${nextStatus}`
+          `La reserva no puede pasar de ${currentStatus} a ${nextStatus}`
         );
       }
     }
@@ -425,7 +627,7 @@ export class BookingsService {
     const bookingStart = new Date(bookingStartDatetime).getTime();
 
     if (nextStatus === 'cancelled' && bookingStart <= now) {
-      throw new BadRequestException('Cannot cancel booking after start datetime');
+      throw new BadRequestException('No se puede cancelar una reserva que ya ha empezado');
     }
   }
 

@@ -228,7 +228,7 @@ CHECKLIST_COUNT="$(printf '%s' "$BODY" | json_count)" || fail "Respuesta de book
 ok "Checklists listados: $CHECKLIST_COUNT"
 
 log "Creando checklist image"
-request "POST" "$BASE_URL/checklist-images" "{\"checklistId\":\"$CHECKLIST_ID\",\"imageUrl\":\"supabase://checklists/smoke/$CHECKLIST_ID/photo-1.jpg\"}" "$OWNER_TOKEN"
+request "POST" "$BASE_URL/checklist-images" "{\"checklistId\":\"$CHECKLIST_ID\",\"imageUrl\":\"supabase://checklists/checklist_image/$OWNER_ID/smoke-photo-1.jpg\"}" "$OWNER_TOKEN"
 expect_status "201" "POST /checklist-images"
 CHECKLIST_IMAGE_ID="$(printf '%s' "$BODY" | json_field id)" || fail "No se pudo extraer CHECKLIST_IMAGE_ID"
 ok "Checklist image creada: $CHECKLIST_IMAGE_ID"
@@ -243,6 +243,10 @@ ok "Checklist images listadas: $CHECKLIST_IMAGES_COUNT"
 log "Owner marca in_progress"
 request "PUT" "$BASE_URL/bookings/$BOOKING_ID/status" "{\"status\":\"in_progress\"}" "$OWNER_TOKEN"
 expect_status "200" "PUT /bookings/:id/status in_progress"
+
+log "Checklist de devolución (obligatorio antes de completed)"
+request "POST" "$BASE_URL/booking-checklists" "{\"bookingId\":\"$BOOKING_ID\",\"type\":\"check_out\",\"mileage\":10480,\"fuelLevel\":55}" "$DRIVER_TOKEN"
+expect_status "201" "POST /booking-checklists check_out"
 
 log "Owner marca completed"
 request "PUT" "$BASE_URL/bookings/$BOOKING_ID/status" "{\"status\":\"completed\"}" "$OWNER_TOKEN"

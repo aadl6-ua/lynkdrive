@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
-import { View, Text, Image, Pressable, StyleSheet, Platform } from 'react-native';
-import { colorTokens } from '../../../app/theme/tokens';
+import { View, Text, StyleSheet, Platform } from 'react-native';
+import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../../../app/theme/tokens';
+import { formatPriceCompact } from '../../../shared/format';
+import { AppImage, Button, IconButton } from '../../../shared/ui';
 import { ExploreVehiclesMapProps } from './ExploreVehiclesMap.types';
 
 type NativeMapsModule = {
@@ -17,6 +19,8 @@ function tryLoadNativeMaps(): NativeMapsModule | null {
   }
 }
 
+const DEFAULT_CENTER = { latitude: 40.4168, longitude: -3.7038 };
+
 export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
   vehicles,
   userLocation,
@@ -32,26 +36,19 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
     [selectedVehicleId, vehicles]
   );
 
-  const centerLocation = userLocation || (vehicles.length > 0 ? vehicles[0].location : null);
+  // Sin ubicación ni vehículos centramos en Madrid para no mostrar un mapa vacío.
+  const centerLocation = userLocation || (vehicles.length > 0 ? vehicles[0].location : DEFAULT_CENTER);
 
   if (!nativeMaps) {
     return (
       <View style={{ height, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 }}>
-        <Text style={{ textAlign: 'center' }}>Mapa no disponible temporalmente en esta build nativa.</Text>
+        <Text style={localStyles.fallbackText}>El mapa no está disponible en esta versión de la app.</Text>
       </View>
     );
   }
 
   const MapView = nativeMaps.default;
   const Marker = nativeMaps.Marker;
-
-  if (!centerLocation) {
-    return (
-      <View style={{ height, justifyContent: 'center', alignItems: 'center' }}>
-        <Text>No hay ubicación disponible</Text>
-      </View>
-    );
-  }
 
   const initialRegion = {
     latitude: centerLocation.latitude,
@@ -81,7 +78,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
               latitude: userLocation.latitude,
               longitude: userLocation.longitude,
             }}
-            title="Tu ubicacion"
+            title="Tu ubicación"
             pinColor={Platform.OS === 'ios' ? colorTokens.accent2 : undefined}
             anchor={Platform.OS === 'android' ? { x: 0.5, y: 0.5 } : undefined}
           >
@@ -117,95 +114,28 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
       </MapView>
 
       {selectedVehicle ? (
-        <View
-          style={{
-            position: 'absolute',
-            left: 12,
-            right: 12,
-            bottom: 12 + infoBottomInset,
-            backgroundColor: '#fff',
-            borderRadius: 10,
-            padding: 10,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.2,
-            shadowRadius: 6,
-            elevation: 5,
-            zIndex: 10,
-          }}
-        >
-          <Pressable
-            onPress={() => {
-              setSelectedVehicleId(null);
-            }}
-            style={{
-              position: 'absolute',
-              right: 10,
-              top: 10,
-              zIndex: 2,
-              width: 32,
-              height: 32,
-              borderRadius: 16,
-              backgroundColor: '#ffffff',
-              borderWidth: 1,
-              borderColor: '#d1d5db',
-              alignItems: 'center',
-              justifyContent: 'center',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 1 },
-              shadowOpacity: 0.08,
-              shadowRadius: 2,
-              elevation: 2,
-            }}
-            hitSlop={10}
-          >
-            <Text style={{ color: '#1f2937', fontSize: 18, lineHeight: 18, fontWeight: '700' }}>×</Text>
-          </Pressable>
-
-          {selectedVehicle.imageUrl ? (
-            <Image
-              source={{ uri: selectedVehicle.imageUrl }}
-              style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 8, marginBottom: 8 }}
-              resizeMode="cover"
+        <View style={[localStyles.infoCard, { bottom: 12 + infoBottomInset }]}>
+          <AppImage uri={selectedVehicle.imageUrl ?? null} style={localStyles.infoImage} fallbackLabel="Sin fotos" />
+          <View style={localStyles.infoBody}>
+            <Text style={localStyles.infoTitle} numberOfLines={1}>
+              {selectedVehicle.brand} {selectedVehicle.model}
+            </Text>
+            <Text style={localStyles.infoPrice}>{formatPriceCompact(selectedVehicle.pricePerDay)} / día</Text>
+            <Button
+              label="Ver detalle"
+              size="sm"
+              onPress={() => onVehiclePress?.(selectedVehicle.id)}
+              style={localStyles.infoButton}
             />
-          ) : (
-            <View
-              style={{
-                width: '100%',
-                aspectRatio: 4 / 3,
-                borderRadius: 8,
-                backgroundColor: '#e5e7eb',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: 8,
-              }}
-            >
-              <Text style={{ color: '#6b7280' }}>Sin imagen</Text>
-            </View>
-          )}
-
-          <Text style={{ fontWeight: '700', fontSize: 14 }}>
-            {selectedVehicle.brand} {selectedVehicle.model}
-          </Text>
-          <Text style={{ marginTop: 2, marginBottom: 8, color: '#374151' }}>
-            EUR {selectedVehicle.pricePerDay.toFixed(2)}/dia
-          </Text>
-
-          <Pressable
-            onPress={() => {
-              if (onVehiclePress) {
-                onVehiclePress(selectedVehicle.id);
-              }
-            }}
-            style={{
-              backgroundColor: colorTokens.primary,
-              borderRadius: 8,
-              paddingVertical: 8,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ color: colorTokens.white, fontWeight: '600' }}>Ver detalle</Text>
-          </Pressable>
+          </View>
+          <IconButton
+            icon="close"
+            size={32}
+            variant="overlay"
+            accessibilityLabel="Cerrar vista previa"
+            onPress={() => setSelectedVehicleId(null)}
+            style={localStyles.infoClose}
+          />
         </View>
       ) : null}
     </View>
@@ -213,6 +143,53 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
 };
 
 const localStyles = StyleSheet.create({
+  fallbackText: {
+    textAlign: 'center',
+    color: colorTokens.textMuted,
+    ...typographyTokens.body
+  },
+  infoCard: {
+    position: 'absolute',
+    left: spacingTokens.md,
+    right: spacingTokens.md,
+    flexDirection: 'row',
+    gap: spacingTokens.md,
+    padding: spacingTokens.sm,
+    borderRadius: radiusTokens.lg,
+    backgroundColor: colorTokens.white,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    zIndex: 10,
+    ...shadowTokens.raised
+  },
+  infoImage: {
+    width: 112,
+    height: 96,
+    borderRadius: radiusTokens.input
+  },
+  infoBody: {
+    flex: 1,
+    gap: 2,
+    justifyContent: 'center',
+    paddingRight: 32
+  },
+  infoTitle: {
+    color: colorTokens.primary,
+    ...typographyTokens.sectionLabel
+  },
+  infoPrice: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
+  },
+  infoButton: {
+    alignSelf: 'flex-start',
+    marginTop: spacingTokens.xs
+  },
+  infoClose: {
+    position: 'absolute',
+    top: spacingTokens.xs,
+    right: spacingTokens.xs
+  },
   userMarkerOuter: {
     width: 20,
     height: 20,

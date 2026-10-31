@@ -1,13 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import type { GeocodingSuggestion } from '@lynkdrive/shared';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 
-export type GeocodingSuggestionDto = {
-  id: string;
-  label: string;
-  lat: number;
-  lng: number;
-  city: string | null;
-  country: string | null;
-};
+export type GeocodingSuggestionDto = GeocodingSuggestion;
 
 @Injectable()
 export class GeocodingService {
@@ -61,7 +55,7 @@ export class GeocodingService {
 
       if (!response.ok) {
         this.logger.warn(`Nominatim search failed with status ${response.status}`);
-        return [];
+        throw new ServiceUnavailableException('El buscador de direcciones no está disponible. Inténtalo de nuevo.');
       }
 
       const payload = (await response.json()) as Array<{
@@ -98,8 +92,12 @@ export class GeocodingService {
 
       return mapped;
     } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+      // Sin conexión con Nominatim no es lo mismo que "sin resultados": la app muestra el error.
       this.logger.warn(`Nominatim search request failed: ${(error as Error).message}`);
-      return [];
+      throw new ServiceUnavailableException('El buscador de direcciones no está disponible. Inténtalo de nuevo.');
     } finally {
       clearTimeout(timeoutId);
     }

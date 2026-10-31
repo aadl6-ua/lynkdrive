@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:3000/api}"
-OWNER_ID="${OWNER_ID:-11111111-1111-4111-8111-111111111111}"
+OWNER_TOKEN="${OWNER_TOKEN:-}"
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "❌ curl no está instalado"
@@ -11,6 +11,12 @@ fi
 
 if ! command -v node >/dev/null 2>&1; then
   echo "❌ node no está instalado (se usa para parsear JSON)"
+  exit 1
+fi
+
+if [[ -z "$OWNER_TOKEN" ]]; then
+  echo "❌ Debes definir OWNER_TOKEN"
+  echo "   Ejemplo: OWNER_TOKEN=... BASE_URL=http://localhost:3000/api scripts/smoke_vehicle_images_availability.sh"
   exit 1
 fi
 
@@ -37,12 +43,19 @@ request() {
   local method="$1"
   local url="$2"
   local payload="${3-}"
+  local token="${4-$OWNER_TOKEN}"
+
+  local curl_args=(-sS -o "$BODY_FILE" -w "%{http_code}" -X "$method" "$url")
+
+  if [[ -n "$token" ]]; then
+    curl_args+=(-H "Authorization: Bearer $token")
+  fi
 
   if [[ -n "$payload" ]]; then
-    HTTP_CODE="$(curl -sS -o "$BODY_FILE" -w "%{http_code}" -X "$method" "$url" -H "Content-Type: application/json" -d "$payload")"
-  else
-    HTTP_CODE="$(curl -sS -o "$BODY_FILE" -w "%{http_code}" -X "$method" "$url")"
+    curl_args+=(-H "Content-Type: application/json" -d "$payload")
   fi
+
+  HTTP_CODE="$(curl "${curl_args[@]}")"
 
   BODY="$(cat "$BODY_FILE")"
 }
@@ -83,16 +96,13 @@ request "GET" "$BASE_URL/health"
 expect_status "200" "GET /health"
 ok "Backend disponible en $BASE_URL"
 
-log "Creando usuario demo (si existe, se tolera 409)"
-request "POST" "$BASE_URL/users" "{\"id\":\"$OWNER_ID\",\"firstName\":\"Demo\",\"lastName\":\"Owner\",\"phoneNumber\":null,\"avatarUrl\":null,\"idDocumentUrl\":null,\"driverLicenseUrl\":null}"
-if [[ "$HTTP_CODE" == "201" || "$HTTP_CODE" == "409" ]]; then
-  ok "Usuario listo ($HTTP_CODE)"
-else
-  fail "POST /users devolvió $HTTP_CODE. Body: $BODY"
-fi
+log "[negativo] Crear vehículo sin token"
+request "POST" "$BASE_URL/vehicles" "{}" ""
+expect_status "401" "POST /vehicles (sin token)"
+ok "La API exige autenticación"
 
 log "Creando vehículo de prueba"
-request "POST" "$BASE_URL/vehicles" "{\"ownerId\":\"$OWNER_ID\",\"brand\":\"Toyota\",\"model\":\"Corolla\",\"year\":2020,\"licensePlate\":\"$LICENSE_PLATE\",\"description\":\"Vehicle smoke test\",\"pricePerDay\":45,\"locationLat\":40.4168,\"locationLng\":-3.7038,\"locationAddress\":\"Madrid Centro\",\"fuelType\":\"hybrid\",\"transmission\":\"automatic\",\"seats\":5,\"status\":\"active\"}"
+request "POST" "$BASE_URL/vehicles" "{\"brand\":\"Toyota\",\"model\":\"Corolla\",\"year\":2020,\"licensePlate\":\"$LICENSE_PLATE\",\"description\":\"Vehicle smoke test\",\"pricePerDay\":45,\"locationLat\":40.4168,\"locationLng\":-3.7038,\"locationAddress\":\"Madrid Centro\",\"fuelType\":\"hybrid\",\"transmission\":\"automatic\",\"seats\":5,\"status\":\"active\"}"
 expect_status "201" "POST /vehicles"
 VEHICLE_ID="$(printf '%s' "$BODY" | json_field id)" || fail "No se pudo extraer vehicleId"
 ok "Vehículo creado: $VEHICLE_ID"
@@ -177,6 +187,13 @@ log "[negativo] Crear imagen con vehicleId inexistente"
 request "POST" "$BASE_URL/vehicle-images" "{\"vehicleId\":\"00000000-0000-4000-8000-000000000000\",\"imageUrl\":\"https://picsum.photos/seed/nope/1200/800\",\"isPrimary\":false}"
 expect_status "404" "POST /vehicle-images (missing vehicle)"
 ok "Validación de vehículo inexistente OK"
+
+log "Eliminando vehículo de prueba"
+request "DELETE" "$BASE_URL/vehicles/$VEHICLE_ID"
+if [[ "$HTTP_CODE" != "200" && "$HTTP_CODE" != "204" ]]; then
+  fail "DELETE /vehicles/$VEHICLE_ID devolvió $HTTP_CODE. Body: $BODY"
+fi
+ok "Vehículo de prueba eliminado"
 
 echo
 echo "🎉 Smoke tests completados correctamente"

@@ -1,15 +1,20 @@
 {
   "name": "@lynkdrive/shared",
-  "version": "0.1.0",
+  "version": "1.0.0-alpha.1",
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
     "lint": "echo \"No linter configured yet for shared\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo \"No tests configured yet for shared\""
   },
   "devDependencies": {
     "typescript": "^5.7.3"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }
