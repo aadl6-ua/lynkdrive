@@ -228,7 +228,7 @@ CHECKLIST_COUNT="$(printf '%s' "$BODY" | json_count)" || fail "Respuesta de book
 ok "Checklists listados: $CHECKLIST_COUNT"
 
 log "Creando checklist image"
-request "POST" "$BASE_URL/checklist-images" "{\"checklistId\":\"$CHECKLIST_ID\",\"imageUrl\":\"supabase://checklists/smoke/$CHECKLIST_ID/photo-1.jpg\"}" "$OWNER_TOKEN"
+request "POST" "$BASE_URL/checklist-images" "{\"checklistId\":\"$CHECKLIST_ID\",\"imageUrl\":\"supabase://checklists/checklist_image/$OWNER_ID/smoke-photo-1.jpg\"}" "$OWNER_TOKEN"
 expect_status "201" "POST /checklist-images"
 CHECKLIST_IMAGE_ID="$(printf '%s' "$BODY" | json_field id)" || fail "No se pudo extraer CHECKLIST_IMAGE_ID"
 ok "Checklist image creada: $CHECKLIST_IMAGE_ID"

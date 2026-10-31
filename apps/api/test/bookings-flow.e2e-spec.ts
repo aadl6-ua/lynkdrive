@@ -251,8 +251,15 @@ describe('API e2e (Postgres + PostGIS)', () => {
       await api()
         .post('/api/checklist-images')
         .set('Authorization', `Bearer ${driverToken}`)
-        .send({ checklistId: checkIn.body.id, imageUrl: 'supabase://checklists/check_in/a.jpg' })
+        .send({ checklistId: checkIn.body.id, imageUrl: `supabase://checklists/checklist_image/${DRIVER_ID}/a.jpg` })
         .expect(201);
+
+      // Una referencia a un fichero subido por otro usuario se rechaza.
+      await api()
+        .post('/api/checklist-images')
+        .set('Authorization', `Bearer ${driverToken}`)
+        .send({ checklistId: checkIn.body.id, imageUrl: `supabase://checklists/checklist_image/${OWNER_ID}/b.jpg` })
+        .expect(400);
 
       await api()
         .put(`/api/bookings/${bookingA}/status`)

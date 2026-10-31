@@ -7,7 +7,13 @@ import {
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
-import { getSupabaseAdminClient, parseStorageReference, StorageReference } from 'src/common/supabase-storage';
+import {
+  getSupabaseAdminClient,
+  isStorageReferenceOwnedBy,
+  parseStorageReference,
+  removeStorageReferences,
+  StorageReference
+} from 'src/common/supabase-storage';
 
 const ACTIVE_BOOKING_STATUSES = ['pending', 'accepted', 'paid_confirmed', 'in_progress'];
 
@@ -147,7 +153,11 @@ export class AccountService {
         ...checklistImageRows.map((row) => row.image_url)
       ]
         .map((value) => parseStorageReference(value))
-        .filter((reference): reference is StorageReference => reference !== null);
+        // Solo se borran ficheros subidos por el propio usuario, aunque la BD apunte a otros.
+        .filter(
+          (reference): reference is StorageReference =>
+            reference !== null && isStorageReferenceOwnedBy(reference, user.sub)
+        );
 
       await this.dataSource.transaction(async (manager) => {
         // Se bloquean las reservas del usuario para que no cambien de estado durante la baja.
@@ -224,25 +234,11 @@ export class AccountService {
   }
 
   private async removeStorageFiles(references: StorageReference[]): Promise<void> {
-    const supabase = getSupabaseAdminClient();
+    const failedBuckets = await removeStorageReferences(getSupabaseAdminClient(), references);
 
-    if (!supabase || references.length === 0) {
-      return;
-    }
-
-    const pathsByBucket = new Map<string, string[]>();
-
-    for (const reference of references) {
-      pathsByBucket.set(reference.bucket, [...(pathsByBucket.get(reference.bucket) ?? []), reference.path]);
-    }
-
-    for (const [bucket, paths] of pathsByBucket) {
-      const { error } = await supabase.storage.from(bucket).remove(paths);
-
-      if (error) {
-        // No se bloquea la baja: se registra para limpieza manual posterior.
-        this.logger.warn(`No se pudieron borrar ${paths.length} ficheros del bucket ${bucket}`);
-      }
+    for (const bucket of failedBuckets) {
+      // No se bloquea la baja: se registra para limpieza manual posterior.
+      this.logger.warn(`No se pudieron borrar ficheros del bucket ${bucket}`);
     }
   }
 

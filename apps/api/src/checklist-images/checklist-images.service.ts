@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { getStorageBuckets, isAcceptableImageValue } from '../common/supabase-storage';
 import { ChecklistImageResponseDto } from './dto/checklist-image-response.dto';
 import { CreateChecklistImageDto } from './dto/create-checklist-image.dto';
 import { ChecklistImageEntity } from './entities/checklist-image.entity';
@@ -48,6 +49,13 @@ export class ChecklistImagesService {
 
   async createForUser(userId: string, createChecklistImageDto: CreateChecklistImageDto): Promise<ChecklistImageResponseDto> {
     await this.ensureChecklistParticipant(createChecklistImageDto.checklistId, userId, true);
+
+    const { checklists } = getStorageBuckets();
+
+    // Solo evidencias del bucket privado subidas por el propio usuario.
+    if (!isAcceptableImageValue(createChecklistImageDto.imageUrl, userId, { buckets: [checklists], allowExternal: false })) {
+      throw new BadRequestException('imageUrl debe ser una imagen de checklist subida por ti');
+    }
 
     const toSave = this.checklistImagesRepository.create({
       checklistId: createChecklistImageDto.checklistId,

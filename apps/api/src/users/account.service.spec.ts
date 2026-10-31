@@ -32,8 +32,8 @@ const profileRow = {
   first_name: 'Ana',
   last_name: 'Lopez',
   phone_number: '600',
-  avatar_url: 'supabase://avatars/user-1/a.jpg',
-  id_document_url: 'supabase://documents/user-1/id.jpg',
+  avatar_url: 'supabase://avatars/avatar/user-1/a.jpg',
+  id_document_url: 'supabase://documents/id_document/user-1/id.jpg',
   driver_license_url: null,
   is_verified: true,
   created_at: new Date(),
@@ -59,8 +59,12 @@ describe('AccountService', () => {
   it('anonimiza datos, borra ficheros y elimina el usuario de auth', async () => {
     const { service, queries } = buildService((sql) => {
       if (sql.includes('FROM users')) return [profileRow];
-      if (sql.includes('FROM vehicle_images')) return [{ image_url: 'supabase://vehicles/user-1/v.jpg' }];
-      if (sql.includes('FROM checklist_images')) return [{ image_url: 'supabase://checklists/user-1/c.jpg' }];
+      if (sql.includes('FROM vehicle_images')) return [
+        { image_url: 'supabase://vehicles/vehicle_image/user-1/v.jpg' },
+        // Referencia a un fichero ajeno: nunca debe borrarse.
+        { image_url: 'supabase://vehicles/vehicle_image/user-2/ajeno.jpg' }
+      ];
+      if (sql.includes('FROM checklist_images')) return [{ image_url: 'supabase://checklists/checklist_image/user-1/c.jpg' }];
       return [];
     });
 
@@ -69,6 +73,7 @@ describe('AccountService', () => {
     expect(queries.some((q) => q.includes('UPDATE users SET') && q.includes('deleted_at = NOW()'))).toBe(true);
     expect(queries.some((q) => q.includes('owner_contact_method = NULL'))).toBe(true);
     expect(removeMock).toHaveBeenCalledTimes(4);
+    expect(removeMock.mock.calls.flat(2)).not.toContain('vehicle_image/user-2/ajeno.jpg');
     expect(deleteUserMock).toHaveBeenCalledWith('user-1', true);
   });
 
