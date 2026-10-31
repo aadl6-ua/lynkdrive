@@ -20,6 +20,7 @@ LynkDrive conecta a ambas partes. El propietario publica su coche con fotos, pre
 - Registro e inicio de sesión con email y contraseña (Supabase Auth). App *auth-first*: sin sesión no hay pestañas ni funcionalidades.
 - Perfil mínimo obligatorio en el registro (nombre, apellidos, teléfono).
 - Avatar, DNI y carnet de conducir; las acciones transaccionales requieren `is_verified`.
+- RGPD: exportar todos mis datos en JSON (`GET /api/users/me/export`) y borrar la cuenta (`DELETE /api/users/me`: anonimiza el perfil, borra los ficheros personales y el usuario de Supabase Auth; se rechaza si hay reservas activas).
 
 **Propietarios (Mis Vehículos)**
 - Alta de vehículos: marca, modelo, año, matrícula, descripción, precio/día, combustible, transmisión, plazas.
@@ -35,7 +36,8 @@ LynkDrive conecta a ambas partes. El propietario publica su coche con fotos, pre
 **Reservas (Mis Viajes)**
 - Reserva en dos fases: solicitud, aceptación o rechazo del propietario y pago.
 - Acciones según rol y estado, validadas en la API.
-- Pagos con Stripe PaymentIntents y modo prototipo si no hay clave de Stripe.
+- Pagos con Stripe PaymentIntents y cobros a propietarios con Stripe Connect Express (onboarding, webhooks y reembolsos por cancelación), con modo prototipo si no hay clave de Stripe.
+- Al aceptar una solicitud se rechazan automáticamente las `pending` solapadas del mismo coche, en una transacción con bloqueo de filas; los solapes incluyen 2 h de margen para la entrega.
 - Checklists de check-in y check-out (kilometraje, combustible, notas y fotos en bucket privado).
 - Valoraciones cruzadas (1 a 5 estrellas + comentario) al completar el viaje.
 
@@ -130,7 +132,7 @@ cp apps/mobile/.env.example apps/mobile/.env
 # Postgres + PostGIS local (coincide con DATABASE_URL de .env.example)
 docker compose -f infra/docker/docker-compose.yml up -d
 
-# Tras crear el esquema de docs/data-model.md, aplicar migraciones de infra/db/migrations
+# Aplicar migraciones de infra/db/migrations (la primera es el esquema base, idempotente)
 npm run db:migrate:remote
 
 # API y Expo a la vez
@@ -149,28 +151,25 @@ Las variables de entorno de la API y de la app están documentadas en el [README
 
 ## Pruebas
 
-Scripts de smoke end-to-end (bash + curl + node) contra la API en marcha:
+- Tests unitarios (Jest, API): máquina de estados y precios de reservas, solapes y margen de 2 h, rechazo automático de solapadas, checklists, reseñas, subidas (con validación del contenido real de la imagen), guard JWT, webhooks de Stripe y exportación/borrado de cuenta. `npm run test`.
+- Tests e2e de la API contra Postgres + PostGIS local (el esquema se recrea en cada ejecución; no apuntar nunca a Supabase): `npm run test:e2e` con `TEST_DATABASE_URL`.
+- CI en GitHub Actions: lint, typecheck, build, tests unitarios y e2e en cada push y PR a `dev` y `main`.
+
+Scripts de smoke (bash + curl + node) contra la API en marcha:
 
 - `scripts/get_supabase_tokens.sh`: inicia sesión con dos usuarios de prueba y muestra los `export` de `OWNER_TOKEN` y `DRIVER_TOKEN`.
 - `scripts/smoke_bookings.sh`: salud, `/users/me` y transiciones principales de reservas.
 - `scripts/smoke_payments_checklists_reviews.sh`: flujo completo (vehículo, disponibilidad, reserva aceptada, pago, checklists, imágenes, finalización y reseñas). Funciona con Stripe real y en modo prototipo.
-- `scripts/smoke_vehicle_images_availability.sh`: imágenes y disponibilidad; es anterior a la autenticación JWT y necesita actualizarse.
+- `scripts/smoke_vehicle_images_availability.sh`: imágenes y disponibilidad; usa `OWNER_TOKEN`, comprueba el 401 sin token y borra su vehículo de prueba.
 
 ```bash
 BASE_URL=http://localhost:3000/api ./scripts/smoke_bookings.sh
 ```
 
-Jest está configurado en la API (`npm run test -w @lynkdrive/api`), pero aún no hay tests unitarios.
-
 ## Hoja de ruta
 
-- Rechazo automático de solicitudes `pending` solapadas al aceptar una, revalidando conflictos en esa transición.
-- Aplicar también en la API el margen de 2 h de entrega (hoy se aplica en el calendario del cliente).
-- Índice GiST de expresión sobre `location::geography`.
-- Pagos a propietarios con Stripe Connect, webhooks y política de reembolsos (gratis con 48 h o más, 50% entre 24 y 48 h, nada con menos de 24 h).
 - Panel "Mis ingresos".
 - Usar `@lynkdrive/shared` desde la API y la app.
-- Tests unitarios y de integración en CI.
 - Chat, emails transaccionales, notificaciones push y backoffice.
 - Verificación de identidad fuerte (eIDAS / DNIe / Cl@ve).
 

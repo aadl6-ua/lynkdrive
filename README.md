@@ -52,6 +52,7 @@ LynkDrive connects both sides. Owners publish their car with photos, price and a
 - Email/password sign-up and login with Supabase Auth; the app is auth-first (no tabs or features without a session).
 - Mandatory minimum profile (first name, last name, phone) during registration.
 - Profile with avatar plus ID document and driving licence upload; transactional actions are gated behind `is_verified`.
+- GDPR: export all my data as JSON (`GET /api/users/me/export`) and delete my account (`DELETE /api/users/me`: anonymises the profile, removes personal files and the Supabase Auth user; refused while there are active bookings).
 
 **Owners (My Vehicles)**
 - Publish vehicles: brand, model, year, plate, description, price per day, fuel, transmission, seats.
@@ -67,7 +68,8 @@ LynkDrive connects both sides. Owners publish their car with photos, price and a
 **Bookings (My Trips)**
 - Two-phase booking: request, then owner accepts or rejects, then payment.
 - Role-aware actions per state (driver vs owner) enforced by the API.
-- Payments via Stripe PaymentIntents, with a prototype fallback when no Stripe key is configured.
+- Payments via Stripe PaymentIntents with Stripe Connect Express payouts to owners (onboarding link, webhooks, cancellation refunds), and a prototype fallback when no Stripe key is configured.
+- Accepting a request automatically rejects the other overlapping `pending` requests for the same car, in one transaction with row locks; overlaps include a 2 h hand-over buffer.
 - Check-in and check-out checklists (mileage, fuel level, notes, photo evidence stored in a private bucket).
 - Cross reviews (1 to 5 stars + comment) once the trip is completed, one per participant per booking.
 
@@ -329,7 +331,7 @@ Local PostgreSQL + PostGIS (matches the default `DATABASE_URL` in `.env.example`
 docker compose -f infra/docker/docker-compose.yml up -d
 ```
 
-Create the schema from [docs/data-model.md](docs/data-model.md). Then apply the versioned migrations in `infra/db/migrations` (the runner reads `DATABASE_URL` from the environment or from `apps/api/.env` and records applied files in `public.app_migrations`):
+The baseline schema is the first migration (`infra/db/migrations/202603010000_baseline_schema.sql`, idempotent), so a fresh database only needs the versioned migrations in `infra/db/migrations` (the runner reads `DATABASE_URL` from the environment or from `apps/api/.env` and records applied files in `public.app_migrations`):
 
 ```bash
 npm run db:migrate:remote
@@ -356,8 +358,10 @@ npm run dev:mobile   # Expo dev server
 
 ```bash
 npm run build   # builds every workspace (nest build, expo export --platform web, tsc)
-npm run lint    # eslint on the API (placeholders in the other workspaces)
-npm run test    # jest on the API (placeholders in the other workspaces)
+npm run lint       # eslint on the API (placeholders in the other workspaces)
+npm run typecheck  # tsc in every workspace
+npm run test       # jest unit tests on the API
+npm run test:e2e   # API e2e tests against a local Postgres + PostGIS (see Testing)
 ```
 
 ## Environment variables
@@ -385,6 +389,14 @@ npm run test    # jest on the API (placeholders in the other workspaces)
 | `SUPABASE_STORAGE_CHECKLISTS_PUBLIC` | `false` | Whether the bucket is public |
 | `SUPABASE_SIGNED_URL_TTL_SECONDS` | `3600` | Lifetime of signed URLs for private files |
 | `STRIPE_SECRET_KEY` | optional | Enables real Stripe PaymentIntents; without it payments use prototype mode |
+| `STRIPE_PUBLISHABLE_KEY` | optional | Sent to the app through `/payments/config` to open the PaymentSheet |
+| `STRIPE_WEBHOOK_SECRET` | optional | Signature secret for `POST /api/payments/webhook` |
+| `STRIPE_APPLICATION_FEE_PERCENT` | `10` | Platform fee on each payment |
+| `STRIPE_CONNECT_COUNTRY` | `ES` | Country of the owners' Connect Express accounts |
+| `API_PUBLIC_URL` | `http://localhost:3000/api` | Public API URL used for Connect onboarding return/refresh |
+| `CORS_ORIGINS` | empty | Comma-separated allowed web origins; empty keeps CORS open (native apps do not use it) |
+| `RATE_LIMIT_PER_MINUTE` | `300` | Global rate limit per client |
+| `TRUST_PROXY` | empty | Set behind a proxy (Render) so rate limiting sees the real client IP |
 | `NOMINATIM_BASE_URL` | `https://nominatim.openstreetmap.org` | Geocoding provider |
 | `NOMINATIM_DEFAULT_COUNTRY_CODES` | `es` | Default country filter |
 | `NOMINATIM_USER_AGENT` | `lynkdrive-tfg/0.1 (contact: ...)` | Required by Nominatim's usage policy |
@@ -444,14 +456,30 @@ lynkdrive/
 
 ## Testing
 
-The main verification is a set of end-to-end **smoke scripts** (bash + curl + node) that run against a live API:
+**Unit tests** (Jest, API workspace) cover the booking state machine and pricing, overlap and hand-over buffer rules, automatic rejection of overlapping requests, checklists, reviews, uploads (including real image content checks), the JWT guard, Stripe webhooks and the GDPR export/delete flow:
+
+```bash
+npm run test
+```
+
+**E2E tests** run the booking flow against a real Postgres + PostGIS (the schema is recreated on every run). Never point them at the Supabase database:
+
+```bash
+docker run -d --name lynkdrive-test-pg -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=lynkdrive_test -p 55432:5432 postgis/postgis:15-3.4
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:55432/lynkdrive_test npm run test:e2e
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, typecheck, build, unit and e2e tests on every push and pull request to `dev` and `main`.
+
+**Smoke scripts** (bash + curl + node) run against a live API:
 
 | Script | What it covers |
 |---|---|
 | `scripts/get_supabase_tokens.sh` | Logs in two test users against Supabase Auth and prints `OWNER_TOKEN` / `DRIVER_TOKEN` exports |
 | `scripts/smoke_bookings.sh` | Health, `/users/me` for both users, booking creation and main state transitions |
 | `scripts/smoke_payments_checklists_reviews.sh` | Full flow: vehicle + availability, booking accepted, payment intent and confirm, checklists, checklist images, completion, reviews and their uniqueness |
-| `scripts/smoke_vehicle_images_availability.sh` | Vehicle images and availability windows. Written before JWT auth was added (sends no token), so it needs updating to pass against the current API |
+| `scripts/smoke_vehicle_images_availability.sh` | Vehicle images and availability windows (needs `OWNER_TOKEN`; checks the 401 without a token and deletes its test vehicle) |
 
 ```bash
 # 1. Get tokens for two existing test accounts
@@ -462,19 +490,15 @@ DRIVER_EMAIL=driver@example.com DRIVER_PASSWORD=... \
 # 2. Paste the printed exports, then:
 BASE_URL=http://localhost:3000/api ./scripts/smoke_bookings.sh
 BASE_URL=http://localhost:3000/api ./scripts/smoke_payments_checklists_reviews.sh
+BASE_URL=http://localhost:3000/api ./scripts/smoke_vehicle_images_availability.sh
 ```
 
-The payments smoke test works in both modes: real Stripe (with `STRIPE_SECRET_KEY`) and prototype. Jest is configured in the API workspace (`npm run test -w @lynkdrive/api`), but unit tests are still to be written.
+The payments smoke test works in both modes: real Stripe (with `STRIPE_SECRET_KEY`) and prototype.
 
 ## Roadmap
 
-- Automatically reject overlapping `pending` requests when one is accepted, and re-check conflicts inside that transition.
-- Apply the 2 h hand-over buffer in the API overlap check too (today it is applied in the client calendar).
-- Expression GiST index on `location::geography` for the radius search.
-- Stripe Connect payouts to owners (`stripe_transfer_id`, `payout_status`), webhooks and the cancellation refund policy (free at 48 h or more, 50% between 24 and 48 h, none under 24 h).
 - "My earnings" panel for owners.
 - Import `@lynkdrive/shared` from both apps instead of mirroring types.
-- Unit and integration tests in CI.
 - In-app chat, transactional emails, push notifications and an admin back office.
 - Strong identity verification (eIDAS / DNIe / Cl@ve) instead of manual document review.
 
