@@ -6,7 +6,7 @@ import {
   NotFoundException
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { IsNull, QueryFailedError, Repository } from 'typeorm';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { ReviewResponseDto } from './dto/review-response.dto';
 import { UpdateReviewDto } from './dto/update-review.dto';
@@ -31,7 +31,7 @@ export class ReviewsService {
       await this.ensureBookingParticipant(bookingId, userId);
     }
 
-    const where = bookingId ? { bookingId } : undefined;
+    const where = bookingId ? { bookingId, hiddenAt: IsNull() } : { hiddenAt: IsNull() };
     const reviews = await this.reviewsRepository.find({
       where,
       order: { createdAt: 'DESC' }
