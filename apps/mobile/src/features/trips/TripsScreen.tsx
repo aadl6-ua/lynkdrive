@@ -1339,7 +1339,8 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
           <Text style={styles.caption}>Solicitada el {formatDateTimeMadrid(selectedBooking.createdAt)}</Text>
         </Card>
 
-        {selectedBooking.ownerContactMethod ? (
+        {/* Tras cancelar ya no hay entrega que coordinar: el contacto deja de mostrarse. */}
+        {selectedBooking.ownerContactMethod && status !== 'cancelled' ? (
           <Card variant="muted">
             <CardHeader title="Contacto del propietario" icon="call-outline" />
             <Text style={styles.contactValue} selectable>
