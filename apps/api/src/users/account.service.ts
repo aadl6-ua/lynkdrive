@@ -26,6 +26,8 @@ type UserRow = {
   id_document_url: string | null;
   driver_license_url: string | null;
   is_verified: boolean;
+  blocked_at: Date | null;
+  blocked_reason: string | null;
   created_at: Date;
   deleted_at: Date | null;
 };
@@ -113,6 +115,8 @@ export class AccountService {
         idDocumentUrl: profile.id_document_url,
         driverLicenseUrl: profile.driver_license_url,
         isVerified: profile.is_verified,
+        blockedAt: profile.blocked_at,
+        blockedReason: profile.blocked_reason,
         createdAt: profile.created_at
       },
       vehicles,
@@ -122,7 +126,10 @@ export class AccountService {
       bookingsAsOwner,
       reviewsWritten,
       reviewsReceived,
-      checklistsSubmitted: checklists
+      checklistsSubmitted: checklists,
+      // Incidencias de la administración que afectan al usuario o a sus reservas y vehículos,
+      // con el texto de las notas pero sin identificar al administrador que las escribió.
+      incidents: await this.findIncidents(user.sub)
     };
   }
 
@@ -222,10 +229,30 @@ export class AccountService {
     await this.deleteAuthUser(user.sub);
   }
 
+  private async findIncidents(userId: string): Promise<unknown[]> {
+    return this.dataSource.query(
+      `SELECT i.id, i.title, i.description, i.status, i.booking_id, i.vehicle_id, i.created_at, i.updated_at,
+              COALESCE(
+                (SELECT json_agg(json_build_object('note', n.body, 'createdAt', n.created_at) ORDER BY n.created_at)
+                 FROM incident_notes n WHERE n.incident_id = i.id),
+                '[]'
+              ) AS notes
+       FROM incidents i
+       WHERE i.user_id = $1
+          OR i.vehicle_id IN (SELECT id FROM vehicles WHERE owner_id = $1)
+          OR i.booking_id IN (
+            SELECT b.id FROM bookings b INNER JOIN vehicles v ON v.id = b.vehicle_id
+            WHERE b.driver_id = $1 OR v.owner_id = $1
+          )
+       ORDER BY i.created_at`,
+      [userId]
+    );
+  }
+
   private async findUserRow(userId: string): Promise<UserRow | null> {
     const rows = await this.dataSource.query(
       `SELECT id, first_name, last_name, phone_number, avatar_url, id_document_url, driver_license_url,
-              is_verified, created_at, deleted_at
+              is_verified, blocked_at, blocked_reason, created_at, deleted_at
        FROM users WHERE id = $1 LIMIT 1`,
       [userId]
     );

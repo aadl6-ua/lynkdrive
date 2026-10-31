@@ -120,3 +120,38 @@ export function getStorageBuckets() {
     checklists: process.env.SUPABASE_STORAGE_CHECKLISTS_BUCKET ?? 'checklists'
   };
 }
+
+export type SignedFile = {
+  url: string | null;
+  expiresAt: string | null;
+};
+
+/**
+ * Devuelve una URL legible para un valor persistido: URL firmada temporal si es una
+ * referencia `supabase://`, la propia URL si ya es pública, o null si no se puede resolver.
+ */
+export async function resolveFileUrl(value: string | null | undefined): Promise<SignedFile> {
+  if (!value) {
+    return { url: null, expiresAt: null };
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    return { url: value, expiresAt: null };
+  }
+
+  const reference = parseStorageReference(value);
+  const supabase = getSupabaseAdminClient();
+
+  if (!reference || !supabase) {
+    return { url: null, expiresAt: null };
+  }
+
+  const ttlSeconds = getSignedUrlTtlSeconds();
+  const { data, error } = await supabase.storage.from(reference.bucket).createSignedUrl(reference.path, ttlSeconds);
+
+  if (error || !data?.signedUrl) {
+    return { url: null, expiresAt: null };
+  }
+
+  return { url: data.signedUrl, expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString() };
+}

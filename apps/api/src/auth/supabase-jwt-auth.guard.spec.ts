@@ -1,6 +1,6 @@
-import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { SignJWT } from 'jose';
-import { SupabaseJwtAuthGuard } from './supabase-jwt-auth.guard';
+import { forgetBlockStatus, SupabaseJwtAuthGuard } from './supabase-jwt-auth.guard';
 
 const SECRET = 'test-secret-with-enough-length-1234567890';
 const SUPABASE_URL = 'http://supabase.test';
@@ -91,5 +91,34 @@ describe('SupabaseJwtAuthGuard', () => {
     await expect(guard.canActivate(contextFor({ authorization: `Bearer ${token}` }).context)).rejects.toBeInstanceOf(
       UnauthorizedException
     );
+  });
+
+  describe('bloqueo de cuentas', () => {
+    beforeEach(() => forgetBlockStatus('user-1'));
+
+    it('rechaza con 403 a un usuario bloqueado', async () => {
+      const dataSource = { query: jest.fn().mockResolvedValue([{ blocked_at: new Date() }]) };
+      const blockingGuard = new SupabaseJwtAuthGuard(dataSource as never);
+      const token = await sign({ sub: 'user-1' });
+
+      await expect(
+        blockingGuard.canActivate(contextFor({ authorization: `Bearer ${token}` }).context)
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('cachea el estado de bloqueo y permite invalidarlo', async () => {
+      const dataSource = { query: jest.fn().mockResolvedValue([{ blocked_at: null }]) };
+      const blockingGuard = new SupabaseJwtAuthGuard(dataSource as never);
+      const token = await sign({ sub: 'user-1' });
+      const run = () => blockingGuard.canActivate(contextFor({ authorization: `Bearer ${token}` }).context);
+
+      await expect(run()).resolves.toBe(true);
+      await expect(run()).resolves.toBe(true);
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+
+      forgetBlockStatus('user-1');
+      dataSource.query.mockResolvedValueOnce([{ blocked_at: new Date() }]);
+      await expect(run()).rejects.toBeInstanceOf(ForbiddenException);
+    });
   });
 });

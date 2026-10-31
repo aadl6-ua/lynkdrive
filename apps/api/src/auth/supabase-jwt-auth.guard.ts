@@ -1,8 +1,10 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   Logger,
+  Optional,
   UnauthorizedException
 } from '@nestjs/common';
 import {
@@ -12,10 +14,20 @@ import {
   JWTPayload,
   JWTVerifyOptions
 } from 'jose';
+import { DataSource } from 'typeorm';
 import { AuthUser } from './auth-user.type';
 
 const SYMMETRIC_ALGORITHMS = ['HS256'];
 const ASYMMETRIC_ALGORITHMS = ['ES256', 'RS256'];
+// Cache corto del estado de bloqueo para no consultar la BD en cada petición.
+// Es de módulo porque Nest puede crear una instancia del guard por controlador.
+const BLOCK_CACHE_TTL_MS = 30_000;
+const blockCache = new Map<string, { blocked: boolean; expiresAt: number }>();
+
+/** Invalida la cache de bloqueo de un usuario (se llama al bloquear/desbloquear). */
+export function forgetBlockStatus(userId: string): void {
+  blockCache.delete(userId);
+}
 
 type RequestWithAuthUser = {
   headers: Record<string, string | string[] | undefined>;
@@ -33,6 +45,9 @@ export class SupabaseJwtAuthGuard implements CanActivate {
   private readonly jwks = this.supabaseJwksUrl
     ? createRemoteJWKSet(new URL(this.supabaseJwksUrl))
     : null;
+
+  // DataSource opcional: sin BD (tests unitarios) no se comprueba el bloqueo.
+  constructor(@Optional() private readonly dataSource?: DataSource) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithAuthUser>();
@@ -57,7 +72,29 @@ export class SupabaseJwtAuthGuard implements CanActivate {
       claims: payload as Record<string, unknown>
     };
 
+    if (await this.isBlocked(sub)) {
+      throw new ForbiddenException('Cuenta bloqueada por la administración');
+    }
+
     return true;
+  }
+
+  private async isBlocked(userId: string): Promise<boolean> {
+    if (!this.dataSource) {
+      return false;
+    }
+
+    const cached = blockCache.get(userId);
+
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.blocked;
+    }
+
+    const rows = await this.dataSource.query(`SELECT blocked_at FROM users WHERE id = $1 LIMIT 1`, [userId]);
+    const blocked = Boolean((rows[0] as { blocked_at: Date | null } | undefined)?.blocked_at);
+    blockCache.set(userId, { blocked, expiresAt: Date.now() + BLOCK_CACHE_TTL_MS });
+
+    return blocked;
   }
 
   private extractBearerToken(authorizationHeader: string | string[] | undefined): string | null {

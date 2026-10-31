@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, integracion]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, integracion]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -30,10 +30,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build (api + shared)
+      - name: Build (api + shared + admin)
         run: |
           npm run build -w @lynkdrive/shared
           npm run build -w @lynkdrive/api
+          npm run build -w @lynkdrive/admin
 
       - name: Tests unitarios
         run: npm test

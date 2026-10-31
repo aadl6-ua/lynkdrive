@@ -17,6 +17,7 @@ export class VehicleResponseDto {
   seats!: number | null;
   status!: VehicleStatus;
   createdAt!: Date;
+  disabledByAdmin?: boolean;
 }
 
 /** Vista pública (Explorar, ficha): sin la matrícula, que solo ve el propietario. */

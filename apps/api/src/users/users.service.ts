@@ -189,6 +189,7 @@ export class UsersService {
         .select('COUNT(review.id)', 'count')
         .addSelect('AVG(review.rating)', 'avg')
         .where('review.reviewee_id = :userId', { userId: id })
+        .andWhere('review.hidden_at IS NULL')
         .getRawOne<{ count: string; avg: string | null }>()
     ]);
 

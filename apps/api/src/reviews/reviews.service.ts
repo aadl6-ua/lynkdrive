@@ -6,7 +6,7 @@ import {
   NotFoundException
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { IsNull, QueryFailedError, Repository } from 'typeorm';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { ReviewResponseDto } from './dto/review-response.dto';
 import { UpdateReviewDto } from './dto/update-review.dto';
@@ -31,10 +31,17 @@ export class ReviewsService {
       await this.ensureBookingParticipant(bookingId, userId);
     }
 
-    // Sin bookingId: las reseñas donde el usuario participa (autor o destinatario),
-    // filtradas en BD en lugar de cargar todas las reseñas de la plataforma.
+    // Sin bookingId: solo las reseñas donde el usuario participa (autor o destinatario),
+    // filtradas en BD. Las ocultas por moderación solo las sigue viendo su autor (evita que
+    // la app le ofrezca reseñar de nuevo y choque con la unicidad).
+    const where = bookingId
+      ? [
+          { bookingId, hiddenAt: IsNull() },
+          { bookingId, reviewerId: userId }
+        ]
+      : [{ reviewerId: userId }, { revieweeId: userId, hiddenAt: IsNull() }];
     const visible = await this.reviewsRepository.find({
-      where: bookingId ? { bookingId } : [{ reviewerId: userId }, { revieweeId: userId }],
+      where,
       order: { createdAt: 'DESC' }
     });
 

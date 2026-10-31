@@ -33,6 +33,7 @@ LynkDrive lets private owners rent out their cars to verified drivers nearby. It
 - [Key engineering decisions](#key-engineering-decisions)
 - [Data model](#data-model)
 - [Getting started](#getting-started)
+- [Admin back office](#admin-back-office)
 - [Environment variables](#environment-variables)
 - [Project structure](#project-structure)
 - [Testing](#testing)
@@ -73,6 +74,13 @@ LynkDrive connects both sides. Owners publish their car with photos, price and a
 - Check-in and check-out checklists (mileage, fuel level, notes, photo evidence stored in a private bucket).
 - Cross reviews (1 to 5 stars + comment) once the trip is completed, one per participant per booking.
 
+**Admin back office (web)**
+- Dashboard with users, vehicles, bookings by status and revenue (gross volume, estimated platform fee, last six months).
+- Users: search, document review through short-lived signed URLs, verify / unverify, block / unblock (blocked accounts get `403` on the whole API and are banned in Supabase Auth).
+- Vehicles: activate / deactivate listings (a listing deactivated by an admin cannot be reactivated by its owner). Reviews: hide / show with a moderation reason (hidden reviews do not count in ratings).
+- Bookings: full status history (recorded by a database trigger) and check-in/check-out evidence photos via signed URLs.
+- Incidents: create, list, change status and keep internal notes.
+
 ## Screenshots
 
 > Placeholders. Add the images to `docs/screenshots/` with these exact filenames (see [docs/screenshots/README.md](docs/screenshots/README.md)).
@@ -106,6 +114,7 @@ LynkDrive connects both sides. Owners publish their car with photos, price and a
 | Auth / Files | Supabase Auth (JWT), Supabase Storage (public and private buckets) |
 | Payments | Stripe (PaymentIntents) |
 | Geocoding | OpenStreetMap Nominatim, proxied and cached by the API |
+| Admin web | Vite + React 19 + TypeScript, Supabase Auth, no UI library |
 | Tooling | npm workspaces monorepo, concurrently, ESLint, Prettier |
 
 ## Architecture
@@ -213,6 +222,9 @@ erDiagram
     BOOKINGS ||--o{ REVIEWS : has
     USERS ||--o{ BOOKING_CHECKLISTS : submits
     USERS ||--o{ REVIEWS : "writes / receives"
+    BOOKINGS ||--o{ BOOKING_STATUS_HISTORY : "status changes"
+    BOOKINGS |o--o{ INCIDENTS : "may relate to"
+    INCIDENTS ||--o{ INCIDENT_NOTES : has
 
     USERS {
         uuid id PK "= auth.users.id"
@@ -225,6 +237,8 @@ erDiagram
         boolean is_verified
         varchar stripe_customer_id
         varchar stripe_account_id
+        boolean is_admin "back office role"
+        timestamptz blocked_at
         timestamptz deleted_at
     }
     VEHICLES {
@@ -241,6 +255,7 @@ erDiagram
         enum transmission
         int seats
         enum status "active | inactive"
+        timestamptz disabled_by_admin_at
         timestamptz deleted_at
     }
     VEHICLE_IMAGES {
@@ -291,10 +306,34 @@ erDiagram
         uuid reviewee_id FK
         int rating "1-5"
         text comment
+        timestamptz hidden_at "moderation"
+    }
+    BOOKING_STATUS_HISTORY {
+        uuid id PK
+        uuid booking_id FK
+        enum from_status
+        enum to_status
+        timestamptz changed_at
+    }
+    INCIDENTS {
+        uuid id PK
+        varchar title
+        text description
+        varchar status "open | in_progress | resolved | closed"
+        uuid booking_id FK
+        uuid user_id FK
+        uuid vehicle_id FK
+        uuid created_by FK
+    }
+    INCIDENT_NOTES {
+        uuid id PK
+        uuid incident_id FK
+        uuid author_id FK
+        text body
     }
 ```
 
-Constraints worth noting: `UNIQUE(booking_id, type)` on checklists, `UNIQUE(booking_id, reviewer_id)` on reviews, `CHECK (end_datetime > start_datetime)` on bookings.
+Constraints worth noting: `UNIQUE(booking_id, type)` on checklists, `UNIQUE(booking_id, reviewer_id)` on reviews, `CHECK (end_datetime > start_datetime)` on bookings. `booking_status_history` is filled by the `trg_booking_status_history` trigger on every insert and status change, so it also captures transitions made by Stripe webhooks and automatic rejections.
 
 ## Getting started
 
@@ -354,15 +393,66 @@ npm run dev:mobile   # Expo dev server
 - In the Expo terminal press `w` for web, `i` for the iOS simulator or `a` for Android, or scan the QR code with Expo Go.
 - Android emulator: set `EXPO_PUBLIC_API_URL=http://10.0.2.2:3000/api`. Physical device: use your machine's LAN IP.
 
+- Admin back office: `npm run dev:admin` on <http://localhost:5174> (see [Admin back office](#admin-back-office)).
+
 ### Other commands
 
 ```bash
 npm run build   # builds every workspace (nest build, expo export --platform web, tsc)
-npm run lint       # eslint on the API (placeholders in the other workspaces)
+npm run lint       # eslint on the API and the admin web (placeholders in the other workspaces)
 npm run typecheck  # tsc in every workspace
-npm run test       # jest unit tests on the API
+npm run test       # jest unit tests on the API, vitest on the admin web
 npm run test:e2e   # API e2e tests against a local Postgres + PostGIS (see Testing)
 ```
+
+## Admin back office
+
+`apps/admin` is a small Vite + React single-page app for operating the platform. It signs in with the same Supabase Auth accounts as the mobile app and only talks to the API under `/api/admin`, which is protected by `AdminGuard`: a valid Supabase JWT **and** `users.is_admin = true` in the database (token claims are never trusted for the role).
+
+**1. Apply the migration.** `infra/db/migrations/202610310900_admin_backoffice.sql` (idempotent) adds `users.is_admin`, `users.blocked_at`, `vehicles.disabled_by_admin_at`, review moderation columns, the `booking_status_history` table with its trigger, and the `incidents` / `incident_notes` tables:
+
+```bash
+npm run db:migrate:remote
+```
+
+**2. Make someone an admin.** The account must already exist (sign up in the app first). The script uses `DATABASE_URL` from the environment or `apps/api/.env`:
+
+```bash
+npm run admin:set -- admin@example.com            # grant
+npm run admin:set -- admin@example.com --revoke   # revoke
+```
+
+Equivalent SQL:
+
+```sql
+UPDATE public.users SET is_admin = TRUE
+WHERE id = (SELECT id FROM auth.users WHERE email = 'admin@example.com');
+```
+
+**3. Configure and run.**
+
+```bash
+cp apps/admin/.env.example apps/admin/.env   # fill in the variables below
+npm run dev:admin                             # http://localhost:5174
+npm run build -w @lynkdrive/admin             # static build in apps/admin/dist (Vercel, Netlify...)
+```
+
+If the API sets `CORS_ORIGINS`, add the admin origin (for example `http://localhost:5174`). To see ID documents and checklist photos, the API needs `SUPABASE_SERVICE_ROLE_KEY`; links are signed with `SUPABASE_SIGNED_URL_TTL_SECONDS` (max 1 hour).
+
+**API endpoints** (all under `/api/admin`, paginated with `page` / `pageSize` up to 100):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/me`, `/dashboard` | Current admin profile, platform metrics |
+| GET | `/users`, `/users/:id` | List (`search`, `filter`) and detail with signed document URLs |
+| PUT | `/users/:id/verification`, `/users/:id/block` | `{ isVerified }`, `{ blocked, reason? }` |
+| GET / PUT | `/vehicles`, `/vehicles/:id/status` | List (`search`, `status`), `{ status: active \| inactive }` |
+| GET / PUT | `/reviews`, `/reviews/:id/visibility` | List (`visibility`, `maxRating`), `{ hidden, reason? }` |
+| GET | `/bookings`, `/bookings/:id` | List (`status`), detail with status history and signed checklist photos |
+| GET / POST | `/incidents`, `/incidents/:id` | List (`status`), create `{ title, description, bookingId?, userId?, vehicleId? }`, detail with notes |
+| PUT / POST | `/incidents/:id/status`, `/incidents/:id/notes` | `{ status }`, `{ body }` |
+
+Blocking takes effect within 30 seconds (the JWT guard caches the blocked flag briefly) and, when the service role key is configured, the user is also banned in Supabase Auth so they cannot refresh their session.
 
 ## Environment variables
 
@@ -416,6 +506,16 @@ npm run test:e2e   # API e2e tests against a local Postgres + PostGIS (see Testi
 | `EXPO_PUBLIC_SUPABASE_STORAGE_URL` | optional | Explicit Storage URL instead of deriving it |
 | `EXPO_PUBLIC_SUPABASE_PUBLIC_BUCKETS` | `vehicles,avatars` | Buckets that can be rendered directly |
 
+### Admin (`apps/admin/.env`)
+
+| Variable | Example | Purpose |
+|---|---|---|
+| `VITE_API_URL` | `http://localhost:3000/api` | Base URL of the NestJS API |
+| `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` | Supabase Auth |
+| `VITE_SUPABASE_ANON_KEY` | anon key | Supabase client (public key, same as the mobile app) |
+
+The admin session is kept in `sessionStorage`, so it ends when the browser tab is closed.
+
 ## Project structure
 
 ```text
@@ -423,7 +523,8 @@ lynkdrive/
 ├── apps/
 │   ├── api/                      # NestJS API, global prefix /api
 │   │   └── src/
-│   │       ├── auth/             # SupabaseJwtAuthGuard, @CurrentUser
+│   │       ├── admin/            # back office endpoints (/api/admin)
+│   │       ├── auth/             # SupabaseJwtAuthGuard, AdminGuard, @CurrentUser
 │   │       ├── users/            # /users/me, overview, soft-delete
 │   │       ├── vehicles/         # CRUD + PostGIS radius search
 │   │       ├── vehicle-images/
@@ -435,6 +536,8 @@ lynkdrive/
 │   │       ├── reviews/
 │   │       ├── uploads/          # Supabase Storage, signed URLs
 │   │       └── geocoding/        # Nominatim proxy with cache
+│   ├── admin/                    # back office web (Vite + React)
+│   │   └── src/                  # pages, components, API client, Supabase session
 │   └── mobile/                   # Expo app (iOS / Android / Web)
 │       ├── App.tsx               # composition root: session, tabs, wiring
 │       └── src/
@@ -450,19 +553,19 @@ lynkdrive/
 │   └── db/
 │       ├── migrations/           # versioned SQL (auth.users -> users trigger)
 │       └── seeds/                # demo vehicles
-├── scripts/                      # migration runner and smoke tests
+├── scripts/                      # migration runner, set-admin and smoke tests
 └── docs/                         # documentation and screenshots
 ```
 
 ## Testing
 
-**Unit tests** (Jest, API workspace) cover the booking state machine and pricing, overlap and hand-over buffer rules, automatic rejection of overlapping requests, checklists, reviews, uploads (including real image content checks), the JWT guard, Stripe webhooks and the GDPR export/delete flow:
+**Unit tests** (Jest, API workspace) cover the booking state machine and pricing, overlap and hand-over buffer rules, automatic rejection of overlapping requests, checklists, reviews, uploads (including real image content checks), the JWT and admin guards, the admin service, Stripe webhooks and the GDPR export/delete flow:
 
 ```bash
 npm run test
 ```
 
-**E2E tests** run the booking flow against a real Postgres + PostGIS (the schema is recreated on every run). Never point them at the Supabase database:
+**E2E tests** run the booking flow and the admin back office against a real Postgres + PostGIS (the schema is recreated on every run). Never point them at the Supabase database:
 
 ```bash
 docker run -d --name lynkdrive-test-pg -e POSTGRES_PASSWORD=postgres \
@@ -470,7 +573,7 @@ docker run -d --name lynkdrive-test-pg -e POSTGRES_PASSWORD=postgres \
 TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:55432/lynkdrive_test npm run test:e2e
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) runs lint, typecheck, build, unit and e2e tests on every push and pull request to `dev` and `main`.
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, typecheck, build, unit and e2e tests on every push and pull request to `integracion`, `dev` and `main`, and builds the admin web.
 
 **Smoke scripts** (bash + curl + node) run against a live API:
 
@@ -499,7 +602,7 @@ The payments smoke test works in both modes: real Stripe (with `STRIPE_SECRET_KE
 
 - "My earnings" panel for owners.
 - Import `@lynkdrive/shared` from both apps instead of mirroring types.
-- In-app chat, transactional emails, push notifications and an admin back office.
+- In-app chat, transactional emails and push notifications.
 - Strong identity verification (eIDAS / DNIe / Cl@ve) instead of manual document review.
 
 ## License

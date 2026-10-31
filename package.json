@@ -15,7 +15,9 @@
     "lint": "npm run lint -ws",
     "typecheck": "npm run typecheck -ws --if-present",
     "test:e2e": "npm run test:e2e -w @lynkdrive/api",
-    "test": "npm run test -ws"
+    "test": "npm run test -ws",
+    "dev:admin": "npm run dev -w @lynkdrive/admin",
+    "admin:set": "node scripts/set-admin.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

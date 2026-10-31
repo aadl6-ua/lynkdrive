@@ -43,6 +43,17 @@
     - `scripts/dev/supabase-local-mock.js`: mock local de Supabase Auth + Storage para recorrer la app sin proyecto real (QA, demos y capturas). Solo desarrollo.
     - Pendientes para producción en `docs/salida-a-produccion.md`.
 
+- **Backoffice de administración (2026-10-31):**
+    - Rol en BD: `users.is_admin` (migración `202610310900_admin_backoffice.sql`); nunca se toma de claims del JWT. Se concede con `npm run admin:set -- <email>` (`--revoke` para retirar).
+    - API bajo `/api/admin` con `AdminGuard` (envuelve `SupabaseJwtAuthGuard` y exige `is_admin`, no borrado ni bloqueado). Servicio con SQL vía `DataSource`, paginación `page`/`pageSize` (máx. 100) y query DTOs con `ValidationPipe({ transform: true })` local.
+    - Bloqueo: `users.blocked_at/blocked_reason`; `SupabaseJwtAuthGuard` responde 403 a usuarios bloqueados (cache en memoria de 30 s, invalidada al bloquear/desbloquear) y, con service role, se banea también en Supabase Auth.
+    - Vehículos: desactivar desde admin fija `vehicles.disabled_by_admin_at`; el propietario recibe 403 si intenta reactivarlo (`PUT /vehicles/:id` con `status: active`). Solo un admin lo reactiva.
+    - Moderación de reseñas: `reviews.hidden_at/hidden_reason`; las ocultas no se listan ni cuentan en la media del perfil.
+    - Historial de reservas: tabla `booking_status_history` alimentada por trigger SQL (cubre API, webhooks y rechazos automáticos).
+    - Incidencias: tablas `incidents` (estados `open`, `in_progress`, `resolved`, `closed`) e `incident_notes`.
+    - Documentos y evidencias se devuelven como URLs firmadas temporales (`resolveFileUrl` en `common/supabase-storage.ts`); sin service role se devuelve `null`.
+    - Web `apps/admin`: Vite + React + TypeScript sin librería de UI ni router (router por hash), login con Supabase Auth (sesión en `sessionStorage`), mismos tokens visuales que la app. Variables `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+
 ---
 
 ## 1. Descripción del Proyecto
@@ -874,6 +885,7 @@ SUPABASE_STORAGE_URL=<url_del_storage>
 lynkdrive/
     apps/
         api/                # NestJS API (fuente única de lógica de negocio)
+        admin/              # Backoffice web (Vite + React)
         mobile/             # Expo React Native (iOS/Android/Web)
     packages/
         shared/             # Tipos, DTOs y contratos compartidos
