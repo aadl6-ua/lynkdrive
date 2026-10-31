@@ -206,4 +206,16 @@ describe('Backoffice admin e2e', () => {
     const booking = await asAdmin(api().get(`/api/admin/bookings/${BOOKING_ID}`)).expect(200);
     expect(booking.body.incidents).toHaveLength(1);
   });
+
+  it('la exportación RGPD del conductor incluye las incidencias de sus reservas sin el autor de las notas', async () => {
+    const exported = await api().get('/api/users/me/export').set('Authorization', `Bearer ${driverToken}`).expect(200);
+
+    expect(exported.body.incidents).toHaveLength(1);
+    expect(exported.body.incidents[0]).toMatchObject({ title: 'Rayón en puerta', status: 'resolved' });
+    expect(exported.body.incidents[0].notes).toEqual([
+      expect.objectContaining({ note: 'Contactado el conductor' })
+    ]);
+    expect(JSON.stringify(exported.body.incidents)).not.toContain(ADMIN_ID);
+    expect(exported.body.profile).toHaveProperty('blockedAt', null);
+  });
 });
