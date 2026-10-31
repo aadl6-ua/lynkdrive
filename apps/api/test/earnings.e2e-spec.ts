@@ -42,7 +42,8 @@ describe('Mis ingresos e2e (GET /api/earnings/mine)', () => {
 
   async function insertBooking(vid: string, status: string, daysAgo: number, total: number): Promise<void> {
     const start = new Date(Date.now() - daysAgo * DAY_MS);
-    const end = new Date(start.getTime() + 2 * DAY_MS);
+    // 12 h para que las reservas confirmadas del mismo coche no se solapen (excl_bookings_no_overlap).
+    const end = new Date(start.getTime() + DAY_MS / 2);
     await withDb((client) =>
       client.query(
         `INSERT INTO bookings (vehicle_id, driver_id, start_datetime, end_datetime, price_per_day_at_booking, total_price, status)
