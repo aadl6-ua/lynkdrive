@@ -19,6 +19,7 @@ import { VehicleImagesModule } from './vehicle-images/vehicle-images.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { GeocodingModule } from './geocoding/geocoding.module';
         };
       }
     }),
+    NotificationsModule,
     UsersModule,
     AuthModule,
     BookingsModule,
