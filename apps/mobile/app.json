@@ -73,6 +73,12 @@
         {
           "locationWhenInUsePermission": "LynkDrive usa tu ubicación para mostrarte vehículos cercanos y situarte en el mapa."
         }
+      ],
+      [
+        "@stripe/stripe-react-native",
+        {
+          "enableGooglePay": false
+        }
       ]
     ]
   }

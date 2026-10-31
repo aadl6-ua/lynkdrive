@@ -39,7 +39,7 @@ Qué está listo para publicar LynkDrive como producto real y qué falta, revisa
 - [ ] **EAS**: `eas init`, `eas.json` con perfiles `preview` y `production`, variables `EXPO_PUBLIC_*` como secretos de EAS, `eas build` y `eas submit`. Subir `buildNumber`/`versionCode` en cada envío.
 - [ ] Fichas de tienda: capturas (`docs/screenshots`), descripción, categoría, clasificación por edades, formulario de **Privacidad de datos** (App Store) y **Seguridad de los datos** (Play), declarando ubicación aproximada, fotos, documentos de identidad y datos de pago (vía Stripe).
 - [ ] Apple exige poder **borrar la cuenta desde la app** (ya está) y una cuenta de prueba para la revisión. Preparar usuarios demo verificados.
-- [ ] Plugin de configuración de `@stripe/stripe-react-native` en `app.json` (con `merchantIdentifier` si se activa Apple Pay) antes del primer build nativo.
+- [ ] El plugin de `@stripe/stripe-react-native` ya está en `app.json` (Google Pay desactivado). Para Apple Pay hace falta un `merchantIdentifier` y configurarlo en la cuenta de Apple.
 
 ### Dominio, web y correo
 - [ ] Dominio propio (p. ej. `lynkdrive.es`) para la web en Vercel y la API (Render permite dominio propio).
