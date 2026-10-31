@@ -89,7 +89,13 @@ export function EarningsScreen({ topPadding = 0, bottomPadding = 0, onBack, onPu
       }
     } catch (loadError) {
       if (requestId === requestIdRef.current) {
-        setError(getApiErrorMessage(loadError, 'No se han podido cargar tus ingresos.'));
+        const status = (loadError as { response?: { status?: number } }).response?.status ?? 0;
+        // Los 5xx traen mensajes técnicos en inglés: mostramos el genérico.
+        setError(
+          status >= 500
+            ? 'No se han podido cargar tus ingresos.'
+            : getApiErrorMessage(loadError, 'No se han podido cargar tus ingresos.')
+        );
       }
     } finally {
       if (requestId === requestIdRef.current) {
@@ -159,7 +165,7 @@ export function EarningsScreen({ topPadding = 0, bottomPadding = 0, onBack, onPu
         <Card>
           <CardHeader
             title="Resumen del periodo"
-            subtitle={`${RANGE_LABEL[range]} · ${data.rangeTotals.bookings} ${pluralize(data.rangeTotals.bookings, 'reserva', 'reservas')}`}
+            subtitle={`${RANGE_LABEL[range]} · ${pluralize(data.rangeTotals.bookings, 'reserva', 'reservas')}`}
             icon="stats-chart-outline"
           />
           <View>
@@ -197,7 +203,7 @@ export function EarningsScreen({ topPadding = 0, bottomPadding = 0, onBack, onPu
                     </Text>
                     <View style={styles.inlineMeta}>
                       <Text style={styles.caption}>
-                        {vehicle.licensePlate} · {vehicle.bookings} {pluralize(vehicle.bookings, 'reserva', 'reservas')}
+                        {vehicle.licensePlate} · {pluralize(vehicle.bookings, 'reserva', 'reservas')}
                       </Text>
                       {vehicle.isDeleted ? <StatusChip label="Retirado" compact /> : null}
                     </View>
@@ -267,7 +273,7 @@ function SummaryTile({
         {formatCurrencyEUR(totals.netAmount)}
       </Text>
       <Text style={[styles.caption, highlight ? styles.tileCaptionHighlight : null]} numberOfLines={2}>
-        {totals.bookings} {pluralize(totals.bookings, 'reserva', 'reservas')} · bruto {formatCurrencyEUR(totals.grossAmount)}
+        {pluralize(totals.bookings, 'reserva', 'reservas')} · bruto {formatCurrencyEUR(totals.grossAmount)}
       </Text>
     </Card>
   );
@@ -281,8 +287,9 @@ function BookingEarningCard({ booking }: { booking: EarningsBooking }) {
           <Text style={styles.rowTitle} numberOfLines={1}>
             {booking.vehicleLabel}
           </Text>
+          <Text style={styles.caption}>{formatDateRangeMadrid(booking.startDatetime, booking.endDatetime)}</Text>
           <Text style={styles.caption} numberOfLines={1}>
-            {booking.driver.displayName} · {formatDateRangeMadrid(booking.startDatetime, booking.endDatetime)}
+            Conductor: {booking.driver.displayName}
           </Text>
         </View>
         <Text style={styles.rowAmount}>{formatCurrencyEUR(booking.netAmount)}</Text>
