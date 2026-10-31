@@ -775,14 +775,9 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
         />
 
         <View style={styles.detailTitleBlock}>
-          <View style={styles.detailTitleRow}>
-            <Text style={styles.detailTitle} accessibilityRole="header">
-              {selectedVehicle.brand} {selectedVehicle.model}
-            </Text>
-            <View style={styles.detailPrice}>
-              <Text style={styles.detailPriceValue}>{formatPriceCompact(selectedVehicle.pricePerDay)}</Text>
-              <Text style={styles.detailPriceUnit}>/día</Text>
-            </View>
+          <View style={styles.detailPrice}>
+            <Text style={styles.detailPriceValue}>{formatPriceCompact(selectedVehicle.pricePerDay)}</Text>
+            <Text style={styles.detailPriceUnit}>/día</Text>
           </View>
           <View style={styles.metaRow}>
             <Ionicons name="location-outline" size={16} color={colorTokens.textMuted} />
@@ -1398,17 +1393,6 @@ const styles = StyleSheet.create({
   },
   detailTitleBlock: {
     gap: spacingTokens.xs
-  },
-  detailTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacingTokens.md
-  },
-  detailTitle: {
-    flex: 1,
-    color: colorTokens.primary,
-    ...typographyTokens.h2
   },
   detailPrice: {
     flexDirection: 'row',

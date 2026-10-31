@@ -40,7 +40,7 @@ export function VehicleLocationMap({ vehicleLocation, userLocation, height = 260
   if (!nativeMaps) {
     return (
       <View style={[styles.fallback, { height }]}>
-        <Text style={styles.fallbackText}>Mapa no disponible temporalmente en esta build nativa.</Text>
+        <Text style={styles.fallbackText}>El mapa no está disponible en esta versión de la app.</Text>
       </View>
     );
   }
@@ -51,7 +51,7 @@ export function VehicleLocationMap({ vehicleLocation, userLocation, height = 260
   if (!hasVehicleCoords) {
     return (
       <View style={[styles.fallback, { height }]}>
-        <Text style={styles.fallbackText}>No se pudo renderizar el mapa por coordenadas invalidas del vehiculo.</Text>
+        <Text style={styles.fallbackText}>No se puede mostrar el mapa: la ubicación del vehículo no es válida.</Text>
       </View>
     );
   }

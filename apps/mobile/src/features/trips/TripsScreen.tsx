@@ -1780,6 +1780,9 @@ const styles = StyleSheet.create({
     borderWidth: 6
   },
   timelineLabel: {
+    // Se deja desbordar un poco la columna para que "Completada" no se parta.
+    alignSelf: 'stretch',
+    marginHorizontal: -8,
     textAlign: 'center',
     color: colorTokens.textMuted,
     ...typographyTokens.caption,
@@ -1787,6 +1790,8 @@ const styles = StyleSheet.create({
     lineHeight: 14
   },
   timelineLabelCurrent: {
+    alignSelf: 'stretch',
+    marginHorizontal: -8,
     color: colorTokens.primary,
     ...typographyTokens.captionStrong,
     fontSize: 11,

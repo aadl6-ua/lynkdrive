@@ -55,7 +55,7 @@ export function AppImage({
     return (
       <View style={[styles.fallback, style]} accessibilityLabel={accessibilityLabel ?? fallbackLabel} accessible>
         <Ionicons name={failed ? 'image-outline' : fallbackIcon} size={28} color={colorTokens.textSubtle} />
-        {fallbackLabel ? <Text style={styles.fallbackText}>{failed ? 'No se pudo cargar la imagen' : fallbackLabel}</Text> : null}
+        {fallbackLabel ? <Text style={styles.fallbackText} numberOfLines={2}>{failed ? 'No se pudo cargar la imagen' : fallbackLabel}</Text> : null}
       </View>
     );
   }

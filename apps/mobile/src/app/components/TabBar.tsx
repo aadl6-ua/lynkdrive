@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../theme/tokens';
 import { APP_TABS, AppTabKey } from '../types';
@@ -40,7 +40,8 @@ export function TabBar({ activeTab, onChangeTab, bottom = false }: TabBarProps) 
               <Pressable
                 key={tab.key}
                 onPress={() => onChangeTab(tab.key)}
-                style={styles.mobileTab}
+                android_ripple={{ color: 'rgba(13,27,42,0.08)', borderless: true, radius: 36 }}
+                style={({ pressed }) => [styles.mobileTab, pressed && Platform.OS === 'ios' ? styles.mobileTabPressed : null]}
                 accessibilityRole="tab"
                 accessibilityLabel={tab.label}
                 accessibilityState={{ selected: isActive }}
@@ -203,6 +204,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 2,
     minHeight: 52
+  },
+  mobileTabPressed: {
+    opacity: 0.6
   },
   mobileIconPill: {
     width: 48,

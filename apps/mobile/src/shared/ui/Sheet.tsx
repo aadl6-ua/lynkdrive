@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { ReactNode } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 import { IconButton } from './Button';
@@ -22,7 +22,10 @@ export function Sheet({ visible, onClose, title, subtitle, children, centered = 
 
   return (
     <Modal visible={visible} transparent animationType={asDialog ? 'fade' : 'slide'} onRequestClose={onClose}>
-      <View style={[styles.backdrop, asDialog ? styles.backdropCentered : null]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={[styles.backdrop, asDialog ? styles.backdropCentered : null]}
+      >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Cerrar" accessibilityRole="button" />
         <View
           style={[
@@ -47,7 +50,7 @@ export function Sheet({ visible, onClose, title, subtitle, children, centered = 
             {children}
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
