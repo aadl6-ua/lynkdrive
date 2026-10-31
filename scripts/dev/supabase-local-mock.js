@@ -4,7 +4,7 @@
  * sin depender de un proyecto real. NO usar en producción.
  *
  * - Auth: signup / login con contraseña / refresh / user / logout / recover y
- *   borrado admin. Los JWT se firman en HS256 con SUPABASE_JWT_SECRET, el mismo
+ *   alta y borrado admin. Los JWT se firman en HS256 con SUPABASE_JWT_SECRET, el mismo
  *   secreto que debe usar la API (modo legacy HS256 del guard).
  * - Alta: inserta en auth.users de la BD local para que el trigger cree public.users.
  *   Las contraseñas se guardan solo en memoria y con hash scrypt.
@@ -220,6 +220,14 @@ async function handleAuth(req, res, url, body) {
 
   if (route === '/logout' && req.method === 'POST') return send(res, 204);
   if (route === '/recover' && req.method === 'POST') return send(res, 200, {});
+
+  if (route === '/admin/users' && req.method === 'POST') {
+    const { email, password, user_metadata: meta } = parseJson(body);
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized || !password) return authError(res, 400, 'Invalid email');
+    if (accounts.has(normalized)) return authError(res, 422, 'A user with this email address has already been registered');
+    return send(res, 200, toUser(await createAccount(normalized, password, meta || {})));
+  }
 
   const adminMatch = route.match(/^\/admin\/users\/([0-9a-f-]{36})$/i);
   if (adminMatch && req.method === 'DELETE') {
