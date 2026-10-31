@@ -308,6 +308,12 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
       ? { latitude: userLocationCoords.latitude, longitude: userLocationCoords.longitude }
       : null;
 
+  // Las distancias se miden desde la ubicación buscada si la hay (es por la que ordena y filtra
+  // la API); si no, desde la ubicación del usuario.
+  const distanceOrigin = appliedFilters.location
+    ? { latitude: appliedFilters.location.lat, longitude: appliedFilters.location.lng }
+    : userPoint;
+
   // Con una ubicación buscada la API ya ordena por cercanía a ese punto; si no, se ordena
   // por cercanía al usuario cuando ha dado permiso de ubicación.
   const listVehicles = useMemo(() => {
@@ -766,8 +772,8 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
     const ownerAvatarUrl = resolveStoredImageUrl(owner?.avatarUrl ?? null);
     const fuel = translateFuelType(selectedVehicle.fuelType);
     const transmission = translateTransmission(selectedVehicle.transmission);
-    const distance = userPoint
-      ? getDistanceKm(userPoint, { latitude: selectedVehicle.locationLat, longitude: selectedVehicle.locationLng })
+    const distance = distanceOrigin
+      ? getDistanceKm(distanceOrigin, { latitude: selectedVehicle.locationLat, longitude: selectedVehicle.locationLng })
       : null;
     const billableDays = bookingRange ? getBillableDays(bookingRange.startISO, bookingRange.endISO) : null;
     const upcomingBlocked = vehicleBookings
@@ -1061,8 +1067,8 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
               const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
               const fuel = translateFuelType(vehicle.fuelType);
               const transmission = translateTransmission(vehicle.transmission);
-              const distance = userPoint
-                ? getDistanceKm(userPoint, { latitude: vehicle.locationLat, longitude: vehicle.locationLng })
+              const distance = distanceOrigin
+                ? getDistanceKm(distanceOrigin, { latitude: vehicle.locationLat, longitude: vehicle.locationLng })
                 : null;
 
               return (
