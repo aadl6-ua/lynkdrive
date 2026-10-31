@@ -31,15 +31,12 @@ export class ReviewsService {
       await this.ensureBookingParticipant(bookingId, userId);
     }
 
-    const where = bookingId ? { bookingId } : undefined;
-    const reviews = await this.reviewsRepository.find({
-      where,
+    // Sin bookingId: las reseñas donde el usuario participa (autor o destinatario),
+    // filtradas en BD en lugar de cargar todas las reseñas de la plataforma.
+    const visible = await this.reviewsRepository.find({
+      where: bookingId ? { bookingId } : [{ reviewerId: userId }, { revieweeId: userId }],
       order: { createdAt: 'DESC' }
     });
-
-    const visible = bookingId
-      ? reviews
-      : await this.filterReviewsByParticipation(reviews, userId);
 
     return visible.map((item) => this.toResponseDto(item));
   }
@@ -163,34 +160,6 @@ export class ReviewsService {
     }
 
     return booking;
-  }
-
-  private async filterReviewsByParticipation(
-    reviews: ReviewEntity[],
-    userId: string
-  ): Promise<ReviewEntity[]> {
-    if (reviews.length === 0) {
-      return [];
-    }
-
-    const bookingIds = Array.from(new Set(reviews.map((review) => review.bookingId)));
-    const rows = await this.reviewsRepository.query(
-      `
-        SELECT b.id AS booking_id, v.owner_id, b.driver_id
-        FROM bookings b
-        INNER JOIN vehicles v ON v.id = b.vehicle_id
-        WHERE b.id = ANY($1::uuid[])
-      `,
-      [bookingIds]
-    );
-
-    const allowedBookingIds = new Set(
-      (rows as Array<{ booking_id: string; owner_id: string; driver_id: string }>)
-        .filter((row) => row.owner_id === userId || row.driver_id === userId)
-        .map((row) => row.booking_id)
-    );
-
-    return reviews.filter((review) => allowedBookingIds.has(review.bookingId));
   }
 
   private validateRating(rating: number): void {
