@@ -26,6 +26,8 @@ export interface VehicleResponse<TDate = IsoDateString> {
   seats: number | null;
   status: VehicleStatus;
   createdAt: TDate;
+  /** Solo en `GET /vehicles/mine/list`: retirado desde el backoffice (el propietario no puede reactivarlo). */
+  disabledByAdmin?: boolean;
 }
 
 /** Cuerpo de `POST /vehicles` (el propietario se toma del JWT). */
