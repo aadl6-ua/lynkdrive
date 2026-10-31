@@ -145,6 +145,9 @@ describe('Backoffice admin e2e', () => {
 
     const ownerView = await api().get(`/api/reviews?bookingId=${BOOKING_ID}`).set('Authorization', `Bearer ${ownerToken}`);
     expect(ownerView.body).toEqual([]);
+    // El autor sigue viendo su reseña oculta.
+    const driverView = await api().get(`/api/reviews?bookingId=${BOOKING_ID}`).set('Authorization', `Bearer ${driverToken}`);
+    expect(driverView.body.map((review: { id: string }) => review.id)).toEqual([REVIEW_ID]);
 
     const list = await asAdmin(api().get('/api/admin/reviews?visibility=hidden')).expect(200);
     expect(list.body.items[0]).toMatchObject({ id: REVIEW_ID, hiddenReason: 'Lenguaje ofensivo' });

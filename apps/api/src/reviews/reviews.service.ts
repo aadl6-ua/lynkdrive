@@ -31,7 +31,13 @@ export class ReviewsService {
       await this.ensureBookingParticipant(bookingId, userId);
     }
 
-    const where = bookingId ? { bookingId, hiddenAt: IsNull() } : { hiddenAt: IsNull() };
+    // Las reseñas ocultas por moderación solo las sigue viendo su autor (evita que la app
+    // le ofrezca reseñar de nuevo y choque con la unicidad).
+    const scope = bookingId ? { bookingId } : {};
+    const where = [
+      { ...scope, hiddenAt: IsNull() },
+      { ...scope, reviewerId: userId }
+    ];
     const reviews = await this.reviewsRepository.find({
       where,
       order: { createdAt: 'DESC' }
