@@ -1,18 +1,20 @@
 import { create } from 'zustand';
 
+export type PendingBookingTarget = { bookingId: string; openMessages: boolean };
+
 type PushNotificationsState = {
-  /** Reserva a abrir en Mis Viajes tras tocar una notificación. */
-  pendingBookingId: string | null;
-  openBooking: (bookingId: string) => void;
-  consumePendingBooking: () => string | null;
+  /** Reserva a abrir en Mis Viajes tras tocar una notificación (y si hay que ir a sus mensajes). */
+  pendingBooking: PendingBookingTarget | null;
+  openBooking: (bookingId: string, openMessages?: boolean) => void;
+  consumePendingBooking: () => PendingBookingTarget | null;
 };
 
 export const usePushNotificationsStore = create<PushNotificationsState>((set, get) => ({
-  pendingBookingId: null,
-  openBooking: (bookingId) => set({ pendingBookingId: bookingId }),
+  pendingBooking: null,
+  openBooking: (bookingId, openMessages = false) => set({ pendingBooking: { bookingId, openMessages } }),
   consumePendingBooking: () => {
-    const bookingId = get().pendingBookingId;
-    set({ pendingBookingId: null });
-    return bookingId;
+    const pending = get().pendingBooking;
+    set({ pendingBooking: null });
+    return pending;
   }
 }));
