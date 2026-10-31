@@ -82,7 +82,7 @@ export class CreateVehicleDto implements CreateVehicleRequest {
 
   @IsOptional()
   @IsInt()
-  @Min(0)
+  @Min(1)
   @Max(100)
   seats?: number;
 

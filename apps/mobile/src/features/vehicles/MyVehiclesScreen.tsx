@@ -289,7 +289,8 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
   }, [form, screenMode, editingVehicle]);
 
   const buildPayload = (status: VehicleItem['status']) => {
-    const seats = parseLocaleNumber(form.seats);
+    // "Sin especificar" es una cadena vacía: Number('') daría 0 plazas.
+    const seats = form.seats.trim() ? parseLocaleNumber(form.seats) : NaN;
 
     return {
       brand: form.brand.trim(),

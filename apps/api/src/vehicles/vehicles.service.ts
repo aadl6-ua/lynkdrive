@@ -287,9 +287,11 @@ export class VehiclesService {
     const nextLocationLat = updateVehicleDto.locationLat ?? current.locationLat;
     const nextLocationLng = updateVehicleDto.locationLng ?? current.locationLng;
     const nextLocationAddress = updateVehicleDto.locationAddress ?? current.locationAddress;
-    const nextFuelType = updateVehicleDto.fuelType ?? current.fuelType;
-    const nextTransmission = updateVehicleDto.transmission ?? current.transmission;
-    const nextSeats = updateVehicleDto.seats ?? current.seats;
+    // En los campos opcionales `undefined` conserva y `null` borra (misma regla que PUT /users/me).
+    const nextFuelType = updateVehicleDto.fuelType === undefined ? current.fuelType : updateVehicleDto.fuelType;
+    const nextTransmission =
+      updateVehicleDto.transmission === undefined ? current.transmission : updateVehicleDto.transmission;
+    const nextSeats = updateVehicleDto.seats === undefined ? current.seats : updateVehicleDto.seats;
     const nextStatus = updateVehicleDto.status ?? current.status;
 
     await this.vehiclesRepository.query(
