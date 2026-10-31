@@ -1,3 +1,4 @@
+import { BOOKING_STATUSES } from '@lynkdrive/shared';
 import {
   BOOKING_STATUS_LABEL,
   BOOKING_STATUS_TONE,
@@ -20,6 +21,11 @@ const ALL_STATUSES: BookingStatus[] = [
 ];
 
 describe('helpers de estado de reserva', () => {
+  it('cubre exactamente los estados del contrato compartido', () => {
+    expect(ALL_STATUSES).toEqual([...BOOKING_STATUSES]);
+    expect(Object.keys(BOOKING_STATUS_LABEL).sort()).toEqual([...BOOKING_STATUSES].sort());
+  });
+
   it('tiene etiqueta y tono para todos los estados', () => {
     for (const status of ALL_STATUSES) {
       expect(BOOKING_STATUS_LABEL[status]).toBeTruthy();

@@ -1,27 +1,11 @@
+import type { UpdateMyProfileRequest, UserResponse } from '@lynkdrive/shared';
 import { create } from 'zustand';
 import { httpClient } from '../api/http';
 import { getApiErrorMessage } from '../shared/errors';
 
-export interface UserProfile {
-  id: string;
-  firstName: string;
-  lastName: string;
-  phoneNumber: string | null;
-  avatarUrl: string | null;
-  idDocumentUrl: string | null;
-  driverLicenseUrl: string | null;
-  isVerified: boolean;
-  createdAt: string;
-}
+export type UserProfile = UserResponse;
 
-interface UserProfileMutation {
-  firstName: string;
-  lastName: string;
-  phoneNumber: string | null;
-  avatarUrl: string | null;
-  idDocumentUrl: string | null;
-  driverLicenseUrl: string | null;
-}
+type UserProfileMutation = Required<UpdateMyProfileRequest>;
 
 interface UserProfileState {
   profile: UserProfile | null;

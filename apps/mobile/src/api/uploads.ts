@@ -1,23 +1,7 @@
+import type { UploadImageResponse, UploadTarget } from '@lynkdrive/shared';
 import { httpClient } from './http';
 
-export type UploadTarget =
-  | 'avatar'
-  | 'id_document'
-  | 'driver_license'
-  | 'vehicle_image'
-  | 'checklist_image';
-
-export type UploadImageResponse = {
-  bucket: string;
-  path: string;
-  publicUrl: string | null;
-  signedUrl: string | null;
-  fileUrl: string;
-  persistedValue: string;
-  isPublicBucket: boolean;
-  mimeType: string;
-  sizeBytes: number;
-};
+export type { UploadImageResponse, UploadTarget };
 
 type UploadImageParams = {
   target: UploadTarget;

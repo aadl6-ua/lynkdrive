@@ -1,3 +1,4 @@
+import type { BookingStatus } from '@lynkdrive/shared';
 import { madridWallTimeToDate } from '../../shared/format';
 
 /**
@@ -15,7 +16,7 @@ export type BookingItem = {
   id: string;
   startDatetime: string;
   endDatetime: string;
-  status: 'pending' | 'accepted' | 'rejected' | 'paid_confirmed' | 'in_progress' | 'completed' | 'cancelled';
+  status: BookingStatus;
 };
 
 export type DayStatus = 'past' | 'unavailable' | 'partial' | 'available';

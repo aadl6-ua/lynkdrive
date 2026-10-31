@@ -1,13 +1,7 @@
+import type { GeocodingSuggestion } from '@lynkdrive/shared';
 import { httpClient } from './http';
 
-export type GeocodingSuggestion = {
-  id: string;
-  label: string;
-  lat: number;
-  lng: number;
-  city: string | null;
-  country: string | null;
-};
+export type { GeocodingSuggestion };
 
 export async function searchGeocodingSuggestions(query: string): Promise<GeocodingSuggestion[]> {
   const trimmed = query.trim();

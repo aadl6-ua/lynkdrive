@@ -1,14 +1,9 @@
+import type { VehicleAvailabilityWindowResponse } from '@lynkdrive/shared';
 import { create } from 'zustand';
 import { httpClient } from '../api/http';
 import { getApiErrorMessage } from '../shared/errors';
 
-interface VehicleAvailabilityWindowItem {
-  id: string;
-  vehicleId: string;
-  startDatetime: string;
-  endDatetime: string;
-  createdAt: string;
-}
+type VehicleAvailabilityWindowItem = VehicleAvailabilityWindowResponse;
 
 interface VehicleAvailabilityWindowsState {
   items: VehicleAvailabilityWindowItem[];

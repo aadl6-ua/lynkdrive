@@ -1,13 +1,7 @@
+import type { BookingStatus, PayoutStatus } from '@lynkdrive/shared';
 import type { StatusChipTone } from './ui/StatusChip';
 
-export type BookingStatus =
-  | 'pending'
-  | 'accepted'
-  | 'rejected'
-  | 'paid_confirmed'
-  | 'in_progress'
-  | 'completed'
-  | 'cancelled';
+export type { BookingStatus };
 
 export const BOOKING_STATUS_LABEL: Record<BookingStatus, string> = {
   pending: 'Pendiente',
@@ -45,7 +39,7 @@ export function isBookingBillable(status: BookingStatus): boolean {
   return status === 'accepted' || status === 'paid_confirmed' || status === 'in_progress' || status === 'completed';
 }
 
-export const PAYOUT_STATUS_LABEL: Record<'pending' | 'processing' | 'paid' | 'failed', string> = {
+export const PAYOUT_STATUS_LABEL: Record<PayoutStatus, string> = {
   pending: 'Pendiente',
   processing: 'En proceso',
   paid: 'Pagado',
