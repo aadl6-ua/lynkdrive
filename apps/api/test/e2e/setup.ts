@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { readdirSync, readFileSync } from 'fs';
 import { SignJWT } from 'jose';
@@ -16,7 +16,7 @@ const MIGRATIONS_DIR = join(__dirname, '..', '..', '..', '..', 'infra', 'db', 'm
 /**
  * Configura el entorno antes de cargar AppModule: BD local de tests, auth en modo
  * HS256 con un secreto de pruebas (sin credenciales reales de Supabase) y pagos
- * en modo prototipo (sin STRIPE_SECRET_KEY).
+ * en modo prototipo (sin STRIPE_SECRET_KEY) y push desactivado.
  */
 export function configureTestEnv(): void {
   process.env.DATABASE_URL = TEST_DATABASE_URL;
@@ -27,6 +27,8 @@ export function configureTestEnv(): void {
   delete process.env.SUPABASE_JWKS_URL;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   delete process.env.STRIPE_SECRET_KEY;
+  // Sin envíos reales a la Expo Push API durante los tests.
+  process.env.PUSH_NOTIFICATIONS_ENABLED = 'false';
 }
 
 /** Recrea el esquema desde cero y aplica las migraciones de infra/db/migrations en orden. */
@@ -96,6 +98,8 @@ export async function createTestApp(): Promise<INestApplication> {
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
+  // Misma validación global que en main.ts.
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: false, transform: false }));
   app.setGlobalPrefix('api');
   await app.init();
 
