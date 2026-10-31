@@ -1,15 +1,19 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { AccountService } from './account.service';
 
 const removeMock = jest.fn().mockResolvedValue({ error: null });
 const deleteUserMock = jest.fn().mockResolvedValue({ error: null });
+let adminConfigured = true;
 
 jest.mock('src/common/supabase-storage', () => ({
   ...jest.requireActual('src/common/supabase-storage'),
-  getSupabaseAdminClient: () => ({
-    storage: { from: () => ({ remove: removeMock }) },
-    auth: { admin: { deleteUser: deleteUserMock } }
-  })
+  getSupabaseAdminClient: () =>
+    adminConfigured
+      ? {
+          storage: { from: () => ({ remove: removeMock }) },
+          auth: { admin: { deleteUser: deleteUserMock } }
+        }
+      : null
 }));
 
 const user = { sub: 'user-1', email: 'a@b.c', claims: {} };
@@ -41,7 +45,18 @@ const profileRow = {
 };
 
 describe('AccountService', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    adminConfigured = true;
+  });
+
+  it('sin configuracion de Supabase admin falla sin anonimizar nada', async () => {
+    adminConfigured = false;
+    const { service, queries } = buildService((sql) => (sql.includes('FROM users') ? [profileRow] : []));
+
+    await expect(service.deleteAccount(user)).rejects.toBeInstanceOf(InternalServerErrorException);
+    expect(queries).toHaveLength(0);
+  });
 
   it('rechaza la baja si hay reservas activas y no toca nada', async () => {
     const { service, queries } = buildService((sql) => {

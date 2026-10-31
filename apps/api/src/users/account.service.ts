@@ -157,6 +157,12 @@ export class AccountService {
   // Supresion: se anonimiza el perfil (soft-delete, sin borrado fisico por integridad del historial),
   // se retiran sus vehiculos, se borran sus ficheros personales y se elimina la cuenta de Supabase Auth.
   async deleteAccount(user: AuthUser): Promise<void> {
+    // Sin cliente admin no se puede borrar la cuenta de auth: se falla antes de anonimizar nada.
+    if (!getSupabaseAdminClient()) {
+      this.logger.error('Falta configuracion de Supabase admin: no se puede eliminar la cuenta de auth');
+      throw new InternalServerErrorException('No se pudo completar la eliminacion de la cuenta');
+    }
+
     const profile = await this.findUserRow(user.sub);
 
     if (profile && !profile.deleted_at) {
