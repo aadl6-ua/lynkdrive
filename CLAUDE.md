@@ -33,9 +33,6 @@
     - En modo `stripe` se prohíbe al conductor pasar a `paid_confirmed` vía `PUT /bookings/:id/status` (solo en `prototype`).
     - Reembolsos al cancelar desde `paid_confirmed` (antes del inicio, según máquina de estados): cancela propietario → 100%; cancela conductor → política Demo 1 (>=48h 100%, 24-48h 50%, <24h 0%). Se hace con `reverse_transfer` + `refund_application_fee` si fue destination charge y con idempotency key por reserva. Si Stripe falla, la cancelación no se aplica. En `prototype` no hay reembolsos.
     - Mobile: pago real con **PaymentSheet** de `@stripe/stripe-react-native` (versión fijada por Expo SDK, incluida en Expo Go), cargado de forma diferida en `stripeSheet.native.ts`; en web se muestra aviso (pago con tarjeta solo en app iOS/Android). UI nueva aislada en `apps/mobile/src/features/payments/` (`PaymentAction`, `OwnerPayoutsCard`); la tarjeta de cobros de Perfil solo aparece en modo `stripe`.
-
----
-
 - **Panel Mis ingresos (2026-10-31):**
     - Endpoint `GET /api/earnings/mine` (JWT; solo reservas de vehículos cuyo `owner_id` es el `sub`, incluidos vehículos con soft-delete). Módulo `apps/api/src/earnings` de solo lectura.
     - Cuentan solo reservas `paid_confirmed`, `in_progress` y `completed`. Las `cancelled` no cuentan (aunque tuvieran reembolso parcial): el importe reembolsado no se persiste en BD, así que no se puede calcular de forma fiable.
