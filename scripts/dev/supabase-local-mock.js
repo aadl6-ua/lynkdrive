@@ -117,7 +117,9 @@ function send(res, status, body, headers = {}) {
   const isBuffer = Buffer.isBuffer(body);
   res.writeHead(status, {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': '*',
+    // Lista explícita: el comodín '*' no cubre Authorization y Safari lo rechaza.
+    'Access-Control-Allow-Headers':
+      'authorization, apikey, content-type, x-client-info, x-supabase-api-version, x-upsert, cache-control, range',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
     ...(isBuffer ? {} : { 'Content-Type': 'application/json' }),
     ...headers
