@@ -46,9 +46,11 @@ const PAYOUT_TONE: Record<EarningsBooking['payoutStatus'], StatusChipTone> = {
   failed: 'danger'
 };
 
-function rangeToParams(range: RangeKey): { from?: string } {
+function rangeToParams(range: RangeKey): { from?: string; to?: string } {
   if (range === 'last90') {
-    return { from: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString() };
+    // "Últimos 90 días" no incluye reservas futuras ya pagadas.
+    const now = Date.now();
+    return { from: new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString(), to: new Date(now).toISOString() };
   }
 
   if (range === 'year') {
