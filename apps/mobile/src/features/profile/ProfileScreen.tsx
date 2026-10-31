@@ -416,7 +416,8 @@ export function ProfileScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
         link.href = url;
         link.download = `lynkdrive-mis-datos-${new Date().toISOString().slice(0, 10)}.json`;
         link.click();
-        URL.revokeObjectURL(url);
+        // Revocar en el mismo tick puede cancelar la descarga en Safari y Firefox.
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
         toast.success('Descarga iniciada.');
       } else {
         await Share.share({ title: 'Mis datos de LynkDrive', message: json });
