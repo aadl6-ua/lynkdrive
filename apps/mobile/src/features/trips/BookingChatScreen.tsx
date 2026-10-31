@@ -78,7 +78,7 @@ function useComposerBottomInset(bottomPadding: number): number {
   }, []);
 
   if (Platform.OS === 'web') {
-    return bottomPadding + spacingTokens.sm;
+    return bottomPadding + spacingTokens.md;
   }
 
   return keyboardInset ?? bottomPadding + spacingTokens.sm;
@@ -441,6 +441,8 @@ export function BookingChatScreen({
                 placeholder="Escribe un mensaje"
                 placeholderTextColor={colorTokens.textSubtle}
                 multiline
+                // En web el textarea arranca con dos filas: se deja en una como en nativo.
+                numberOfLines={Platform.OS === 'web' ? 1 : undefined}
                 maxLength={CHAT_MESSAGE_MAX_LENGTH}
                 editable={!loading && !error}
                 accessibilityLabel="Mensaje"
