@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { readdirSync, readFileSync } from 'fs';
 import { SignJWT } from 'jose';
@@ -96,6 +96,8 @@ export async function createTestApp(): Promise<INestApplication> {
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
+  // Mismo pipe global que main.ts para que la validación de DTOs se pruebe igual.
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: false, transform: false }));
   app.setGlobalPrefix('api');
   await app.init();
 
