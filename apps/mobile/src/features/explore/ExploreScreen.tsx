@@ -1035,7 +1035,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
           />
         </View>
 
-        <View pointerEvents="box-none" style={[styles.mapOverlay, { paddingTop: topPadding + spacingTokens.sm }]}>
+        <View style={[styles.mapOverlay, { pointerEvents: 'box-none' }, { paddingTop: topPadding + spacingTokens.sm }]}>
           <View style={[styles.mapControlsCard, { maxWidth: layoutTokens.formMaxWidth }]}>
             {controlsBar(false)}
           </View>

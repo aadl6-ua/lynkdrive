@@ -212,7 +212,7 @@ export function ImageCarousel({ images, height = 240, emptyLabel = 'Sin fotos to
               {index + 1}/{images.length}
             </Text>
           </View>
-          <View style={styles.dots} pointerEvents="none">
+          <View style={[styles.dots, { pointerEvents: 'none' }]}>
             {images.map((_, dotIndex) => (
               <View key={dotIndex} style={[styles.dot, dotIndex === index ? styles.dotActive : null]} />
             ))}

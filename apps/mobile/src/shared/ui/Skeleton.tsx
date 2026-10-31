@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Animated, DimensionValue, Easing, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { Animated, DimensionValue, Easing, Platform, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { colorTokens, radiusTokens, spacingTokens } from '../../app/theme/tokens';
 
 type SkeletonProps = {
@@ -20,13 +20,13 @@ export function Skeleton({ width = '100%', height = 14, radius = radiusTokens.sm
           toValue: 1,
           duration: 650,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true
+          useNativeDriver: Platform.OS !== 'web'
         }),
         Animated.timing(opacity, {
           toValue: 0.55,
           duration: 650,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true
+          useNativeDriver: Platform.OS !== 'web'
         })
       ])
     );
