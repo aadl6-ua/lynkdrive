@@ -792,7 +792,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
           <SpecTile icon="calendar-outline" label="Año" value={String(selectedVehicle.year)} />
           <SpecTile icon="flash-outline" label="Combustible" value={fuel ?? 'No indicado'} />
           <SpecTile icon="cog-outline" label="Cambio" value={transmission ?? 'No indicado'} />
-          <SpecTile icon="people-outline" label="Plazas" value={selectedVehicle.seats ? String(selectedVehicle.seats) : '—'} />
+          <SpecTile icon="people-outline" label="Plazas" value={selectedVehicle.seats ? String(selectedVehicle.seats) : 'No indicado'} />
         </View>
 
         <Card>
