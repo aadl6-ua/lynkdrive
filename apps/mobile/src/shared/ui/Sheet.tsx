@@ -88,8 +88,9 @@ export function OptionList<T extends string>({ options, selected, onSelect }: Op
           <Pressable
             key={option.value || `option-${index}`}
             onPress={() => onSelect(option.value)}
-            accessibilityRole="button"
-            accessibilityState={{ selected: isSelected }}
+            // Con valor seleccionado se comporta como grupo de opciones; si no, como lista de acciones.
+            accessibilityRole={selected !== undefined ? 'radio' : 'button'}
+            accessibilityState={selected !== undefined ? { checked: isSelected } : undefined}
             style={({ pressed }) => [
               styles.option,
               index === options.length - 1 ? styles.optionLast : null,
