@@ -34,6 +34,16 @@
     - Reembolsos al cancelar desde `paid_confirmed` (antes del inicio, según máquina de estados): cancela propietario → 100%; cancela conductor → política Demo 1 (>=48h 100%, 24-48h 50%, <24h 0%). Se hace con `reverse_transfer` + `refund_application_fee` si fue destination charge y con idempotency key por reserva. Si Stripe falla, la cancelación no se aplica. En `prototype` no hay reembolsos.
     - Mobile: pago real con **PaymentSheet** de `@stripe/stripe-react-native` (versión fijada por Expo SDK, incluida en Expo Go), cargado de forma diferida en `stripeSheet.native.ts`; en web se muestra aviso (pago con tarjeta solo en app iOS/Android). UI nueva aislada en `apps/mobile/src/features/payments/` (`PaymentAction`, `OwnerPayoutsCard`); la tarjeta de cobros de Perfil solo aparece en modo `stripe`.
 
+- **Backoffice de administración (2026-10-31):**
+    - Rol en BD: `users.is_admin` (migración `202610310900_admin_backoffice.sql`); nunca se toma de claims del JWT. Se concede con `npm run admin:set -- <email>` (`--revoke` para retirar).
+    - API bajo `/api/admin` con `AdminGuard` (envuelve `SupabaseJwtAuthGuard` y exige `is_admin`, no borrado ni bloqueado). Servicio con SQL vía `DataSource`, paginación `page`/`pageSize` (máx. 100) y query DTOs con `ValidationPipe({ transform: true })` local.
+    - Bloqueo: `users.blocked_at/blocked_reason`; `SupabaseJwtAuthGuard` responde 403 a usuarios bloqueados (cache en memoria de 30 s, invalidada al bloquear/desbloquear) y, con service role, se banea también en Supabase Auth.
+    - Moderación de reseñas: `reviews.hidden_at/hidden_reason`; las ocultas no se listan ni cuentan en la media del perfil.
+    - Historial de reservas: tabla `booking_status_history` alimentada por trigger SQL (cubre API, webhooks y rechazos automáticos).
+    - Incidencias: tablas `incidents` (estados `open`, `in_progress`, `resolved`, `closed`) e `incident_notes`.
+    - Documentos y evidencias se devuelven como URLs firmadas temporales (`resolveFileUrl` en `common/supabase-storage.ts`); sin service role se devuelve `null`.
+    - Web `apps/admin`: Vite + React + TypeScript sin librería de UI ni router (router por hash), login con Supabase Auth (sesión en `sessionStorage`), mismos tokens visuales que la app. Variables `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+
 ---
 
 ## 1. Descripción del Proyecto
@@ -865,6 +875,7 @@ SUPABASE_STORAGE_URL=<url_del_storage>
 lynkdrive/
     apps/
         api/                # NestJS API (fuente única de lógica de negocio)
+        admin/              # Backoffice web (Vite + React)
         mobile/             # Expo React Native (iOS/Android/Web)
     packages/
         shared/             # Tipos, DTOs y contratos compartidos
