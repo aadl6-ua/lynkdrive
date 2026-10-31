@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { httpClient, setAccessToken } from '../api/http';
 import { supabaseClient } from '../api/supabase';
+import { LEGAL_VERSION } from '../shared/legal';
 import { useUserProfileStore } from './useUserProfileStore';
 import { useVehiclesStore } from './useVehiclesStore';
 
@@ -189,7 +190,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const { data, error } = await supabaseClient.auth.signUp({
         email: emailInput.trim(),
-        password: passwordInput
+        password: passwordInput,
+        options: {
+          // El trigger auth.users -> public.users usa nombre y apellidos aunque haya confirmación
+          // por email; la aceptación de los textos legales queda registrada con fecha y versión.
+          data: {
+            first_name: profileInput?.firstName,
+            last_name: profileInput?.lastName,
+            terms_accepted_at: new Date().toISOString(),
+            terms_version: LEGAL_VERSION
+          }
+        }
       });
 
       if (error) {

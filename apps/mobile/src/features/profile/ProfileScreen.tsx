@@ -42,12 +42,13 @@ import {
 import { useBackHandler } from '../../shared/useBackHandler';
 import { OwnerPayoutsCard } from '../payments/OwnerPayoutsCard';
 import { hasMinimumProfileData } from '../../shared/verification';
+import { LegalSheet } from '../../shared/components/LegalSheet';
+import { LEGAL_CONTENT, LegalDoc } from '../../shared/legal';
 import { useAuthStore } from '../../store/useAuthStore';
 import { UserProfile, useUserProfileStore } from '../../store/useUserProfileStore';
 
 type ProfileMode = 'overview' | 'personal' | 'documents';
 type ProfileUploadTarget = Extract<UploadTarget, 'avatar' | 'id_document' | 'driver_license'>;
-type LegalDoc = 'terms' | 'privacy' | 'cancellation';
 
 type BookingItem = {
   id: string;
@@ -117,35 +118,6 @@ const DOCUMENTS: Array<{ target: 'id_document' | 'driver_license'; field: 'idDoc
     icon: 'car-outline'
   }
 ];
-
-const LEGAL_CONTENT: Record<LegalDoc, { title: string; paragraphs: string[] }> = {
-  terms: {
-    title: 'Términos y condiciones',
-    paragraphs: [
-      'LynkDrive es una plataforma que pone en contacto a propietarios de vehículos con conductores particulares. El contrato de alquiler se celebra entre ambas partes.',
-      'Para reservar o publicar es obligatorio tener el perfil completo y la documentación (DNI y permiso de conducir) verificada.',
-      'El conductor se compromete a usar el vehículo de forma responsable y a devolverlo en las condiciones y fechas acordadas. Los checklists de entrega y devolución sirven como evidencia del estado del vehículo.',
-      'Las valoraciones deben ser veraces y respetuosas. LynkDrive puede retirar contenido que incumpla estas normas.'
-    ]
-  },
-  privacy: {
-    title: 'Política de privacidad',
-    paragraphs: [
-      'Tratamos tus datos (nombre, teléfono, email, documentos e imágenes) para gestionar tu cuenta, verificar tu identidad y permitir las reservas, conforme al RGPD.',
-      'Los documentos de identidad y las fotos de los checklists se guardan en almacenamiento privado y solo se usan para verificación y resolución de incidencias.',
-      'Tu método de contacto solo se comparte con el conductor cuando aceptas una reserva.',
-      'Puedes ejercer tus derechos de acceso, rectificación y supresión escribiendo al equipo de LynkDrive.'
-    ]
-  },
-  cancellation: {
-    title: 'Política de cancelación',
-    paragraphs: [
-      'Mientras la solicitud está pendiente, conductor y propietario pueden cancelarla sin coste.',
-      'Con la reserva pagada: cancelación gratuita si faltan 48 horas o más para el inicio; reembolso del 50% si faltan entre 48 y 24 horas; sin reembolso si faltan menos de 24 horas.',
-      'Las cancelaciones solo son posibles antes del inicio del viaje.'
-    ]
-  }
-};
 
 function profilePayload(profile: UserProfile | null) {
   return {
@@ -546,20 +518,7 @@ export function ProfileScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
           }}
         />
       </Sheet>
-      <Sheet
-        visible={!!legalDoc}
-        onClose={() => setLegalDoc(null)}
-        title={legalDoc ? LEGAL_CONTENT[legalDoc].title : undefined}
-        centered
-      >
-        {legalDoc
-          ? LEGAL_CONTENT[legalDoc].paragraphs.map((paragraph, index) => (
-              <Text key={index} style={styles.legalParagraph}>
-                {paragraph}
-              </Text>
-            ))
-          : null}
-      </Sheet>
+      <LegalSheet doc={legalDoc} onClose={() => setLegalDoc(null)} />
     </>
   );
 
@@ -1189,10 +1148,6 @@ const styles = StyleSheet.create({
     minHeight: 52,
     paddingHorizontal: spacingTokens.md,
     borderRadius: radiusTokens.input
-  },
-  legalParagraph: {
-    color: colorTokens.textMain,
-    ...typographyTokens.body
   },
   rowActions: {
     flexDirection: 'row',

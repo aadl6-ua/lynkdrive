@@ -12,6 +12,8 @@ import {
   useWindowDimensions
 } from 'react-native';
 import { colorTokens, shadowTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import { LegalSheet } from '../../shared/components/LegalSheet';
+import { LegalDoc } from '../../shared/legal';
 import { Button, InlineMessage, SegmentedControl, TextField } from '../../shared/ui';
 import { useAuthStore } from '../../store/useAuthStore';
 
@@ -22,7 +24,7 @@ type AuthScreenProps = {
   bottomInset?: number;
 };
 
-type FieldErrors = Partial<Record<'firstName' | 'lastName' | 'phone' | 'email' | 'password' | 'confirm', string>>;
+type FieldErrors = Partial<Record<'firstName' | 'lastName' | 'phone' | 'email' | 'password' | 'confirm' | 'terms', string>>;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^\+?[0-9\s-]{9,15}$/;
@@ -42,6 +44,8 @@ export function AuthScreen({ topInset = 0, bottomInset = 0 }: AuthScreenProps) {
   const [phoneInput, setPhoneInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null);
 
   const lastNameRef = useRef<TextInput>(null);
   const phoneRef = useRef<TextInput>(null);
@@ -72,6 +76,7 @@ export function AuthScreen({ topInset = 0, bottomInset = 0 }: AuthScreenProps) {
   const switchMode = (next: AuthMode) => {
     setMode(next);
     setFieldErrors({});
+    setTermsAccepted(false);
     clearFeedback();
   };
 
@@ -105,6 +110,10 @@ export function AuthScreen({ topInset = 0, bottomInset = 0 }: AuthScreenProps) {
 
       if (passwordInput !== confirmPasswordInput) {
         next.confirm = 'Las contraseñas no coinciden.';
+      }
+
+      if (!termsAccepted) {
+        next.terms = 'Debes aceptar los términos y la política de privacidad.';
       }
     }
 
@@ -314,6 +323,38 @@ export function AuthScreen({ topInset = 0, bottomInset = 0 }: AuthScreenProps) {
         )}
       </View>
 
+      {mode === 'register' ? (
+        <View>
+          <View style={styles.termsRow}>
+            <Pressable
+              onPress={() => {
+                setTermsAccepted((current) => !current);
+                clearFieldError('terms');
+              }}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: termsAccepted }}
+              accessibilityLabel="Acepto los términos y condiciones y la política de privacidad"
+              hitSlop={8}
+              style={[styles.checkbox, termsAccepted ? styles.checkboxChecked : null, fieldErrors.terms ? styles.checkboxError : null]}
+            >
+              {termsAccepted ? <Ionicons name="checkmark" size={16} color={colorTokens.white} /> : null}
+            </Pressable>
+            <Text style={styles.termsText}>
+              He leído y acepto los{' '}
+              <Text style={styles.legalLink} onPress={() => setLegalDoc('terms')} accessibilityRole="link">
+                Términos y condiciones
+              </Text>{' '}
+              y la{' '}
+              <Text style={styles.legalLink} onPress={() => setLegalDoc('privacy')} accessibilityRole="link">
+                Política de privacidad
+              </Text>
+              .
+            </Text>
+          </View>
+          {fieldErrors.terms ? <Text style={styles.termsError}>{fieldErrors.terms}</Text> : null}
+        </View>
+      ) : null}
+
       {error ? <InlineMessage tone="error" message={error} /> : null}
       {message ? <InlineMessage tone="success" message={message} /> : null}
 
@@ -326,8 +367,7 @@ export function AuthScreen({ topInset = 0, bottomInset = 0 }: AuthScreenProps) {
 
       {mode === 'register' ? (
         <Text style={styles.legal}>
-          Al crear tu cuenta aceptas los Términos y condiciones y la Política de privacidad de LynkDrive. Puedes
-          consultarlos en cualquier momento desde Perfil.
+          Puedes consultar estos documentos en cualquier momento desde Perfil.
         </Text>
       ) : (
         <Text style={styles.legal}>
@@ -355,7 +395,21 @@ export function AuthScreen({ topInset = 0, bottomInset = 0 }: AuthScreenProps) {
           {brandPanel}
           <View style={isWide ? styles.formColumnWide : null}>{form}</View>
         </View>
+        <View style={styles.footerLinks}>
+          <Text style={styles.footerLink} onPress={() => setLegalDoc('terms')} accessibilityRole="link">
+            Términos
+          </Text>
+          <Text style={styles.footerDot}>·</Text>
+          <Text style={styles.footerLink} onPress={() => setLegalDoc('privacy')} accessibilityRole="link">
+            Privacidad
+          </Text>
+          <Text style={styles.footerDot}>·</Text>
+          <Text style={styles.footerLink} onPress={() => setLegalDoc('cancellation')} accessibilityRole="link">
+            Cancelaciones
+          </Text>
+        </View>
       </ScrollView>
+      <LegalSheet doc={legalDoc} onClose={() => setLegalDoc(null)} />
     </KeyboardAvoidingView>
   );
 }
@@ -496,5 +550,52 @@ const styles = StyleSheet.create({
   legalLink: {
     color: colorTokens.accent2,
     ...typographyTokens.captionStrong
+  },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacingTokens.sm
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    marginTop: 1,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: colorTokens.borderStrong,
+    backgroundColor: colorTokens.white,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  checkboxChecked: {
+    borderColor: colorTokens.primary,
+    backgroundColor: colorTokens.primary
+  },
+  checkboxError: {
+    borderColor: colorTokens.alert
+  },
+  termsText: {
+    flex: 1,
+    color: colorTokens.textMain,
+    ...typographyTokens.caption
+  },
+  termsError: {
+    marginTop: spacingTokens.xs,
+    color: colorTokens.alertText,
+    ...typographyTokens.caption
+  },
+  footerLinks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacingTokens.sm,
+    marginTop: spacingTokens.lg
+  },
+  footerLink: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
+  },
+  footerDot: {
+    color: colorTokens.textSubtle,
+    ...typographyTokens.caption
   }
 });

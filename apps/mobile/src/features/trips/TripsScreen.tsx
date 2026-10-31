@@ -1175,6 +1175,7 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     }
     if (!isOwner && status === 'accepted') {
       actionButtons.push({ status: 'paid_confirmed', label: `Pagar ${formatCurrencyEUR(selectedBooking.totalPrice)}`, variant: 'accent', icon: 'card-outline' });
+      actionButtons.push({ status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' });
     }
     if (!isOwner && status === 'paid_confirmed') {
       actionButtons.push({ status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' });

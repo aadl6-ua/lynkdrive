@@ -16,6 +16,7 @@ import { colorTokens, layoutTokens, spacingTokens, typographyTokens } from './sr
 import { AppTabKey } from './src/app/types';
 import { AuthScreen } from './src/features/auth/AuthScreen';
 import { ExploreScreen } from './src/features/explore/ExploreScreen';
+import { getWebLegalDoc, LegalPage } from './src/features/legal/LegalPage';
 import { ProfileScreen } from './src/features/profile/ProfileScreen';
 import { TripsScreen } from './src/features/trips/TripsScreen';
 import { MyVehiclesScreen } from './src/features/vehicles/MyVehiclesScreen';
@@ -28,6 +29,9 @@ void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 /** Si las fuentes tardan (red lenta en web) no bloqueamos el arranque. */
 const FONT_LOAD_TIMEOUT_MS = 2500;
+
+// Se lee una vez al cargar: las páginas legales públicas no dependen de la sesión.
+const webLegalDoc = getWebLegalDoc();
 
 function AppShell() {
   const [activeTab, setActiveTab] = useState<AppTabKey>('explore');
@@ -56,6 +60,15 @@ function AppShell() {
 
     void fetchMyProfile();
   }, [authUserId, fetchMyProfile]);
+
+  if (webLegalDoc) {
+    return (
+      <View style={styles.container}>
+        <LegalPage doc={webLegalDoc} topInset={insets.top} />
+        <StatusBar style="dark" />
+      </View>
+    );
+  }
 
   if (!hasHydrated) {
     return <SplashView />;
