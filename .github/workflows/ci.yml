@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, integracion]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, integracion]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -22,6 +22,7 @@ jobs:
           node-version: 20
           cache: npm
 
+      # `npm ci` compila @lynkdrive/shared (script prepare) antes de lint/typecheck.
       - run: npm ci
 
       - name: Lint
@@ -30,12 +31,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build (api + shared)
+      - name: Build (shared + api + export web de mobile)
         run: |
           npm run build -w @lynkdrive/shared
           npm run build -w @lynkdrive/api
+          npm run build -w @lynkdrive/mobile
 
-      - name: Tests unitarios
+      - name: Tests unitarios (api + mobile)
         run: npm test
 
   e2e:
