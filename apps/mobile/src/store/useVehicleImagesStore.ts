@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { httpClient } from '../api/http';
+import { getApiErrorMessage } from '../shared/errors';
 
 interface VehicleImageItem {
   id: string;
@@ -15,14 +16,17 @@ interface VehicleImagesState {
   saving: boolean;
   error: string | null;
   mutationMessage: string | null;
+  /** Vehículo al que pertenecen los items cargados. */
+  vehicleId: string | null;
   fetchByVehicleId: (vehicleId: string) => Promise<void>;
-  createForVehicle: (vehicleId: string, imageUrl: string, isPrimary: boolean) => Promise<void>;
-  updateById: (imageId: string, vehicleId: string, payload: { isPrimary?: boolean; imageUrl?: string }) => Promise<void>;
-  deleteById: (imageId: string, vehicleId: string) => Promise<void>;
+  createForVehicle: (vehicleId: string, imageUrl: string, isPrimary: boolean) => Promise<boolean>;
+  updateById: (imageId: string, vehicleId: string, payload: { isPrimary?: boolean; imageUrl?: string }) => Promise<boolean>;
+  deleteById: (imageId: string, vehicleId: string) => Promise<boolean>;
 }
 
-export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
+export const useVehicleImagesStore = create<VehicleImagesState>((set, get) => ({
   items: [],
+  vehicleId: null,
   loading: false,
   saving: false,
   error: null,
@@ -34,18 +38,22 @@ export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
       return;
     }
 
-    set({ loading: true, error: null, mutationMessage: null });
+    // Evita mostrar datos de otro vehículo mientras carga el nuevo.
+    const isSameVehicle = get().vehicleId === vehicleId;
+    set({ loading: true, error: null, mutationMessage: null, vehicleId, items: isSameVehicle ? get().items : [] });
 
     try {
       const response = await httpClient.get<VehicleImageItem[]>('/vehicle-images', {
         params: { vehicleId }
       });
 
-      set({ items: response.data, loading: false });
-    } catch {
+      if (get().vehicleId === vehicleId) {
+        set({ items: response.data, loading: false });
+      }
+    } catch (error: unknown) {
       set({
         loading: false,
-        error: 'No se pudieron cargar las imágenes del vehículo.'
+        error: getApiErrorMessage(error, 'No se pudieron cargar las imágenes del vehículo.')
       });
     }
   },
@@ -53,7 +61,7 @@ export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
     if (!vehicleId || !imageUrl.trim()) {
       set({ mutationMessage: 'Debes informar vehículo y URL de imagen.' });
 
-      return;
+      return false;
     }
 
     set({ saving: true, error: null, mutationMessage: null });
@@ -73,18 +81,20 @@ export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
         items: response.data,
         saving: false
       });
-    } catch {
+      return true;
+    } catch (error: unknown) {
       set({
         saving: false,
-        mutationMessage: 'No se pudo crear la imagen.'
+        mutationMessage: getApiErrorMessage(error, 'No se pudo crear la imagen.')
       });
+      return false;
     }
   },
   updateById: async (imageId, vehicleId, payload) => {
     if (!imageId || !vehicleId) {
       set({ mutationMessage: 'No se pudo identificar la imagen a actualizar.' });
 
-      return;
+      return false;
     }
 
     set({ saving: true, error: null, mutationMessage: null });
@@ -100,18 +110,20 @@ export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
         items: response.data,
         saving: false
       });
-    } catch {
+      return true;
+    } catch (error: unknown) {
       set({
         saving: false,
-        mutationMessage: 'No se pudo actualizar la imagen.'
+        mutationMessage: getApiErrorMessage(error, 'No se pudo actualizar la imagen.')
       });
+      return false;
     }
   },
   deleteById: async (imageId, vehicleId) => {
     if (!imageId || !vehicleId) {
       set({ mutationMessage: 'No se pudo identificar la imagen a eliminar.' });
 
-      return;
+      return false;
     }
 
     set({ saving: true, error: null, mutationMessage: null });
@@ -127,11 +139,13 @@ export const useVehicleImagesStore = create<VehicleImagesState>((set) => ({
         items: response.data,
         saving: false
       });
-    } catch {
+      return true;
+    } catch (error: unknown) {
       set({
         saving: false,
-        mutationMessage: 'No se pudo eliminar la imagen.'
+        mutationMessage: getApiErrorMessage(error, 'No se pudo eliminar la imagen.')
       });
+      return false;
     }
   }
 }));

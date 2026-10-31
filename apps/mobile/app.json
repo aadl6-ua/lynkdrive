@@ -2,24 +2,78 @@
   "expo": {
     "name": "LynkDrive",
     "slug": "lynkdrive",
+    "scheme": "lynkdrive",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "backgroundColor": "#F7F7F9",
+    "primaryColor": "#0D1B2A",
+    "description": "Alquiler de coches entre particulares: encuentra un vehículo cerca o publica el tuyo.",
     "newArchEnabled": true,
     "ios": {
+      "bundleIdentifier": "com.lynkdrive.app",
+      "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "LynkDrive usa tu ubicacion para mostrarte vehiculos cercanos y posicionarte en el mapa."
+        "NSLocationWhenInUseUsageDescription": "LynkDrive usa tu ubicación para mostrarte vehículos cercanos y situarte en el mapa.",
+        "NSCameraUsageDescription": "LynkDrive usa la cámara para hacer fotos de tu vehículo, de tus documentos y de las evidencias de entrega y devolución.",
+        "NSPhotoLibraryUsageDescription": "LynkDrive accede a tus fotos para que puedas añadir imágenes de tu vehículo, tu foto de perfil, tus documentos y las evidencias de los checklists.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
+      "package": "com.lynkdrive.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0D1B2A"
+      },
+      "edgeToEdgeEnabled": true,
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "CAMERA"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
-      "bundler": "metro"
-    }
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png",
+      "name": "LynkDrive",
+      "shortName": "LynkDrive",
+      "themeColor": "#0D1B2A",
+      "backgroundColor": "#F7F7F9"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 120,
+          "resizeMode": "contain",
+          "backgroundColor": "#F7F7F9"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "LynkDrive accede a tus fotos para que puedas añadir imágenes de tu vehículo, tu foto de perfil, tus documentos y las evidencias de los checklists.",
+          "cameraPermission": "LynkDrive usa la cámara para hacer fotos de tu vehículo, de tus documentos y de las evidencias de entrega y devolución.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "LynkDrive usa tu ubicación para mostrarte vehículos cercanos y situarte en el mapa."
+        }
+      ]
+    ]
   }
 }

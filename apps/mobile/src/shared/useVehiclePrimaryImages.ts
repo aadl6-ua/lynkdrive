@@ -15,6 +15,8 @@ export function useVehiclePrimaryImages(vehicleIds: string[]) {
 
   useEffect(() => {
     let cancelled = false;
+    // Se deriva de la clave para que el efecto solo dependa de un string estable.
+    const normalizedVehicleIds = vehicleIdsKey ? vehicleIdsKey.split('|') : [];
 
     if (normalizedVehicleIds.length === 0) {
       setImageByVehicleId({});

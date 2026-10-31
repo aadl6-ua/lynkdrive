@@ -6,13 +6,16 @@ import {
   Popup,
 } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { colorTokens } from '../../../app/theme/tokens';
+import { colorTokens, fontFamilies } from '../../../app/theme/tokens';
+import { formatPriceCompact } from '../../../shared/format';
 import { ExploreVehiclesMapProps } from './ExploreVehiclesMap.types';
 
 // Type wrappers para evitar errores de TypeScript
 const MapContainer = LeafletMapContainer as any;
 const TileLayer = LeafletTileLayer as any;
 const WebCircleMarker = CircleMarker as any;
+
+const DEFAULT_CENTER = { latitude: 40.4168, longitude: -3.7038 };
 
 export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
   vehicles,
@@ -23,22 +26,15 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
 }) => {
   void infoBottomInset;
   // Calcular centro del mapa
-  const centerLocation = userLocation || (vehicles.length > 0 ? vehicles[0].location : null);
-
-  if (!centerLocation) {
-    return (
-      <div style={{ height: `${height}px`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <p>No hay ubicación disponible</p>
-      </div>
-    );
-  }
+  // Sin ubicación ni vehículos centramos en Madrid para no mostrar un mapa vacío.
+  const centerLocation = userLocation || (vehicles.length > 0 ? vehicles[0].location : DEFAULT_CENTER);
 
   return (
     <MapContainer
       center={[centerLocation.latitude, centerLocation.longitude]}
       zoom={13}
       zoomControl={false}
-      style={{ height: `${height}px`, width: '100%', borderRadius: '8px' }}
+      style={{ height: `${height}px`, width: '100%' }}
     >
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -74,6 +70,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
                 width: '200px',
                 textAlign: 'center',
                 cursor: 'default',
+                fontFamily: fontFamilies.body,
               }}
             >
               {vehicle.imageUrl ? (
@@ -84,7 +81,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
                     width: '100%',
                     height: '120px',
                     objectFit: 'cover',
-                    borderRadius: '4px',
+                    borderRadius: '10px',
                     marginBottom: '8px',
                   }}
                 />
@@ -110,7 +107,7 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
                 {vehicle.brand} {vehicle.model}
               </div>
               <div style={{ fontSize: '12px', color: '#333' }}>
-                €{vehicle.pricePerDay.toFixed(2)}/día
+                {formatPriceCompact(vehicle.pricePerDay)} / día
               </div>
               <button
                 type="button"
@@ -124,9 +121,12 @@ export const ExploreVehiclesMap: React.FC<ExploreVehiclesMapProps> = ({
                   border: `1px solid ${colorTokens.primary}`,
                   backgroundColor: colorTokens.primary,
                   color: colorTokens.white,
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  padding: '6px 10px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  fontFamily: fontFamilies.bodyBold,
+                  width: '100%',
+                  padding: '8px 12px',
                   cursor: 'pointer',
                 }}
               >

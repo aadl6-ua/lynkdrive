@@ -1,8 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../theme/tokens';
 import { APP_TABS, AppTabKey } from '../types';
-
-const ACTIVE_ACCENT_COLOR = '#E36414';
 
 type TabBarProps = {
   activeTab: AppTabKey;
@@ -10,66 +10,7 @@ type TabBarProps = {
   bottom?: boolean;
 };
 
-export function TabBar({ activeTab, onChangeTab, bottom = false }: TabBarProps) {
-  const isMobileBottomNav = bottom;
-
-  if (isMobileBottomNav) {
-    return (
-      <View style={localStyles.mobileBottomNavShell}>
-        <View style={localStyles.mobileBottomNavContainer}>
-          {APP_TABS.map((tab) => {
-            const isActive = activeTab === tab.key;
-
-            return (
-              <Pressable
-                key={tab.key}
-                onPress={() => onChangeTab(tab.key)}
-                style={[localStyles.mobileIconButton, isActive ? localStyles.mobileIconButtonActive : undefined]}
-                accessibilityRole="button"
-                accessibilityLabel={tab.label}
-              >
-                <Ionicons
-                  name={getMobileIconName(tab.key, isActive)}
-                  size={isActive ? 22 : 21}
-                  color={isActive ? ACTIVE_ACCENT_COLOR : '#1B263B'}
-                />
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={localStyles.desktopTopNavShell}>
-      <View style={localStyles.desktopTopNavContainer}>
-        {APP_TABS.map((tab) => {
-          const isActive = activeTab === tab.key;
-
-          return (
-            <Pressable
-              key={tab.key}
-              onPress={() => onChangeTab(tab.key)}
-              style={[localStyles.desktopTabButton, isActive ? localStyles.desktopTabButtonActive : undefined]}
-            >
-              <Ionicons
-                name={getTabIconName(tab.key, isActive)}
-                size={isActive ? 18 : 17}
-                color={isActive ? ACTIVE_ACCENT_COLOR : '#1B263B'}
-              />
-              <Text style={isActive ? localStyles.desktopTabLabelActive : localStyles.desktopTabLabel}>
-                {tab.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-function getMobileIconName(tab: AppTabKey, isActive: boolean): keyof typeof Ionicons.glyphMap {
+function getTabIconName(tab: AppTabKey, isActive: boolean): keyof typeof Ionicons.glyphMap {
   if (tab === 'explore') {
     return isActive ? 'compass' : 'compass-outline';
   }
@@ -85,99 +26,205 @@ function getMobileIconName(tab: AppTabKey, isActive: boolean): keyof typeof Ioni
   return isActive ? 'person-circle' : 'person-circle-outline';
 }
 
-function getTabIconName(tab: AppTabKey, isActive: boolean): keyof typeof Ionicons.glyphMap {
-  return getMobileIconName(tab, isActive);
+export function TabBar({ activeTab, onChangeTab, bottom = false }: TabBarProps) {
+  const insets = useSafeAreaInsets();
+
+  if (bottom) {
+    return (
+      <View style={[styles.mobileShell, { bottom: Math.max(insets.bottom, spacingTokens.sm) + 2 }]} accessibilityRole="tablist">
+        <View style={styles.mobileContainer}>
+          {APP_TABS.map((tab) => {
+            const isActive = activeTab === tab.key;
+
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => onChangeTab(tab.key)}
+                android_ripple={{ color: 'rgba(13,27,42,0.08)', borderless: true, radius: 36 }}
+                style={({ pressed }) => [styles.mobileTab, pressed && Platform.OS === 'ios' ? styles.mobileTabPressed : null]}
+                accessibilityRole="tab"
+                accessibilityLabel={tab.label}
+                accessibilityState={{ selected: isActive }}
+              >
+                <View style={[styles.mobileIconPill, isActive ? styles.mobileIconPillActive : null]}>
+                  <Ionicons
+                    name={getTabIconName(tab.key, isActive)}
+                    size={21}
+                    color={isActive ? colorTokens.accent2 : colorTokens.secondary}
+                  />
+                </View>
+                <Text style={[styles.mobileLabel, isActive ? styles.mobileLabelActive : null]} numberOfLines={1}>
+                  {tab.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.desktopShell, { top: insets.top + 14 }]} accessibilityRole="tablist">
+      <View style={styles.desktopContainer}>
+        <View style={styles.brand}>
+          <View style={styles.brandMark}>
+            <Text style={styles.brandLetter}>L</Text>
+          </View>
+          <Text style={styles.brandName}>LynkDrive</Text>
+        </View>
+        <View style={styles.desktopTabs}>
+          {APP_TABS.map((tab) => {
+            const isActive = activeTab === tab.key;
+
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => onChangeTab(tab.key)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isActive }}
+                style={({ pressed }) => [
+                  styles.desktopTab,
+                  isActive ? styles.desktopTabActive : null,
+                  pressed && !isActive ? styles.desktopTabPressed : null
+                ]}
+              >
+                <Ionicons
+                  name={getTabIconName(tab.key, isActive)}
+                  size={18}
+                  color={isActive ? colorTokens.accent2 : colorTokens.secondary}
+                />
+                <Text style={isActive ? styles.desktopLabelActive : styles.desktopLabel}>{tab.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </View>
+  );
 }
 
-const localStyles = StyleSheet.create({
-  desktopTopNavShell: {
+const styles = StyleSheet.create({
+  desktopShell: {
     position: 'absolute',
     left: 16,
     right: 16,
-    top: Platform.OS === 'web' ? 14 : 10,
     zIndex: 30,
     alignItems: 'center'
   },
-  desktopTopNavContainer: {
+  desktopContainer: {
     width: '100%',
-    maxWidth: 1060,
+    maxWidth: 1100,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    gap: spacingTokens.md,
     borderWidth: 1,
-    borderColor: '#D5DBE4',
+    borderColor: colorTokens.border,
     borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.96)',
+    backgroundColor: 'rgba(255,255,255,0.97)',
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    shadowColor: '#0B0F14',
-    shadowOpacity: 0.09,
-    shadowRadius: 16,
-    shadowOffset: {
-      width: 0,
-      height: 6
-    },
-    elevation: 4
+    paddingVertical: 8,
+    ...shadowTokens.raised,
+    shadowOpacity: 0.08
   },
-  desktopTabButton: {
+  brand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.sm,
+    paddingHorizontal: spacingTokens.sm
+  },
+  brandMark: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: colorTokens.primary,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  brandLetter: {
+    color: colorTokens.accent1,
+    ...typographyTokens.h3,
+    lineHeight: undefined
+  },
+  brandName: {
+    color: colorTokens.primary,
+    ...typographyTokens.h3
+  },
+  desktopTabs: {
+    flex: 1,
+    maxWidth: 720,
+    flexDirection: 'row',
+    gap: 6
+  },
+  desktopTab: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    borderRadius: 16,
+    borderRadius: 18,
     paddingHorizontal: 14,
-    paddingVertical: 10
+    minHeight: 44
   },
-  desktopTabButtonActive: {
-    backgroundColor: '#0D1B2A'
+  desktopTabActive: {
+    backgroundColor: colorTokens.primary
   },
-  desktopTabLabel: {
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '600',
-    color: '#1B263B'
+  desktopTabPressed: {
+    backgroundColor: colorTokens.surfaceMuted
   },
-  desktopTabLabelActive: {
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '700',
-    color: '#FFFFFF'
+  desktopLabel: {
+    color: colorTokens.secondary,
+    ...typographyTokens.captionStrong
   },
-  mobileBottomNavShell: {
+  desktopLabelActive: {
+    color: colorTokens.white,
+    ...typographyTokens.captionStrong
+  },
+  mobileShell: {
     position: 'absolute',
     left: 12,
-    right: 12,
-    bottom: Platform.OS === 'ios' ? 14 : 10
+    right: 12
   },
-  mobileBottomNavContainer: {
+  mobileContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'space-around',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E2E4E8',
-    borderRadius: 30,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    shadowColor: '#0B0F14',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: {
-      width: 0,
-      height: 5
-    },
-    elevation: 4
+    borderColor: colorTokens.border,
+    borderRadius: radiusTokens.lg + 8,
+    backgroundColor: colorTokens.white,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    ...shadowTokens.raised
   },
-  mobileIconButton: {
-    width: 52,
-    height: 42,
-    borderRadius: 21,
+  mobileTab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    minHeight: 52
+  },
+  mobileTabPressed: {
+    opacity: 0.6
+  },
+  mobileIconPill: {
+    width: 48,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center'
   },
-  mobileIconButtonActive: {
-    backgroundColor: '#0D1B2A'
+  mobileIconPillActive: {
+    backgroundColor: colorTokens.primary
+  },
+  mobileLabel: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.overline,
+    fontSize: 10,
+    letterSpacing: 0.2
+  },
+  mobileLabelActive: {
+    color: colorTokens.primary
   }
 });

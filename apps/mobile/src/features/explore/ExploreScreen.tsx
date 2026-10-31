@@ -1,42 +1,76 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
-  Image,
-  Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
   useWindowDimensions
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { httpClient } from '../../api/http';
 import { resolveStoredImageUrl } from '../../api/storage';
-import { EmptyState } from '../../app/components/ui/EmptyState';
-import { SectionHeader } from '../../app/components/ui/SectionHeader';
-import { StatusChip, StatusChipTone } from '../../app/components/ui/StatusChip';
-import { styles } from '../../app/styles';
-import { colorTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import {
+  colorTokens,
+  layoutTokens,
+  radiusTokens,
+  shadowTokens,
+  spacingTokens,
+  typographyTokens
+} from '../../app/theme/tokens';
+import { AppTabKey } from '../../app/types';
+import { BookingStatus } from '../../shared/booking';
+import { UserOverviewModal } from '../../shared/components/UserOverviewModal';
+import { getApiErrorMessage } from '../../shared/errors';
+import {
+  calendarDayHourToIso,
+  formatCurrencyEUR,
+  formatDateRangeMadrid,
+  formatPriceCompact,
+  getBillableDays,
+  getDisplayName,
+  pluralize,
+  translateFuelType,
+  translateTransmission
+} from '../../shared/format';
 import { parseLocaleNumber } from '../../shared/number';
-import { useGeocodingSuggestions } from '../../shared/useGeocodingSuggestions';
+import {
+  AppImage,
+  Avatar,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  ErrorState,
+  ImageCarousel,
+  InlineMessage,
+  Screen,
+  ScreenHeader,
+  SectionTitle,
+  SegmentedControl,
+  Sheet,
+  Skeleton,
+  StatusChip,
+  TextField,
+  VehicleCardSkeleton,
+  VerificationGate,
+  toast
+} from '../../shared/ui';
+import { useBackHandler } from '../../shared/useBackHandler';
 import { useUserLocation } from '../../shared/useUserLocation';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
 import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
-import { UserOverviewModal } from '../../shared/components/UserOverviewModal';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
 import { useVehicleAvailabilityWindowsStore } from '../../store/useVehicleAvailabilityWindowsStore';
 import { useVehicleImagesStore } from '../../store/useVehicleImagesStore';
 import { useVehiclesStore } from '../../store/useVehiclesStore';
-import { ExploreVehiclesMap, VehicleLocationMap } from '../maps';
+import { ExploreVehiclesMap, VehicleLocationMap, type VehicleMarker } from '../maps';
 import { CalendarPicker } from './CalendarPicker';
-import type { VehicleMarker } from '../maps';
+import { AddressSearch } from '../../shared/components/AddressSearch';
 
 type ExploreScreenMode = 'list' | 'detail' | 'map';
 type FuelFilter = '' | 'gasoline' | 'diesel' | 'electric' | 'hybrid';
@@ -54,7 +88,7 @@ type VehicleBookingItem = {
   id: string;
   startDatetime: string;
   endDatetime: string;
-  status: 'pending' | 'accepted' | 'rejected' | 'paid_confirmed' | 'in_progress' | 'completed' | 'cancelled';
+  status: BookingStatus;
 };
 
 type ExploreVehicle = {
@@ -73,277 +107,160 @@ type ExploreVehicle = {
   description: string;
 };
 
-type AvailabilityWindowItem = {
-  id: string;
-  startDatetime: string;
-  endDatetime: string;
+type FilterDraft = {
+  address: string;
+  location: { lat: number; lng: number } | null;
+  radius: string;
+  maxPrice: string;
+  fuelType: FuelFilter;
+  transmission: TransmissionFilter;
+  seats: SeatsFilter;
 };
-
-type VehicleImageItem = {
-  imageUrl: string;
-};
-
-type ActionButtonVariant = 'primary' | 'ghost';
-type SelectOption<T extends string> = { label: string; value: T };
 
 type ExploreScreenProps = {
   topPadding?: number;
   bottomPadding?: number;
+  onNavigateToTab?: (tab: AppTabKey) => void;
 };
 
-function getBookingStatusLabel(status: VehicleBookingItem['status']): string {
-  const map: Record<VehicleBookingItem['status'], string> = {
-    pending: 'Pendiente',
-    accepted: 'Aceptada',
-    rejected: 'Rechazada',
-    paid_confirmed: 'Pago confirmado',
-    in_progress: 'En curso',
-    completed: 'Completada',
-    cancelled: 'Cancelada'
-  };
+const EMPTY_FILTERS: FilterDraft = {
+  address: '',
+  location: null,
+  radius: '',
+  maxPrice: '',
+  fuelType: '',
+  transmission: '',
+  seats: ''
+};
 
-  return map[status];
+const FUEL_OPTIONS: Array<{ label: string; value: FuelFilter }> = [
+  { label: 'Todos', value: '' },
+  { label: 'Gasolina', value: 'gasoline' },
+  { label: 'Diésel', value: 'diesel' },
+  { label: 'Eléctrico', value: 'electric' },
+  { label: 'Híbrido', value: 'hybrid' }
+];
+
+const TRANSMISSION_OPTIONS: Array<{ label: string; value: TransmissionFilter }> = [
+  { label: 'Todas', value: '' },
+  { label: 'Manual', value: 'manual' },
+  { label: 'Automático', value: 'automatic' }
+];
+
+const SEATS_OPTIONS: Array<{ label: string; value: SeatsFilter }> = [
+  { label: 'Cualquiera', value: '' },
+  { label: '2', value: '2' },
+  { label: '4', value: '4' },
+  { label: '5', value: '5' },
+  { label: '7', value: '7' }
+];
+
+const RADIUS_PRESETS = ['5', '10', '25', '50', '100'];
+
+/** Distancia en km entre dos coordenadas (fórmula de Haversine). */
+function getDistanceKm(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }): number {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLng = toRad(b.longitude - a.longitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-function getBookingStatusTone(status: VehicleBookingItem['status']): StatusChipTone {
-  if (status === 'completed' || status === 'paid_confirmed') {
-    return 'success';
-  }
-
-  if (status === 'pending') {
-    return 'warning';
-  }
-
-  if (status === 'accepted' || status === 'in_progress') {
-    return 'info';
-  }
-
-  if (status === 'rejected') {
-    return 'danger';
-  }
-
-  return 'neutral';
+function formatDistance(km: number): string {
+  return km < 1 ? `a ${Math.round(km * 1000)} m` : `a ${km.toLocaleString('es-ES', { maximumFractionDigits: km < 10 ? 1 : 0 })} km`;
 }
 
-function getUserFullName(profile?: UserMiniProfile): string {
-  if (!profile) {
-    return 'Usuario';
-  }
-
-  return `${profile.firstName} ${profile.lastName}`.trim();
+function countActiveFilters(filters: FilterDraft): number {
+  return [filters.location, filters.maxPrice.trim(), filters.fuelType, filters.transmission, filters.seats].filter(Boolean)
+    .length;
 }
 
-function getInitials(profile?: UserMiniProfile): string {
-  if (!profile) {
-    return 'U';
-  }
-
-  const first = profile.firstName?.[0] ?? '';
-  const last = profile.lastName?.[0] ?? '';
-  const initials = `${first}${last}`.toUpperCase();
-
-  return initials || 'U';
-}
-
-function translateFuelType(fuelType: string | null): string {
-  const map: Record<string, string> = {
-    gasoline: 'Gasolina',
-    diesel: 'Diesel',
-    electric: 'Eléctrico',
-    hybrid: 'Híbrido'
-  };
-  return map[fuelType?.toLowerCase() ?? ''] ?? 'Combustible no definido';
-}
-
-function translateTransmission(transmission: string | null): string {
-  const map: Record<string, string> = {
-    manual: 'Manual',
-    automatic: 'Automática'
-  };
-  return map[transmission?.toLowerCase() ?? ''] ?? 'Transmisión no definida';
-}
-
-function getApiErrorMessage(error: unknown): string | null {
-  if (!error || typeof error !== 'object') {
-    return null;
-  }
-
-  const response = (error as { response?: { data?: { message?: string | string[] } } }).response;
-  const message = response?.data?.message;
-
-  if (Array.isArray(message)) {
-    return message.join('. ');
-  }
-
-  if (typeof message === 'string' && message.trim()) {
-    return message;
-  }
-
-  return null;
-}
-
-function formatDateTimeMadrid(value: string): string {
-  return new Intl.DateTimeFormat('es-ES', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'Europe/Madrid'
-  }).format(new Date(value));
-}
-
-function formatCurrencyEUR(value: number): string {
-  return new Intl.NumberFormat('es-ES', {
-    style: 'currency',
-    currency: 'EUR',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value);
-}
-
-function ActionButton({
+function ChipGroup<T extends string>({
   label,
-  onPress,
-  disabled = false,
-  variant = 'primary'
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  variant?: ActionButtonVariant;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[
-        localStyles.actionButton,
-        variant === 'primary' ? localStyles.actionButtonPrimary : localStyles.actionButtonGhost,
-        disabled ? localStyles.actionButtonDisabled : undefined
-      ]}
-    >
-      <Text
-        style={[
-          localStyles.actionButtonText,
-          variant === 'primary' ? localStyles.actionButtonPrimaryText : localStyles.actionButtonGhostText
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function SelectDropdown<T extends string>({
-  label,
-  value,
   options,
+  value,
   onChange
 }: {
   label: string;
+  options: Array<{ label: string; value: T }>;
   value: T;
-  options: Array<SelectOption<T>>;
-  onChange: (nextValue: T) => void;
+  onChange: (value: T) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const selectedLabel = options.find((option) => option.value === value)?.label ?? options[0]?.label ?? '';
-
   return (
-    <View style={localStyles.dropdownWrap}>
-      <Text style={localStyles.inputLabel}>{label}</Text>
-      <Pressable style={localStyles.dropdownTrigger} onPress={() => setOpen((current) => !current)}>
-        <Text style={localStyles.dropdownValue}>{selectedLabel}</Text>
-        <View style={[localStyles.dropdownChevronIcon, open ? localStyles.dropdownChevronIconOpen : undefined]} />
-      </Pressable>
+    <View style={styles.chipGroup}>
+      <Text style={styles.chipGroupLabel}>{label}</Text>
+      <View style={styles.chipGroupRow} accessibilityRole="radiogroup" accessibilityLabel={label}>
+        {options.map((option) => {
+          const active = option.value === value;
 
-      {open ? (
-        <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-          <Pressable style={localStyles.selectModalBackdrop} onPress={() => setOpen(false)}>
-            <Pressable style={localStyles.selectModalCard} onPress={() => undefined}>
-              <Text style={localStyles.selectModalTitle}>{label}</Text>
-              <View style={localStyles.dropdownPanel}>
-                {options.map((option) => {
-                  const isActive = option.value === value;
-
-                  return (
-                    <Pressable
-                      key={option.value || 'empty'}
-                      style={[localStyles.dropdownItem, isActive ? localStyles.dropdownItemActive : undefined]}
-                      onPress={() => {
-                        onChange(option.value);
-                        setOpen(false);
-                      }}
-                    >
-                      <Text style={[localStyles.dropdownItemText, isActive ? localStyles.dropdownItemTextActive : undefined]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+          return (
+            <Pressable
+              key={option.value || 'all'}
+              onPress={() => onChange(option.value)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: active }}
+              accessibilityLabel={`${label}: ${option.label}`}
+              style={({ pressed }) => [
+                styles.choiceChip,
+                active ? styles.choiceChipActive : null,
+                pressed && !active ? styles.choiceChipPressed : null
+              ]}
+            >
+              <Text style={[styles.choiceChipText, active ? styles.choiceChipTextActive : null]}>{option.label}</Text>
             </Pressable>
-          </Pressable>
-        </Modal>
-      ) : null}
+          );
+        })}
+      </View>
     </View>
   );
 }
 
-export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScreenProps) {
+export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab }: ExploreScreenProps) {
   const { width, height } = useWindowDimensions();
-  const isDesktopWeb = Platform.OS === 'web' && width >= 1024;
-  const desktopCardStyle = isDesktopWeb ? localStyles.desktopCard : undefined;
-  const mapViewportHeight = Math.max(
-    420,
-    height - topPadding - bottomPadding - (isDesktopWeb ? 200 : 190)
-  );
-  const [showStickyFilters, setShowStickyFilters] = useState(true);
-  const lastScrollYRef = useRef(0);
-  const showStickyFiltersRef = useRef(true);
-  const stickyFiltersAnim = useRef(new Animated.Value(1)).current;
 
   const [screenMode, setScreenMode] = useState<ExploreScreenMode>('list');
+  const [lastListMode, setLastListMode] = useState<'list' | 'map'>('list');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
-  const [exploreMaxPriceInput, setExploreMaxPriceInput] = useState('');
-  const [exploreFuelTypeInput, setExploreFuelTypeInput] = useState<FuelFilter>('');
-  const [exploreTransmissionInput, setExploreTransmissionInput] = useState<TransmissionFilter>('');
-  const [exploreSeatsInput, setExploreSeatsInput] = useState<SeatsFilter>('');
-  const [exploreAddressInput, setExploreAddressInput] = useState('');
-  const [exploreSelectedLocation, setExploreSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [exploreRadiusInput, setExploreRadiusInput] = useState('');
-  const [exploreFiltersError, setExploreFiltersError] = useState<string | null>(null);
+
+  // Filtros aplicados (los que se envían a la API) y borrador editable en la hoja.
+  const [appliedFilters, setAppliedFilters] = useState<FilterDraft>(EMPTY_FILTERS);
+  const [draft, setDraft] = useState<FilterDraft>(EMPTY_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filtersError, setFiltersError] = useState<string | null>(null);
+  const [showSearchRow, setShowSearchRow] = useState(true);
+  const lastScrollYRef = useRef(0);
 
   const [bookingStartDate, setBookingStartDate] = useState<Date | null>(null);
   const [bookingStartHour, setBookingStartHour] = useState(10);
   const [bookingEndDate, setBookingEndDate] = useState<Date | null>(null);
   const [bookingEndHour, setBookingEndHour] = useState(18);
+  const [calendarKey, setCalendarKey] = useState(0);
   const [bookingSaving, setBookingSaving] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
-  const [bookingMessage, setBookingMessage] = useState<string | null>(null);
+  const [bookingSent, setBookingSent] = useState(false);
   const [hasShownLocationPrompt, setHasShownLocationPrompt] = useState(false);
-  const [overviewUser, setOverviewUser] = useState<{ id: string; displayName: string; avatarUrl: string | null } | null>(null);
+  const [overviewUser, setOverviewUser] = useState<{ id: string; displayName: string; avatarUrl: string | null } | null>(
+    null
+  );
 
   const [vehicleBookings, setVehicleBookings] = useState<VehicleBookingItem[]>([]);
-  const [vehicleBookingsLoading, setVehicleBookingsLoading] = useState(false);
-  const [vehicleBookingsError, setVehicleBookingsError] = useState<string | null>(null);
-  const [activePhotoIndex, setActivePhotoIndex] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const { items: vehicles, loading: vehiclesLoading, error: vehiclesError, fetchVehicles } = useVehiclesStore();
   const { userId: authUserId } = useAuthStore();
   const { profile } = useUserProfileStore();
   const [ownerById, setOwnerById] = useState<Record<string, UserMiniProfile>>({});
-  const [ownerLookupError, setOwnerLookupError] = useState<string | null>(null);
 
-  const typedVehicles = vehicles as ExploreVehicle[];
-  const exploreVehicles = typedVehicles.filter((vehicle: ExploreVehicle) => !authUserId || vehicle.ownerId !== authUserId);
-  const imageByVehicleId = useVehiclePrimaryImages(exploreVehicles.map((vehicle: ExploreVehicle) => vehicle.id));
+  const exploreVehicles = useMemo(
+    () => (vehicles as ExploreVehicle[]).filter((vehicle) => !authUserId || vehicle.ownerId !== authUserId),
+    [vehicles, authUserId]
+  );
+  const imageByVehicleId = useVehiclePrimaryImages(exploreVehicles.map((vehicle) => vehicle.id));
 
   const {
     items: vehicleImages,
     loading: vehicleImagesLoading,
-    error: vehicleImagesError,
     fetchByVehicleId: fetchVehicleImagesByVehicleId
   } = useVehicleImagesStore();
 
@@ -354,19 +271,8 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
     fetchByVehicleId: fetchAvailabilityWindowsByVehicleId
   } = useVehicleAvailabilityWindowsStore();
 
-  const typedAvailabilityWindows = availabilityWindows as AvailabilityWindowItem[];
-  const typedVehicleImages = vehicleImages as VehicleImageItem[];
-
-  const {
-    suggestions: exploreAddressSuggestions,
-    loading: exploreAddressLoading,
-    error: exploreAddressError
-  } = useGeocodingSuggestions(exploreAddressInput);
-
   const {
     permissionStatus,
-    loading: userLocationLoading,
-    error: userLocationError,
     coords: userLocationCoords,
     refreshPermissionStatus,
     requestPermission,
@@ -375,446 +281,243 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
   } = useUserLocation();
 
   const selectedVehicle = useMemo(
-    () => exploreVehicles.find((vehicle: ExploreVehicle) => vehicle.id === selectedVehicleId) ?? null,
+    () => exploreVehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null,
     [exploreVehicles, selectedVehicleId]
   );
 
   const hasRequiredProfileData = hasMinimumProfileData(profile);
   const canTransact = canUseTransactionalFlows(profile);
+  const activeFilterCount = countActiveFilters(appliedFilters);
 
-  const selectedVehicleImageUrls = useMemo(() => {
-    return typedVehicleImages
-      .map((image: VehicleImageItem) => resolveStoredImageUrl(image.imageUrl))
-      .filter((url: string | null): url is string => Boolean(url));
-  }, [typedVehicleImages]);
+  const selectedVehicleImageUrls = useMemo(
+    () =>
+      [...vehicleImages]
+        .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+        .map((image) => resolveStoredImageUrl(image.imageUrl))
+        .filter((url): url is string => Boolean(url)),
+    [vehicleImages]
+  );
 
-  const ownerIds = useMemo(
-    () => Array.from(new Set(exploreVehicles.map((vehicle: ExploreVehicle) => vehicle.ownerId))).sort(),
+  const ownerIdsKey = useMemo(
+    () => Array.from(new Set(exploreVehicles.map((vehicle) => vehicle.ownerId))).sort().join('|'),
     [exploreVehicles]
   );
 
-  const ownerIdsKey = ownerIds.join('|');
+  const userPoint =
+    permissionStatus === 'granted' && userLocationCoords
+      ? { latitude: userLocationCoords.latitude, longitude: userLocationCoords.longitude }
+      : null;
+
+  // Columnas de la rejilla según el ancho disponible (centrado con ancho máximo).
+  const contentWidth = Math.min(width - spacingTokens.lg * 2, layoutTokens.contentMaxWidth);
+  const columns = contentWidth >= 960 ? 3 : contentWidth >= 600 ? 2 : 1;
+  const cardWidth = Math.floor((contentWidth - spacingTokens.lg * (columns - 1)) / columns);
+
+  const buildApiFilters = useCallback((filters: FilterDraft) => {
+    const maxPrice = parseLocaleNumber(filters.maxPrice);
+    const radius = parseLocaleNumber(filters.radius);
+
+    return {
+      maxPrice: filters.maxPrice.trim() && !Number.isNaN(maxPrice) ? maxPrice : undefined,
+      fuelType: filters.fuelType || undefined,
+      transmission: filters.transmission || undefined,
+      seats: filters.seats ? Number(filters.seats) : undefined,
+      lat: filters.location?.lat,
+      lng: filters.location?.lng,
+      radiusKm: filters.location && filters.radius.trim() && !Number.isNaN(radius) ? radius : undefined
+    };
+  }, []);
 
   useEffect(() => {
     void fetchVehicles();
   }, [fetchVehicles]);
 
+  // Si el usuario ya dio permiso de ubicación, mostramos distancias sin volver a preguntar.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const status = await refreshPermissionStatus();
+        if (status === 'granted') {
+          await refreshLocation();
+        }
+      } catch {
+        // Sin ubicación seguimos mostrando el listado normal.
+      }
+    })();
+  }, [refreshPermissionStatus, refreshLocation]);
+
+  const handleRequestLocationPermission = useCallback(async () => {
+    clearLocationError();
+
+    if (hasShownLocationPrompt) {
+      return;
+    }
+
+    setHasShownLocationPrompt(true);
+    const nextPermission = await requestPermission();
+
+    if (nextPermission === 'granted') {
+      await refreshLocation();
+    }
+  }, [clearLocationError, hasShownLocationPrompt, refreshLocation, requestPermission]);
+
+  const loadVehicleBookings = useCallback(async (vehicleId: string) => {
+    try {
+      const response = await httpClient.get<VehicleBookingItem[]>(`/bookings/vehicle/${vehicleId}`);
+      setVehicleBookings(response.data);
+    } catch {
+      // El calendario sigue funcionando con las ventanas; el backend valida solapes.
+      setVehicleBookings([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (screenMode !== 'detail' || !selectedVehicleId) {
       return;
     }
 
-    void Promise.all([
-      fetchVehicleImagesByVehicleId(selectedVehicleId),
-      fetchAvailabilityWindowsByVehicleId(selectedVehicleId),
-      refreshPermissionStatus()
-    ]);
-
-    // Solicitar permiso de ubicación automáticamente la primera vez
-    if (!hasShownLocationPrompt) {
-      void handleRequestLocationPermission();
-    }
+    void fetchVehicleImagesByVehicleId(selectedVehicleId);
+    void fetchAvailabilityWindowsByVehicleId(selectedVehicleId);
+    void loadVehicleBookings(selectedVehicleId);
+    void handleRequestLocationPermission();
   }, [
     screenMode,
     selectedVehicleId,
     fetchVehicleImagesByVehicleId,
     fetchAvailabilityWindowsByVehicleId,
-    refreshPermissionStatus,
-    hasShownLocationPrompt
+    loadVehicleBookings,
+    handleRequestLocationPermission
   ]);
 
   useEffect(() => {
-    if (screenMode !== 'detail' || !selectedVehicleId) {
-      setVehicleBookings([]);
-      setVehicleBookingsError(null);
-      return;
-    }
+    const ownerIds = ownerIdsKey ? ownerIdsKey.split('|') : [];
 
-    let isCancelled = false;
-
-    const loadVehicleBookings = async () => {
-      setVehicleBookingsLoading(true);
-      setVehicleBookingsError(null);
-
-      try {
-        const response = await httpClient.get<VehicleBookingItem[]>(`/bookings/vehicle/${selectedVehicleId}`);
-
-        if (!isCancelled) {
-          setVehicleBookings(response.data);
-        }
-      } catch {
-        if (!isCancelled) {
-          setVehicleBookingsError('No se pudieron cargar las reservas actuales del vehiculo.');
-        }
-      } finally {
-        if (!isCancelled) {
-          setVehicleBookingsLoading(false);
-        }
-      }
-    };
-
-    void loadVehicleBookings();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [screenMode, selectedVehicleId]);
-
-  useEffect(() => {
     if (ownerIds.length === 0) {
-      setOwnerById({});
-      setOwnerLookupError(null);
       return;
     }
 
     let isCancelled = false;
 
-    const loadOwners = async () => {
-      try {
-        const owners = await Promise.all(
-          ownerIds.map(async (ownerId) => {
-            const response = await httpClient.get<UserMiniProfile>(`/users/${ownerId}`);
-            return response.data;
-          })
-        );
+    void (async () => {
+      // allSettled: un propietario que falle no deja sin nombre al resto.
+      const results = await Promise.allSettled(
+        ownerIds.map(async (ownerId) => (await httpClient.get<UserMiniProfile>(`/users/${ownerId}`)).data)
+      );
 
-        if (isCancelled) {
-          return;
-        }
-
-        const nextMap = owners.reduce<Record<string, UserMiniProfile>>((acc: Record<string, UserMiniProfile>, owner: UserMiniProfile) => {
-          acc[owner.id] = owner;
-          return acc;
-        }, {});
-
-        setOwnerById(nextMap);
-        setOwnerLookupError(null);
-      } catch {
-        if (!isCancelled) {
-          setOwnerLookupError('No se pudo cargar la informacion de algunos propietarios.');
-        }
+      if (isCancelled) {
+        return;
       }
-    };
 
-    void loadOwners();
+      setOwnerById((current) => {
+        const next = { ...current };
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            next[result.value.id] = result.value;
+          }
+        }
+        return next;
+      });
+    })();
 
     return () => {
       isCancelled = true;
     };
   }, [ownerIdsKey]);
 
-  useEffect(() => {
-    showStickyFiltersRef.current = showStickyFilters;
-  }, [showStickyFilters]);
-
-  useEffect(() => {
-    Animated.timing(stickyFiltersAnim, {
-      toValue: showStickyFilters ? 1 : 0,
-      duration: 280,
-      useNativeDriver: false
-    }).start();
-  }, [showStickyFilters, stickyFiltersAnim]);
-
-  useEffect(() => {
-    lastScrollYRef.current = 0;
-    if (screenMode === 'map' && !showStickyFiltersRef.current) {
-      setShowStickyFilters(true);
-    }
-  }, [screenMode]);
-
-  const handleExploreScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (screenMode === 'map') {
-      if (!showStickyFiltersRef.current) {
-        setShowStickyFilters(true);
-      }
-      lastScrollYRef.current = Math.max(0, event.nativeEvent.contentOffset.y);
-      return;
-    }
-
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const currentY = Math.max(0, event.nativeEvent.contentOffset.y);
     const delta = currentY - lastScrollYRef.current;
 
     if (currentY < 80) {
-      if (!showStickyFiltersRef.current) {
-        setShowStickyFilters(true);
-      }
-      lastScrollYRef.current = currentY;
-      return;
-    }
-
-    if (delta > 8 && showStickyFiltersRef.current) {
-      setShowStickyFilters(false);
-    } else if (delta < -8 && !showStickyFiltersRef.current) {
-      setShowStickyFilters(true);
+      setShowSearchRow(true);
+    } else if (delta > 10) {
+      setShowSearchRow(false);
+    } else if (delta < -10) {
+      setShowSearchRow(true);
     }
 
     lastScrollYRef.current = currentY;
   };
 
-  const stickyWebStyle =
-    Platform.OS === 'web'
-      ? ({ position: 'sticky', top: isDesktopWeb ? topPadding : 8, zIndex: 30 } as any)
-      : undefined;
+  const applyFilters = async (next: FilterDraft) => {
+    const radius = parseLocaleNumber(next.radius);
+    const maxPrice = parseLocaleNumber(next.maxPrice);
 
-  const stickyMobileHiddenInset = Platform.OS !== 'web' && !showStickyFilters ? 12 : 0;
-
-  const fuelOptions: Array<SelectOption<FuelFilter>> = [
-    { label: 'Todos', value: '' },
-    { label: 'Gasolina', value: 'gasoline' },
-    { label: 'Diesel', value: 'diesel' },
-    { label: 'Eléctrico', value: 'electric' },
-    { label: 'Híbrido', value: 'hybrid' }
-  ];
-
-  const transmissionOptions: Array<SelectOption<TransmissionFilter>> = [
-    { label: 'Todas', value: '' },
-    { label: 'Manual', value: 'manual' },
-    { label: 'Automática', value: 'automatic' }
-  ];
-
-  const seatsOptions: Array<SelectOption<SeatsFilter>> = [
-    { label: 'Seleccionar plazas', value: '' },
-    { label: '2 plazas', value: '2' },
-    { label: '4 plazas', value: '4' },
-    { label: '5 plazas', value: '5' },
-    { label: '7 plazas', value: '7' }
-  ];
-
-  const handleExploreAddressChange = (value: string) => {
-    setExploreAddressInput(value);
-    setExploreSelectedLocation(null);
-    setExploreFiltersError(null);
-  };
-
-  const handleSelectExploreAddress = (label: string, lat: number, lng: number) => {
-    setExploreAddressInput(label);
-    setExploreSelectedLocation({ lat, lng });
-    setExploreFiltersError(null);
-  };
-
-  const controlsBlock = (
-    <>
-      <Animated.View
-        pointerEvents={showStickyFilters ? 'auto' : 'none'}
-        style={[
-          localStyles.filterAnimatedWrap,
-          {
-            opacity: stickyFiltersAnim,
-            maxHeight: stickyFiltersAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, 560]
-            }),
-            marginBottom: stickyFiltersAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, spacingTokens.md]
-            }),
-            transform: [
-              {
-                translateY: stickyFiltersAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [-8, 0]
-                })
-              }
-            ]
-          }
-        ]}
-      >
-        <View style={[styles.card, desktopCardStyle, localStyles.filterBarCard]}>
-          <Text style={localStyles.sectionLabel}>Filtros</Text>
-          <View style={localStyles.filterBarScrollShell}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={localStyles.filterBarRow}>
-              <View style={localStyles.locationRadioGroup}>
-                <View style={localStyles.locationBarItem}>
-                  <Text style={localStyles.inputLabel}>Ubicación</Text>
-                  <View style={localStyles.locationField}>
-                    <View style={localStyles.locationIconWrap}>
-                      <View style={localStyles.locationPinDot} />
-                      <View style={localStyles.locationPinTail} />
-                    </View>
-                    <TextInput
-                      value={exploreAddressInput}
-                      onChangeText={handleExploreAddressChange}
-                      style={localStyles.locationInput}
-                      placeholder="Busca tu zona..."
-                    />
-                  </View>
-                </View>
-
-                <View style={localStyles.barInputItem}>
-                  <Text style={localStyles.inputLabel}>Radio (km)</Text>
-                  <TextInput
-                    value={exploreRadiusInput}
-                    onChangeText={setExploreRadiusInput}
-                    style={localStyles.inputField}
-                    placeholder="25"
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
-
-              <View style={localStyles.barInputItem}>
-                <Text style={localStyles.inputLabel}>Precio máx (€)</Text>
-                <TextInput
-                  value={exploreMaxPriceInput}
-                  onChangeText={setExploreMaxPriceInput}
-                  style={localStyles.inputField}
-                  placeholder="500"
-                  keyboardType="decimal-pad"
-                />
-              </View>
-
-              <View style={localStyles.barSelectItem}>
-                <SelectDropdown
-                  label="Combustible"
-                  value={exploreFuelTypeInput}
-                  options={fuelOptions}
-                  onChange={setExploreFuelTypeInput}
-                />
-              </View>
-
-              <View style={localStyles.barSelectItem}>
-                <SelectDropdown
-                  label="Transmision"
-                  value={exploreTransmissionInput}
-                  options={transmissionOptions}
-                  onChange={setExploreTransmissionInput}
-                />
-              </View>
-
-              <View style={localStyles.barSelectItem}>
-                <SelectDropdown
-                  label="Plazas"
-                  value={exploreSeatsInput}
-                  options={seatsOptions}
-                  onChange={setExploreSeatsInput}
-                />
-              </View>
-
-              <View style={localStyles.barActionsWrap}>
-                <ActionButton label="Aplicar" onPress={() => void handleApplyExploreFilters()} />
-                <ActionButton label="Limpiar" onPress={() => void handleClearExploreFilters()} variant="ghost" />
-              </View>
-            </ScrollView>
-          </View>
-
-          {exploreAddressLoading ? <Text style={styles.linkHint}>Buscando direcciones...</Text> : null}
-          {exploreAddressError ? <Text style={styles.error}>{exploreAddressError}</Text> : null}
-          {exploreAddressSuggestions.length > 0 && !exploreSelectedLocation ? (
-            <View style={localStyles.suggestionsList}>
-              {exploreAddressSuggestions.map((suggestion) => (
-                <Pressable
-                  key={suggestion.id}
-                  style={localStyles.suggestionItem}
-                  onPress={() => handleSelectExploreAddress(suggestion.label, suggestion.lat, suggestion.lng)}
-                >
-                  <Text style={localStyles.suggestionLabel}>{suggestion.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-
-          {exploreSelectedLocation ? (
-            <Text style={styles.linkHint}>
-              Ubicacion seleccionada: {exploreSelectedLocation.lat.toFixed(5)}, {exploreSelectedLocation.lng.toFixed(5)}
-            </Text>
-          ) : null}
-
-          {exploreFiltersError ? <Text style={styles.error}>{exploreFiltersError}</Text> : null}
-        </View>
-      </Animated.View>
-
-      <View style={[styles.card, localStyles.viewModeCard]}>
-        <Pressable
-          onPress={() => setScreenMode('list')}
-          style={[localStyles.viewModePill, screenMode === 'list' ? localStyles.viewModePillActive : undefined]}
-        >
-          <Text style={[localStyles.viewModeText, screenMode === 'list' ? localStyles.viewModeTextActive : undefined]}>Lista</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setScreenMode('map')}
-          style={[localStyles.viewModePill, screenMode === 'map' ? localStyles.viewModePillActive : undefined]}
-        >
-          <Text style={[localStyles.viewModeText, screenMode === 'map' ? localStyles.viewModeTextActive : undefined]}>Mapa</Text>
-        </Pressable>
-      </View>
-    </>
-  );
-
-  const handleApplyExploreFilters = async () => {
-    const parsedMaxPrice = parseLocaleNumber(exploreMaxPriceInput);
-    const parsedSeats = parseLocaleNumber(exploreSeatsInput);
-    const parsedRadius = parseLocaleNumber(exploreRadiusInput);
-
-    if (exploreRadiusInput.trim() && Number.isNaN(parsedRadius)) {
-      setExploreFiltersError('El radio debe ser un numero valido.');
-      return;
+    if (next.radius.trim() && (Number.isNaN(radius) || radius <= 0)) {
+      setFiltersError('El radio debe ser un número mayor que 0.');
+      return false;
     }
 
-    if (exploreAddressInput.trim() && !exploreSelectedLocation) {
-      setExploreFiltersError('Selecciona una direccion sugerida para aplicar filtro por ubicacion.');
-      return;
+    if (next.maxPrice.trim() && (Number.isNaN(maxPrice) || maxPrice <= 0)) {
+      setFiltersError('El precio máximo debe ser un número mayor que 0.');
+      return false;
     }
 
-    setExploreFiltersError(null);
+    if (next.address.trim() && !next.location) {
+      setFiltersError('Elige una de las direcciones sugeridas para filtrar por ubicación.');
+      return false;
+    }
 
-    await fetchVehicles({
-      maxPrice: exploreMaxPriceInput.trim() && !Number.isNaN(parsedMaxPrice) ? parsedMaxPrice : undefined,
-      fuelType: exploreFuelTypeInput || undefined,
-      transmission: exploreTransmissionInput || undefined,
-      seats: exploreSeatsInput.trim() && !Number.isNaN(parsedSeats) ? parsedSeats : undefined,
-      lat: exploreSelectedLocation?.lat,
-      lng: exploreSelectedLocation?.lng,
-      radiusKm: exploreRadiusInput.trim() && !Number.isNaN(parsedRadius) ? parsedRadius : undefined
-    });
+    setFiltersError(null);
+    setAppliedFilters(next);
+    setDraft(next);
+    await fetchVehicles(buildApiFilters(next));
+    return true;
   };
 
-  const handleClearExploreFilters = async () => {
-    setExploreMaxPriceInput('');
-    setExploreFuelTypeInput('');
-    setExploreTransmissionInput('');
-    setExploreSeatsInput('');
-    setExploreAddressInput('');
-    setExploreSelectedLocation(null);
-    setExploreRadiusInput('');
-    setExploreFiltersError(null);
+  const handleClearFilters = async () => {
+    setDraft(EMPTY_FILTERS);
+    setAppliedFilters(EMPTY_FILTERS);
+    setFiltersError(null);
+    setFiltersOpen(false);
     await fetchVehicles();
   };
 
-  const handleOpenVehicleDetails = (vehicleId: string) => {
-    setSelectedVehicleId(vehicleId);
-    setScreenMode('detail');
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchVehicles(buildApiFilters(appliedFilters));
+    setRefreshing(false);
+  };
+
+  const resetBookingForm = () => {
     setBookingStartDate(null);
     setBookingStartHour(10);
     setBookingEndDate(null);
     setBookingEndHour(18);
     setBookingError(null);
-    setBookingMessage(null);
+    setCalendarKey((key) => key + 1);
+  };
+
+  const handleOpenVehicleDetails = (vehicleId: string) => {
+    if (screenMode !== 'detail') {
+      setLastListMode(screenMode);
+    }
+    setSelectedVehicleId(vehicleId);
+    setScreenMode('detail');
     setVehicleBookings([]);
-    setVehicleBookingsError(null);
+    setBookingSent(false);
+    resetBookingForm();
   };
 
   const handleBackToExploreList = () => {
-    setScreenMode('list');
+    setScreenMode(lastListMode);
     setSelectedVehicleId(null);
-    setActivePhotoIndex(null);
-    setBookingStartDate(null);
-    setBookingStartHour(10);
-    setBookingEndDate(null);
-    setBookingEndHour(18);
-    setBookingError(null);
-    setBookingMessage(null);
+    setBookingSent(false);
+    resetBookingForm();
   };
 
-  const handleRequestLocationPermission = async () => {
-    clearLocationError();
-    if (!hasShownLocationPrompt) {
-      setHasShownLocationPrompt(true);
-      const nextPermission = await requestPermission();
-      if (nextPermission === 'granted') {
-        await refreshLocation();
-      }
+  useBackHandler(screenMode === 'detail', handleBackToExploreList);
+
+  const bookingRange = useMemo(() => {
+    if (!bookingStartDate || !bookingEndDate) {
+      return null;
     }
-  };
+
+    const startISO = calendarDayHourToIso(bookingStartDate, bookingStartHour);
+    const endISO = calendarDayHourToIso(bookingEndDate, bookingEndHour);
+
+    return new Date(endISO).getTime() > new Date(startISO).getTime() ? { startISO, endISO } : null;
+  }, [bookingStartDate, bookingStartHour, bookingEndDate, bookingEndHour]);
 
   const handleCreateBooking = async () => {
     if (!selectedVehicleId) {
@@ -822,62 +525,45 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
     }
 
     if (!authUserId) {
-      setBookingError('Debes iniciar sesion para solicitar una reserva.');
-      setBookingMessage(null);
+      setBookingError('Debes iniciar sesión para solicitar una reserva.');
       return;
     }
 
-    if (!hasRequiredProfileData) {
-      setBookingError('Completa nombre, apellidos y telefono en Perfil antes de solicitar una reserva.');
-      setBookingMessage(null);
-      return;
-    }
-
-    if (!canTransact) {
-      setBookingError('Necesitas verificacion documental para solicitar reservas. Ve a Perfil > Documentacion.');
-      setBookingMessage(null);
+    if (!hasRequiredProfileData || !canTransact) {
+      setBookingError('Completa tu perfil y verifica tu documentación antes de reservar.');
       return;
     }
 
     if (!bookingStartDate || !bookingEndDate) {
       setBookingError('Selecciona fecha y hora de inicio y fin en el calendario.');
-      setBookingMessage(null);
       return;
     }
 
-    // Construcción de datetime ISO con las fechas y horas seleccionadas
-    const startDateTime = new Date(bookingStartDate);
-    startDateTime.setHours(bookingStartHour, 0, 0, 0);
-    const startISO = startDateTime.toISOString();
-
-    const endDateTime = new Date(bookingEndDate);
-    endDateTime.setHours(bookingEndHour, 0, 0, 0);
-    const endISO = endDateTime.toISOString();
+    if (!bookingRange) {
+      setBookingError('La fecha de fin debe ser posterior a la de inicio.');
+      return;
+    }
 
     setBookingSaving(true);
     setBookingError(null);
-    setBookingMessage(null);
 
     try {
       await httpClient.post('/bookings', {
         vehicleId: selectedVehicleId,
-        startDatetime: startISO,
-        endDatetime: endISO
+        startDatetime: bookingRange.startISO,
+        endDatetime: bookingRange.endISO
       });
 
-      const bookingsResponse = await httpClient.get<VehicleBookingItem[]>(`/bookings/vehicle/${selectedVehicleId}`);
-      setVehicleBookings(bookingsResponse.data);
-
-      setBookingMessage(null);
-      setBookingStartDate(null);
-      setBookingStartHour(10);
-      setBookingEndDate(null);
-      setBookingEndHour(18);
+      await loadVehicleBookings(selectedVehicleId);
+      resetBookingForm();
+      setBookingSent(true);
+      toast.success('Solicitud enviada. El propietario la revisará pronto.');
     } catch (error: unknown) {
-      const apiMessage = getApiErrorMessage(error);
       setBookingError(
-        apiMessage ??
-          'No se pudo crear la reserva. Revisa disponibilidad y que no exista solape con otra reserva.'
+        getApiErrorMessage(
+          error,
+          'No se pudo crear la reserva. Revisa la disponibilidad y que no se solape con otra reserva.'
+        )
       );
     } finally {
       setBookingSaving(false);
@@ -892,945 +578,895 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0 }: ExploreScre
     setOverviewUser({ id: userId, displayName, avatarUrl });
   };
 
-  if (screenMode === 'detail' && selectedVehicle) {
-    const selectedOwner = ownerById[selectedVehicle.ownerId];
-    const selectedOwnerAvatarUrl = resolveStoredImageUrl(selectedOwner?.avatarUrl ?? null);
+  const overviewModal = (
+    <UserOverviewModal
+      visible={!!overviewUser}
+      userId={overviewUser?.id ?? null}
+      displayName={overviewUser?.displayName ?? 'Usuario'}
+      avatarUrl={overviewUser?.avatarUrl ?? null}
+      onClose={() => setOverviewUser(null)}
+    />
+  );
 
-    return (
-      <ScrollView
-        style={localStyles.exploreScroll}
-        contentContainerStyle={[
-          localStyles.exploreScrollContent,
-          {
-            paddingTop: topPadding,
-            paddingBottom: bottomPadding + spacingTokens.md,
-            paddingHorizontal: spacingTokens.lg
+  const filtersSheet = (
+    <Sheet
+      visible={filtersOpen}
+      onClose={() => {
+        setFiltersOpen(false);
+        setDraft(appliedFilters);
+        setFiltersError(null);
+      }}
+      title="Filtros"
+      subtitle="Afina la búsqueda por precio y características"
+    >
+      <View style={styles.sheetSection}>
+        <Text style={styles.chipGroupLabel}>Radio de búsqueda</Text>
+        <View style={styles.chipGroupRow}>
+          {RADIUS_PRESETS.map((preset) => {
+            const active = draft.radius === preset;
+            return (
+              <Pressable
+                key={preset}
+                onPress={() => setDraft((current) => ({ ...current, radius: active ? '' : preset }))}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: active, disabled: !draft.location }}
+                disabled={!draft.location}
+                style={[
+                  styles.choiceChip,
+                  active ? styles.choiceChipActive : null,
+                  !draft.location ? styles.choiceChipDisabled : null
+                ]}
+              >
+                <Text style={[styles.choiceChipText, active ? styles.choiceChipTextActive : null]}>{preset} km</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.sheetHint}>
+          {draft.location ? 'Distancia máxima desde la ubicación elegida.' : 'Elige primero una ubicación en el buscador.'}
+        </Text>
+      </View>
+
+      <TextField
+        label="Precio máximo por día"
+        value={draft.maxPrice}
+        onChangeText={(value) => setDraft((current) => ({ ...current, maxPrice: value }))}
+        placeholder="Sin límite"
+        keyboardType="decimal-pad"
+        leftIcon="pricetag-outline"
+        right={<Text style={styles.unit}>€</Text>}
+      />
+
+      <ChipGroup
+        label="Combustible"
+        options={FUEL_OPTIONS}
+        value={draft.fuelType}
+        onChange={(value) => setDraft((current) => ({ ...current, fuelType: value }))}
+      />
+      <ChipGroup
+        label="Transmisión"
+        options={TRANSMISSION_OPTIONS}
+        value={draft.transmission}
+        onChange={(value) => setDraft((current) => ({ ...current, transmission: value }))}
+      />
+      <ChipGroup
+        label="Plazas"
+        options={SEATS_OPTIONS}
+        value={draft.seats}
+        onChange={(value) => setDraft((current) => ({ ...current, seats: value }))}
+      />
+
+      {filtersError ? <InlineMessage tone="error" message={filtersError} /> : null}
+
+      <View style={styles.sheetActions}>
+        <Button label="Limpiar" variant="secondary" onPress={() => void handleClearFilters()} style={styles.flex1} />
+        <Button
+          label="Ver resultados"
+          onPress={() =>
+            void applyFilters(draft).then((ok) => {
+              if (ok) {
+                setFiltersOpen(false);
+              }
+            })
           }
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
-        <SectionHeader
-          title={`${selectedVehicle.brand} ${selectedVehicle.model}`}
-          subtitle="Ficha completa del vehiculo para decidir tu reserva."
-          centered={isDesktopWeb}
+          loading={vehiclesLoading}
+          style={styles.flex1}
+        />
+      </View>
+    </Sheet>
+  );
+
+  const controlsBar = (compact: boolean) => (
+    <View style={styles.controls}>
+      {!compact ? (
+        <AddressSearch
+          value={draft.address}
+          selected={!!draft.location}
+          placeholder="¿Dónde quieres recoger el coche?"
+          onChange={(value) => {
+            setDraft((current) => ({ ...current, address: value, location: null }));
+            setFiltersError(null);
+          }}
+          onSelect={(label, lat, lng) => {
+            const next = { ...draft, address: label, location: { lat, lng }, radius: draft.radius || '25' };
+            void applyFilters(next);
+          }}
+          onClear={() => {
+            const next = { ...draft, address: '', location: null, radius: '' };
+            void applyFilters(next);
+          }}
+        />
+      ) : null}
+      {!compact && filtersError && !filtersOpen ? <InlineMessage tone="error" message={filtersError} /> : null}
+      <View style={styles.controlsRow}>
+        <Pressable
+          onPress={() => {
+            setDraft(appliedFilters);
+            setFiltersOpen(true);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Filtros${activeFilterCount ? `, ${activeFilterCount} activos` : ''}`}
+          android_ripple={{ color: 'rgba(13,27,42,0.08)' }}
+          style={({ pressed }) => [
+            styles.filterButton,
+            activeFilterCount ? styles.filterButtonActive : null,
+            pressed && Platform.OS !== 'android' ? styles.filterButtonPressed : null
+          ]}
+        >
+          <Ionicons
+            name="options-outline"
+            size={18}
+            color={activeFilterCount ? colorTokens.white : colorTokens.primary}
+          />
+          <Text style={[styles.filterButtonText, activeFilterCount ? styles.filterButtonTextActive : null]}>Filtros</Text>
+          {activeFilterCount ? (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+        <SegmentedControl
+          options={[
+            { value: 'list', label: 'Lista', icon: 'list-outline' },
+            { value: 'map', label: 'Mapa', icon: 'map-outline' }
+          ]}
+          value={screenMode === 'map' ? 'map' : 'list'}
+          onChange={(value) => {
+            setScreenMode(value);
+            setLastListMode(value);
+          }}
+          style={styles.segmented}
+        />
+      </View>
+    </View>
+  );
+
+  /* ------------------------------------------------------------------------ */
+  /* Detalle de vehículo                                                      */
+  /* ------------------------------------------------------------------------ */
+
+  if (screenMode === 'detail' && selectedVehicle) {
+    const owner = ownerById[selectedVehicle.ownerId];
+    const ownerName = owner ? getDisplayName(owner.firstName, owner.lastName) : 'Propietario';
+    const ownerAvatarUrl = resolveStoredImageUrl(owner?.avatarUrl ?? null);
+    const fuel = translateFuelType(selectedVehicle.fuelType);
+    const transmission = translateTransmission(selectedVehicle.transmission);
+    const distance = userPoint
+      ? getDistanceKm(userPoint, { latitude: selectedVehicle.locationLat, longitude: selectedVehicle.locationLng })
+      : null;
+    const billableDays = bookingRange ? getBillableDays(bookingRange.startISO, bookingRange.endISO) : null;
+    const upcomingBlocked = vehicleBookings
+      .filter(
+        (booking) =>
+          ['accepted', 'paid_confirmed', 'in_progress'].includes(booking.status) &&
+          new Date(booking.endDatetime).getTime() > Date.now()
+      )
+      .sort((a, b) => new Date(a.startDatetime).getTime() - new Date(b.startDatetime).getTime());
+    const isWide = width >= 900;
+    const hasFutureWindows = availabilityWindows.some((window) => new Date(window.endDatetime).getTime() > Date.now());
+
+    const infoColumn = (
+      <View style={styles.detailColumn}>
+        <ImageCarousel
+          images={selectedVehicleImageUrls}
+          height={isWide ? 380 : 260}
+          loading={vehicleImagesLoading && selectedVehicleImageUrls.length === 0}
+          emptyLabel="Este vehículo aún no tiene fotos"
         />
 
-        {!isDesktopWeb ? (
-          <View style={localStyles.inlineActions}>
-            <ActionButton label="Volver a explorar" onPress={handleBackToExploreList} variant="ghost" />
+        <View style={styles.detailTitleBlock}>
+          <View style={styles.detailPrice}>
+            <Text style={styles.detailPriceValue}>{formatPriceCompact(selectedVehicle.pricePerDay)}</Text>
+            <Text style={styles.detailPriceUnit}>/día</Text>
+          </View>
+          <View style={styles.metaRow}>
+            <Ionicons name="location-outline" size={16} color={colorTokens.textMuted} />
+            <Text style={styles.metaText} numberOfLines={2}>
+              {selectedVehicle.locationAddress}
+              {distance !== null ? ` · ${formatDistance(distance)}` : ''}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.specGrid}>
+          <SpecTile icon="calendar-outline" label="Año" value={String(selectedVehicle.year)} />
+          <SpecTile icon="flash-outline" label="Combustible" value={fuel ?? 'No indicado'} />
+          <SpecTile icon="cog-outline" label="Cambio" value={transmission ?? 'No indicado'} />
+          <SpecTile icon="people-outline" label="Plazas" value={selectedVehicle.seats ? String(selectedVehicle.seats) : '—'} />
+        </View>
+
+        <Card>
+          <CardHeader title="Descripción" icon="document-text-outline" />
+          <Text style={styles.bodyText}>{selectedVehicle.description}</Text>
+        </Card>
+
+        <Card
+          onPress={() => handleOpenUserOverview(selectedVehicle.ownerId, ownerName, owner?.avatarUrl ?? null)}
+          accessibilityLabel={`Propietario: ${ownerName}. Ver perfil`}
+        >
+          <View style={styles.ownerRow}>
+            <Avatar uri={ownerAvatarUrl} name={ownerName} size={48} />
+            <View style={styles.flex1}>
+              <Text style={styles.caption}>Propietario</Text>
+              <Text style={styles.ownerName}>{ownerName}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colorTokens.textMuted} />
+          </View>
+        </Card>
+
+        <Card>
+          <CardHeader title="Ubicación" icon="map-outline" subtitle="Punto aproximado de recogida" />
+          <View style={styles.mapWrap}>
+            <VehicleLocationMap
+              vehicleLocation={{ latitude: selectedVehicle.locationLat, longitude: selectedVehicle.locationLng }}
+              userLocation={userPoint}
+              height={220}
+            />
+          </View>
+        </Card>
+      </View>
+    );
+
+    const bookingColumn = (
+      <Card style={isWide ? styles.bookingCardWide : undefined}>
+        <CardHeader title="Solicitar reserva" icon="key-outline" subtitle="Pagas solo cuando el propietario acepte" />
+
+        <VerificationGate
+          missingProfile={!hasRequiredProfileData}
+          missingVerification={!canTransact}
+          onGoToProfile={onNavigateToTab ? () => onNavigateToTab('profile') : undefined}
+          action="solicitar reservas"
+        />
+
+        {availabilityWindowsLoading && availabilityWindows.length === 0 ? (
+          <View style={styles.skeletonStack}>
+            <Skeleton height={48} radius={radiusTokens.input} />
+            <Skeleton height={36} width="60%" />
+          </View>
+        ) : availabilityWindowsError ? (
+          <InlineMessage
+            tone="error"
+            message={availabilityWindowsError}
+            actionLabel="Reintentar"
+            onAction={() => void fetchAvailabilityWindowsByVehicleId(selectedVehicle.id)}
+          />
+        ) : !hasFutureWindows ? (
+          <InlineMessage
+            tone="info"
+            title="Sin fechas publicadas"
+            message="El propietario todavía no ha abierto disponibilidad para este vehículo."
+          />
+        ) : (
+          <CalendarPicker
+            key={calendarKey}
+            availabilityWindows={availabilityWindows}
+            bookings={vehicleBookings}
+            onDateRangeChange={(startDate, startHour, endDate, endHour) => {
+              setBookingStartDate(startDate);
+              setBookingStartHour(startHour);
+              setBookingEndDate(endDate);
+              setBookingEndHour(endHour);
+              setBookingError(null);
+            }}
+          />
+        )}
+
+        {billableDays !== null ? (
+          <View style={styles.priceSummary}>
+            <View style={styles.priceRow}>
+              <Text style={styles.bodyText}>
+                {formatCurrencyEUR(selectedVehicle.pricePerDay)} × {pluralize(billableDays, 'día', 'días')}
+              </Text>
+              <Text style={styles.priceTotal}>{formatCurrencyEUR(selectedVehicle.pricePerDay * billableDays)}</Text>
+            </View>
+            <Text style={styles.caption}>Importe estimado. El total final se confirma al crear la solicitud.</Text>
           </View>
         ) : null}
 
-        <View style={[styles.card, desktopCardStyle]}>
-          <Pressable
-            style={localStyles.ownerCard}
-            onPress={() =>
-              handleOpenUserOverview(
-                selectedVehicle.ownerId,
-                getUserFullName(selectedOwner),
-                selectedOwner?.avatarUrl ?? null
-              )
-            }
-          >
-            {selectedOwnerAvatarUrl ? (
-              <Image source={{ uri: selectedOwnerAvatarUrl }} style={localStyles.ownerAvatar} resizeMode="cover" />
-            ) : (
-              <View style={localStyles.ownerAvatarFallback}>
-                <Text style={localStyles.ownerAvatarFallbackText}>{getInitials(selectedOwner)}</Text>
-              </View>
-            )}
-            <View style={localStyles.ownerInfo}>
-              <Text style={localStyles.ownerLabel}>Propietario</Text>
-              <Text style={localStyles.ownerName}>{getUserFullName(selectedOwner)}</Text>
-            </View>
-          </Pressable>
+        {bookingError ? <InlineMessage tone="error" message={bookingError} /> : null}
 
-          {vehicleImagesLoading || availabilityWindowsLoading ? <ActivityIndicator size="small" /> : null}
-          {vehicleImagesError ? <Text style={styles.error}>{vehicleImagesError}</Text> : null}
-          {availabilityWindowsError ? <Text style={styles.error}>{availabilityWindowsError}</Text> : null}
-          {ownerLookupError ? <Text style={styles.error}>{ownerLookupError}</Text> : null}
-
-          <Text style={localStyles.sectionLabel}>Fotos</Text>
-          {selectedVehicleImageUrls.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={localStyles.galleryRow}>
-              {selectedVehicleImageUrls.map((imageUrl: string, index: number) => (
-                <Pressable key={`${selectedVehicle.id}-${index}`} onPress={() => setActivePhotoIndex(index)}>
-                  <Image source={{ uri: imageUrl }} style={localStyles.galleryImage} resizeMode="cover" />
-                </Pressable>
-              ))}
-            </ScrollView>
-          ) : (
-            <View style={localStyles.imagePlaceholder}>
-              <Text style={localStyles.imagePlaceholderText}>Este vehiculo aun no tiene fotos publicadas.</Text>
-            </View>
-          )}
-
-          <Text style={localStyles.sectionLabel}>Detalles</Text>
-          <View style={localStyles.detailGrid}>
-            <StatusChip label={`Año ${selectedVehicle.year}`} tone="neutral" compact />
-            <StatusChip label={formatCurrencyEUR(selectedVehicle.pricePerDay)} tone="info" compact />
-            <StatusChip label={translateFuelType(selectedVehicle.fuelType)} tone="neutral" compact />
-            <StatusChip label={translateTransmission(selectedVehicle.transmission)} tone="neutral" compact />
-            {selectedVehicle.seats ? <StatusChip label={`${selectedVehicle.seats} plazas`} tone="neutral" compact /> : null}
-          </View>
-          <Text style={localStyles.locationText}>{selectedVehicle.locationAddress}</Text>
-          <Text style={localStyles.descriptionText}>{selectedVehicle.description}</Text>
-
-          <Text style={localStyles.sectionLabel}>Mapa</Text>
-          <VehicleLocationMap
-            vehicleLocation={{
-              latitude: selectedVehicle.locationLat,
-              longitude: selectedVehicle.locationLng
-            }}
-            userLocation={
-              userLocationCoords
-                ? {
-                    latitude: userLocationCoords.latitude,
-                    longitude: userLocationCoords.longitude
-                  }
-                : null
-            }
-            height={220}
+        {bookingSent ? (
+          <InlineMessage
+            tone="success"
+            title="Solicitud enviada"
+            message="Te avisaremos en Mis Viajes cuando el propietario responda."
+            actionLabel={onNavigateToTab ? 'Ver en Mis Viajes' : undefined}
+            onAction={onNavigateToTab ? () => onNavigateToTab('trips') : undefined}
           />
+        ) : null}
 
-          <Text style={localStyles.sectionLabel}>Solicitar reserva</Text>
-          <View style={localStyles.bookingCard}>
-            <View style={localStyles.inlineActions}>
-              <StatusChip label={hasRequiredProfileData ? 'Perfil minimo: OK' : 'Perfil minimo: pendiente'} tone={hasRequiredProfileData ? 'success' : 'warning'} compact />
-              <StatusChip label={canTransact ? 'Documentacion: verificada' : 'Documentacion: pendiente'} tone={canTransact ? 'success' : 'warning'} compact />
-            </View>
-
-            {selectedVehicle && vehicleBookings.length >= 0 ? (
-              <CalendarPicker
-                availabilityWindows={typedAvailabilityWindows.map((w) => ({
-                  id: w.id,
-                  startDatetime: w.startDatetime,
-                  endDatetime: w.endDatetime
-                }))}
-                bookings={vehicleBookings}
-                onDateRangeChange={(startDate: Date | null, startHour: number, endDate: Date | null, endHour: number) => {
-                  setBookingStartDate(startDate);
-                  setBookingStartHour(startHour);
-                  setBookingEndDate(endDate);
-                  setBookingEndHour(endHour);
-                }}
-              />
-            ) : null}
-
-            <View style={localStyles.inlineActions}>
-              <ActionButton
-                label={bookingSaving ? 'Solicitando...' : 'Solicitar reserva'}
-                onPress={() => void handleCreateBooking()}
-                disabled={bookingSaving || !canTransact || !bookingStartDate || !bookingEndDate}
-              />
-            </View>
-
-            {bookingError ? <Text style={styles.error}>{bookingError}</Text> : null}
-          </View>
-
-          {isDesktopWeb ? (
-            <View style={[localStyles.inlineActions, localStyles.inlineActionsCentered]}>
-              <ActionButton label="Volver a explorar" onPress={handleBackToExploreList} variant="ghost" />
-            </View>
-          ) : null}
-        </View>
-
-        <Modal visible={activePhotoIndex !== null} animationType="fade" transparent>
-          <View style={localStyles.modalBackdrop}>
-            <View style={localStyles.modalCard}>
-              <View style={localStyles.modalTopRow}>
-                <Text style={localStyles.modalTitle}>Galeria</Text>
-                <Pressable onPress={() => setActivePhotoIndex(null)} style={localStyles.modalCloseButton}>
-                  <Text style={localStyles.modalCloseText}>Cerrar</Text>
-                </Pressable>
-              </View>
-
-              {activePhotoIndex !== null && selectedVehicleImageUrls[activePhotoIndex] ? (
-                <Image
-                  source={{ uri: selectedVehicleImageUrls[activePhotoIndex] }}
-                  style={localStyles.modalImage}
-                  resizeMode="contain"
-                />
-              ) : null}
-
-              <View style={localStyles.modalActions}>
-                <ActionButton
-                  label="Anterior"
-                  variant="ghost"
-                  onPress={() => setActivePhotoIndex((current) => (current === null || current <= 0 ? 0 : current - 1))}
-                  disabled={activePhotoIndex === null || activePhotoIndex <= 0}
-                />
-                <ActionButton
-                  label="Siguiente"
-                  variant="ghost"
-                  onPress={() =>
-                    setActivePhotoIndex((current) => {
-                      if (current === null) {
-                        return 0;
-                      }
-
-                      return Math.min(selectedVehicleImageUrls.length - 1, current + 1);
-                    })
-                  }
-                  disabled={activePhotoIndex === null || activePhotoIndex >= selectedVehicleImageUrls.length - 1}
-                />
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        <UserOverviewModal
-          visible={!!overviewUser}
-          userId={overviewUser?.id ?? null}
-          displayName={overviewUser?.displayName ?? 'Usuario'}
-          avatarUrl={overviewUser?.avatarUrl ?? null}
-          onClose={() => setOverviewUser(null)}
+        <Button
+          label="Solicitar reserva"
+          icon="paper-plane-outline"
+          onPress={() => void handleCreateBooking()}
+          loading={bookingSaving}
+          disabled={!canTransact || !bookingRange}
+          fullWidth
         />
-      </ScrollView>
+
+        {upcomingBlocked.length > 0 ? (
+          <View style={styles.blockedList}>
+            <Text style={styles.chipGroupLabel}>Fechas ya reservadas</Text>
+            {upcomingBlocked.slice(0, 4).map((booking) => (
+              <View key={booking.id} style={styles.blockedItem}>
+                <Ionicons name="lock-closed-outline" size={14} color={colorTokens.textMuted} />
+                <Text style={styles.caption}>{formatDateRangeMadrid(booking.startDatetime, booking.endDatetime)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </Card>
+    );
+
+    return (
+      <Screen
+        topPadding={topPadding}
+        bottomPadding={bottomPadding}
+        header={
+          <ScreenHeader
+            title={`${selectedVehicle.brand} ${selectedVehicle.model}`}
+            eyebrow="Ficha del vehículo"
+            onBack={handleBackToExploreList}
+            backLabel={lastListMode === 'map' ? 'Volver al mapa' : 'Volver a explorar'}
+          />
+        }
+      >
+        {isWide ? (
+          <View style={styles.detailWide}>
+            <View style={styles.detailWideMain}>{infoColumn}</View>
+            <View style={styles.detailWideSide}>{bookingColumn}</View>
+          </View>
+        ) : (
+          <>
+            {infoColumn}
+            {bookingColumn}
+          </>
+        )}
+        {overviewModal}
+      </Screen>
     );
   }
 
-  if (screenMode === 'map') {
-    const fullMapHeight = Math.max(420, height);
+  /* ------------------------------------------------------------------------ */
+  /* Mapa                                                                     */
+  /* ------------------------------------------------------------------------ */
 
+  if (screenMode === 'map') {
     return (
-      <View style={localStyles.mapLayerRoot}>
-        <View style={localStyles.mapBackgroundLayer}>
+      <View style={styles.mapRoot}>
+        <View style={StyleSheet.absoluteFill}>
           <ExploreVehiclesMap
-            vehicles={exploreVehicles.map((vehicle: ExploreVehicle): VehicleMarker => ({
-              id: vehicle.id,
-              location: {
-                latitude: vehicle.locationLat,
-                longitude: vehicle.locationLng
-              },
-              brand: vehicle.brand,
-              model: vehicle.model,
-              pricePerDay: vehicle.pricePerDay,
-              imageUrl: resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null)
-            }))}
-            userLocation={
-              permissionStatus === 'granted' && userLocationCoords
-                ? { latitude: userLocationCoords.latitude, longitude: userLocationCoords.longitude }
-                : null
-            }
-            onVehiclePress={(vehicleId: string) => handleOpenVehicleDetails(vehicleId)}
-            height={fullMapHeight}
+            vehicles={exploreVehicles.map(
+              (vehicle): VehicleMarker => ({
+                id: vehicle.id,
+                location: { latitude: vehicle.locationLat, longitude: vehicle.locationLng },
+                brand: vehicle.brand,
+                model: vehicle.model,
+                pricePerDay: vehicle.pricePerDay,
+                imageUrl: resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null)
+              })
+            )}
+            userLocation={userPoint}
+            onVehiclePress={handleOpenVehicleDetails}
+            height={Math.max(420, height)}
             infoBottomInset={bottomPadding + (Platform.OS === 'ios' ? 36 : 0)}
           />
         </View>
 
-        <View
-          pointerEvents="box-none"
-          style={[
-            localStyles.mapOverlayLayer,
-            {
-              paddingTop: topPadding + spacingTokens.sm,
-              paddingBottom: bottomPadding + spacingTokens.sm,
-              paddingHorizontal: spacingTokens.lg
-            }
-          ]}
-        >
-          <View pointerEvents="auto" style={localStyles.mapOverlayContent}>
-            <View style={localStyles.mapControlsStack}>{controlsBlock}</View>
-            {vehiclesLoading ? <ActivityIndicator size="small" /> : null}
-            {vehiclesError ? <Text style={[styles.error, localStyles.mapStatusErrorText]}>{vehiclesError}</Text> : null}
-            {ownerLookupError ? <Text style={[styles.error, localStyles.mapStatusErrorText]}>{ownerLookupError}</Text> : null}
+        <View pointerEvents="box-none" style={[styles.mapOverlay, { paddingTop: topPadding + spacingTokens.sm }]}>
+          <View style={[styles.mapControlsCard, { maxWidth: layoutTokens.formMaxWidth }]}>
+            {controlsBar(false)}
           </View>
+          {vehiclesLoading ? (
+            <View style={styles.mapStatus}>
+              <ActivityIndicator size="small" color={colorTokens.primary} />
+              <Text style={styles.mapStatusText}>Buscando vehículos…</Text>
+            </View>
+          ) : vehiclesError ? (
+            <View style={[styles.mapStatus, styles.mapStatusError]}>
+              <Ionicons name="alert-circle" size={16} color={colorTokens.alertText} />
+              <Text style={[styles.mapStatusText, { color: colorTokens.alertText }]}>{vehiclesError}</Text>
+              <Pressable onPress={() => void handleRefresh()} accessibilityRole="button" hitSlop={8}>
+                <Text style={styles.mapRetry}>Reintentar</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.mapStatus}>
+              <Text style={styles.mapStatusText}>{pluralize(exploreVehicles.length, 'vehículo', 'vehículos')}</Text>
+            </View>
+          )}
         </View>
+        {filtersSheet}
       </View>
     );
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Lista                                                                    */
+  /* ------------------------------------------------------------------------ */
+
+  const showSkeletons = vehiclesLoading && exploreVehicles.length === 0;
+
   return (
-    <ScrollView
-      style={localStyles.exploreScroll}
-      contentContainerStyle={[
-        localStyles.exploreScrollContent,
-        {
-          paddingTop: topPadding,
-          paddingBottom: bottomPadding + spacingTokens.md,
-          paddingHorizontal: spacingTokens.lg
-        }
-      ]}
-      onScroll={handleExploreScroll}
-      scrollEventThrottle={16}
-      stickyHeaderIndices={Platform.OS === 'web' ? undefined : [1]}
+    <Screen
+      topPadding={topPadding}
+      bottomPadding={bottomPadding}
+      onScroll={handleScroll}
+      refreshing={refreshing}
+      onRefresh={() => void handleRefresh()}
+      header={<ScreenHeader title="Explorar" subtitle="Coches de particulares cerca de ti, listos para reservar." />}
+      stickyHeader={controlsBar(!showSearchRow)}
     >
-      <SectionHeader
-        title="Explorar"
-        subtitle="Descubre vehiculos cercanos y filtra en segundos."
-        centered={isDesktopWeb}
-      />
-
-      <View
-        style={[
-          localStyles.stickyControlsShell,
-          stickyWebStyle,
-          stickyMobileHiddenInset ? { paddingTop: stickyMobileHiddenInset } : undefined
-        ]}
-      >
-        {controlsBlock}
-      </View>
-
-      {vehiclesLoading ? <ActivityIndicator size="small" /> : null}
-      {vehiclesError ? <Text style={styles.error}>{vehiclesError}</Text> : null}
-      {ownerLookupError ? <Text style={styles.error}>{ownerLookupError}</Text> : null}
-
-      <View style={[localStyles.vehicleGrid, isDesktopWeb ? localStyles.vehicleGridDesktop : undefined]}>
-          {exploreVehicles.map((vehicle: ExploreVehicle) => {
-            const owner = ownerById[vehicle.ownerId];
-            const ownerAvatarUrl = resolveStoredImageUrl(owner?.avatarUrl ?? null);
-            const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
-
-            return (
-              <Pressable
-                key={vehicle.id}
-                style={[styles.card, isDesktopWeb ? localStyles.desktopListCard : undefined]}
-                onPress={() => handleOpenVehicleDetails(vehicle.id)}
-              >
-                {primaryImageUrl ? (
-                  <Image
-                    source={{ uri: primaryImageUrl }}
-                    style={[localStyles.vehicleHeroImage, isDesktopWeb ? localStyles.vehicleHeroImageDesktop : undefined]}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={[localStyles.imagePlaceholder, isDesktopWeb ? localStyles.vehicleHeroImageDesktop : undefined]}>
-                    <Text style={localStyles.imagePlaceholderText}>Sin imagen</Text>
-                  </View>
-                )}
-
-                <View style={localStyles.vehicleTitleRow}>
-                  <Text style={localStyles.vehicleTitle}>{vehicle.brand} {vehicle.model}</Text>
-                  <Text style={localStyles.vehiclePrice}>{formatCurrencyEUR(vehicle.pricePerDay)}</Text>
-                </View>
-
-                <Text style={localStyles.vehicleLocation}>{vehicle.locationAddress}</Text>
-
-                <View style={localStyles.vehicleMetaChips}>
-                  <StatusChip label={`Año ${vehicle.year}`} tone="neutral" compact />
-                  {vehicle.fuelType ? <StatusChip label={translateFuelType(vehicle.fuelType)} tone="neutral" compact /> : null}
-                  {vehicle.transmission ? <StatusChip label={translateTransmission(vehicle.transmission)} tone="neutral" compact /> : null}
-                  {vehicle.seats ? <StatusChip label={`${vehicle.seats} plazas`} tone="neutral" compact /> : null}
-                </View>
-
-                <View style={localStyles.ownerInlineRow}>
-                  <Pressable
-                    style={localStyles.ownerInlineTap}
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      handleOpenUserOverview(vehicle.ownerId, getUserFullName(owner), owner?.avatarUrl ?? null);
-                    }}
-                  >
-                    {ownerAvatarUrl ? (
-                      <Image source={{ uri: ownerAvatarUrl }} style={localStyles.ownerAvatarInline} resizeMode="cover" />
-                    ) : (
-                      <View style={localStyles.ownerAvatarInlineFallback}>
-                        <Text style={localStyles.ownerAvatarInlineFallbackText}>{getInitials(owner)}</Text>
-                      </View>
-                    )}
-                    <Text style={localStyles.ownerInlineName}>{getUserFullName(owner)}</Text>
-                  </Pressable>
-                </View>
-
-                <Text style={styles.linkHint}>Toca para ver ficha completa, galeria y disponibilidad.</Text>
-              </Pressable>
-            );
-          })}
-      </View>
-
-      {!vehiclesLoading && !vehiclesError && exploreVehicles.length === 0 ? (
-        <EmptyState title="Sin resultados" description="No hay vehiculos disponibles con estos filtros." />
+      {vehiclesError && exploreVehicles.length > 0 ? (
+        <InlineMessage
+          tone="error"
+          message={vehiclesError}
+          actionLabel="Reintentar"
+          onAction={() => void handleRefresh()}
+        />
       ) : null}
 
-      <UserOverviewModal
-        visible={!!overviewUser}
-        userId={overviewUser?.id ?? null}
-        displayName={overviewUser?.displayName ?? 'Usuario'}
-        avatarUrl={overviewUser?.avatarUrl ?? null}
-        onClose={() => setOverviewUser(null)}
-      />
-    </ScrollView>
+      {!showSkeletons && !vehiclesError && exploreVehicles.length > 0 ? (
+        <SectionTitle
+          title={activeFilterCount ? 'Resultados' : 'Disponibles'}
+          count={exploreVehicles.length}
+          actionLabel={activeFilterCount ? 'Quitar filtros' : undefined}
+          onAction={activeFilterCount ? () => void handleClearFilters() : undefined}
+        />
+      ) : null}
+
+      <View style={[styles.grid, { gap: spacingTokens.lg }]}>
+        {showSkeletons
+          ? Array.from({ length: columns * 2 }).map((_, index) => (
+              <VehicleCardSkeleton key={index} style={{ width: cardWidth }} />
+            ))
+          : exploreVehicles.map((vehicle) => {
+              const owner = ownerById[vehicle.ownerId];
+              const ownerName = owner ? getDisplayName(owner.firstName, owner.lastName) : 'Propietario';
+              const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
+              const fuel = translateFuelType(vehicle.fuelType);
+              const transmission = translateTransmission(vehicle.transmission);
+              const distance = userPoint
+                ? getDistanceKm(userPoint, { latitude: vehicle.locationLat, longitude: vehicle.locationLng })
+                : null;
+
+              return (
+                <Card
+                  key={vehicle.id}
+                  padding={0}
+                  onPress={() => handleOpenVehicleDetails(vehicle.id)}
+                  accessibilityLabel={`${vehicle.brand} ${vehicle.model}, ${formatPriceCompact(vehicle.pricePerDay)} por día`}
+                  accessibilityHint="Abre la ficha del vehículo"
+                  style={[styles.vehicleCard, { width: cardWidth }]}
+                >
+                  <View>
+                    <AppImage uri={primaryImageUrl} style={styles.vehicleImage} fallbackLabel="Sin fotos" />
+                    <View style={styles.priceBadge}>
+                      <Text style={styles.priceBadgeValue}>{formatPriceCompact(vehicle.pricePerDay)}</Text>
+                      <Text style={styles.priceBadgeUnit}>/día</Text>
+                    </View>
+                  </View>
+                  <View style={styles.vehicleBody}>
+                    <Text style={styles.vehicleTitle} numberOfLines={1}>
+                      {vehicle.brand} {vehicle.model}
+                    </Text>
+                    <View style={styles.metaRow}>
+                      <Ionicons name="location-outline" size={14} color={colorTokens.textMuted} />
+                      <Text style={styles.metaText} numberOfLines={1}>
+                        {distance !== null ? `${formatDistance(distance)} · ` : ''}
+                        {vehicle.locationAddress}
+                      </Text>
+                    </View>
+                    <View style={styles.chipsRow}>
+                      <StatusChip label={String(vehicle.year)} compact />
+                      {fuel ? <StatusChip label={fuel} compact /> : null}
+                      {transmission ? <StatusChip label={transmission} compact /> : null}
+                      {vehicle.seats ? <StatusChip label={`${vehicle.seats} plazas`} compact /> : null}
+                    </View>
+                    <Pressable
+                      onPress={() =>
+                        handleOpenUserOverview(vehicle.ownerId, ownerName, owner?.avatarUrl ?? null)
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={`Ver perfil de ${ownerName}`}
+                      hitSlop={6}
+                      style={styles.ownerInline}
+                    >
+                      <Avatar uri={resolveStoredImageUrl(owner?.avatarUrl ?? null)} name={ownerName} size={26} />
+                      <Text style={styles.ownerInlineName} numberOfLines={1}>
+                        {ownerName}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </Card>
+              );
+            })}
+      </View>
+
+      {!vehiclesLoading && vehiclesError && exploreVehicles.length === 0 ? (
+        <ErrorState message={vehiclesError} onRetry={() => void handleRefresh()} retrying={refreshing} />
+      ) : null}
+
+      {!vehiclesLoading && !vehiclesError && exploreVehicles.length === 0 ? (
+        activeFilterCount ? (
+          <EmptyState
+            icon="search-outline"
+            title="Sin resultados"
+            description="No hay vehículos que cumplan estos filtros. Prueba a ampliar el radio o quitar algún filtro."
+            actionLabel="Quitar filtros"
+            onAction={() => void handleClearFilters()}
+          />
+        ) : (
+          <EmptyState
+            icon="car-sport-outline"
+            title="Aún no hay vehículos publicados"
+            description="Vuelve a intentarlo en un rato o publica el tuyo y empieza a ganar dinero."
+            actionLabel={onNavigateToTab ? 'Publicar mi vehículo' : undefined}
+            onAction={onNavigateToTab ? () => onNavigateToTab('myVehicles') : undefined}
+          />
+        )
+      ) : null}
+
+      {filtersSheet}
+      {overviewModal}
+    </Screen>
   );
 }
 
-const localStyles = StyleSheet.create({
-  exploreScroll: {
+function SpecTile({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={styles.specTile} accessible accessibilityLabel={`${label}: ${value}`}>
+      <Ionicons name={icon} size={18} color={colorTokens.accent2} />
+      <Text style={styles.caption}>{label}</Text>
+      <Text style={styles.specValue} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex1: {
     flex: 1
   },
-  exploreScrollContent: {
-    gap: spacingTokens.md
+  caption: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
   },
-  desktopCard: {
-    width: '100%',
-    maxWidth: 900,
-    alignSelf: 'center'
+  bodyText: {
+    color: colorTokens.textMain,
+    ...typographyTokens.body
   },
-  sectionLabel: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
+  controls: {
+    gap: spacingTokens.sm
   },
-  filterBarCard: {
-    overflow: 'visible',
-    borderRadius: 18,
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0
-  },
-  stickyControlsShell: {
-    gap: 0,
-    backgroundColor: 'transparent',
-    paddingBottom: spacingTokens.xs,
-    zIndex: 20
-  },
-  filterAnimatedWrap: {
-    overflow: 'hidden'
-  },
-  filterBarScrollShell: {
-    position: 'relative'
-  },
-  filterBarRow: {
-    gap: spacingTokens.sm,
-    paddingTop: spacingTokens.xs + 1,
-    paddingBottom: spacingTokens.xs,
-    alignItems: 'flex-end',
-    paddingHorizontal: 2
-  },
-  filterEdgeFade: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 22
-  },
-  filterEdgeFadeLeft: {
-    left: 0
-  },
-  filterEdgeFadeRight: {
-    right: 0
-  },
-  locationRadioGroup: {
-    flexDirection: 'row',
-    gap: spacingTokens.sm,
-    alignItems: 'flex-end',
-    flex: 1
-  },
-  locationBarItem: {
-    flex: 1,
-    minWidth: 200,
-    maxWidth: 280,
-    gap: spacingTokens.xs
-  },
-  locationField: {
+  controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacingTokens.sm,
+    gap: spacingTokens.sm
+  },
+  segmented: {
+    flex: 1,
+    maxWidth: 260,
+    marginLeft: 'auto'
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 48,
+    paddingHorizontal: spacingTokens.lg,
+    borderRadius: radiusTokens.pill,
     borderWidth: 1,
     borderColor: colorTokens.border,
-    borderRadius: 14,
     backgroundColor: colorTokens.white,
-    paddingHorizontal: spacingTokens.md,
-    minHeight: 50
+    overflow: 'hidden'
   },
-  barInputItem: {
-    minWidth: 120,
-    maxWidth: 150,
-    gap: spacingTokens.xs
-  },
-  barSelectItem: {
-    minWidth: 165,
-    maxWidth: 180
-  },
-  barActionsWrap: {
-    flexDirection: 'row',
-    gap: spacingTokens.sm,
-    paddingBottom: 1
-  },
-  viewModeCard: {
-    flexDirection: 'row',
-    gap: spacingTokens.xs,
-    padding: spacingTokens.xs,
-    alignSelf: 'center',
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.pill,
-    backgroundColor: colorTokens.white,
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0
-  },
-  viewModePill: {
-    borderWidth: 1,
-    borderColor: 'transparent',
-    borderRadius: radiusTokens.pill,
-    backgroundColor: 'transparent',
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.xs
-  },
-  viewModePillActive: {
+  filterButtonActive: {
     backgroundColor: colorTokens.primary,
     borderColor: colorTokens.primary
   },
-  viewModeText: {
-    color: colorTokens.secondary,
+  filterButtonPressed: {
+    opacity: 0.8
+  },
+  filterButtonText: {
+    color: colorTokens.primary,
+    ...typographyTokens.captionStrong
+  },
+  filterButtonTextActive: {
+    color: colorTokens.white
+  },
+  filterBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    backgroundColor: colorTokens.accent2,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  filterBadgeText: {
+    color: colorTokens.white,
+    ...typographyTokens.overline,
+    letterSpacing: 0
+  },
+  sheetSection: {
+    gap: spacingTokens.sm
+  },
+  sheetHint: {
+    color: colorTokens.textMuted,
     ...typographyTokens.caption
   },
-  viewModeTextActive: {
-    color: colorTokens.white,
-    fontWeight: '700'
+  sheetActions: {
+    flexDirection: 'row',
+    gap: spacingTokens.sm,
+    marginTop: spacingTokens.sm
   },
-  mapLayerRoot: {
-    flex: 1,
-    backgroundColor: colorTokens.bgLight
+  unit: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.bodyStrong
   },
-  mapBackgroundLayer: {
-    ...StyleSheet.absoluteFillObject
+  chipGroup: {
+    gap: spacingTokens.sm
   },
-  mapOverlayLayer: {
-    flex: 1
+  chipGroupLabel: {
+    color: colorTokens.secondary,
+    ...typographyTokens.captionStrong
   },
-  mapOverlayContent: {
-    gap: spacingTokens.md
-  },
-  mapControlsStack: {
-    gap: spacingTokens.xs
-  },
-  mapStatusText: {
-    color: colorTokens.white,
-    textShadowColor: 'rgba(0,0,0,0.25)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2
-  },
-  mapStatusErrorText: {
-    color: colorTokens.alert,
-    backgroundColor: 'transparent',
-    textShadowColor: 'rgba(255,255,255,0.6)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2
-  },
-  inlineActions: {
+  chipGroupRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacingTokens.sm
   },
-  inlineActionsCentered: {
-    justifyContent: 'center'
-  },
-  actionButton: {
-    minHeight: 50,
-    borderRadius: 14,
-    borderWidth: 1,
+  choiceChip: {
+    minHeight: 40,
     paddingHorizontal: spacingTokens.lg,
-    paddingVertical: spacingTokens.sm,
+    borderRadius: radiusTokens.pill,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    backgroundColor: colorTokens.white,
     alignItems: 'center',
     justifyContent: 'center'
   },
-  actionButtonPrimary: {
+  choiceChipActive: {
     backgroundColor: colorTokens.primary,
     borderColor: colorTokens.primary
   },
-  actionButtonGhost: {
-    backgroundColor: colorTokens.white,
-    borderColor: colorTokens.border
+  choiceChipPressed: {
+    backgroundColor: colorTokens.surfaceMuted
   },
-  actionButtonText: {
-    ...typographyTokens.caption,
-    fontWeight: '700'
-  },
-  actionButtonPrimaryText: {
-    color: colorTokens.white
-  },
-  actionButtonGhostText: {
-    color: colorTokens.secondary
-  },
-  actionButtonDisabled: {
+  choiceChipDisabled: {
     opacity: 0.45
   },
-  locationGroup: {
+  choiceChipText: {
+    color: colorTokens.secondary,
+    ...typographyTokens.captionStrong
+  },
+  choiceChipTextActive: {
+    color: colorTokens.white
+  },
+  grid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacingTokens.sm,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: 14,
-    backgroundColor: colorTokens.white,
-    paddingHorizontal: spacingTokens.md,
-    minHeight: 50
+    flexWrap: 'wrap'
   },
-  locationIconWrap: {
-    width: 18,
-    alignItems: 'center',
-    justifyContent: 'center'
+  vehicleCard: {
+    overflow: 'hidden',
+    gap: 0
   },
-  locationPinDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 2,
-    borderColor: colorTokens.secondary,
-    backgroundColor: colorTokens.white
+  vehicleImage: {
+    width: '100%',
+    aspectRatio: 16 / 10
   },
-  locationPinTail: {
-    width: 2,
-    height: 7,
-    marginTop: 1,
-    borderRadius: 1,
-    backgroundColor: colorTokens.secondary
-  },
-  locationInput: {
-    flex: 1,
-    color: colorTokens.textMain,
-    ...typographyTokens.body
-  },
-  inputLabel: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  inputField: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: 14,
-    backgroundColor: colorTokens.white,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.md,
-    minHeight: 50,
-    color: colorTokens.textMain,
-    ...typographyTokens.body
-  },
-  dropdownWrap: {
-    gap: spacingTokens.xs,
-    position: 'relative'
-  },
-  dropdownTrigger: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: 14,
-    backgroundColor: colorTokens.white,
-    paddingHorizontal: spacingTokens.md,
-    minHeight: 50,
+  priceBadge: {
+    position: 'absolute',
+    right: spacingTokens.md,
+    bottom: spacingTokens.md,
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between'
-  },
-  dropdownValue: {
-    color: colorTokens.textMain,
-    ...typographyTokens.body
-  },
-  dropdownChevronIcon: {
-    width: 8,
-    height: 8,
-    borderRightWidth: 1.6,
-    borderBottomWidth: 1.6,
-    borderColor: colorTokens.secondary,
-    transform: [{ rotate: '45deg' }],
-    marginRight: 2
-  },
-  dropdownChevronIconOpen: {
-    transform: [{ rotate: '-135deg' }],
-    marginTop: 4
-  },
-  selectModalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(11,15,20,0.2)',
-    justifyContent: 'center',
-    paddingHorizontal: spacingTokens.lg
-  },
-  selectModalCard: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
+    alignItems: 'baseline',
+    gap: 2,
+    paddingHorizontal: spacingTokens.md,
+    paddingVertical: 6,
+    borderRadius: radiusTokens.pill,
     backgroundColor: colorTokens.white,
-    padding: spacingTokens.md,
-    gap: spacingTokens.sm,
-    maxHeight: 420
+    ...shadowTokens.card
   },
-  selectModalTitle: {
+  priceBadgeValue: {
     color: colorTokens.primary,
     ...typographyTokens.sectionLabel
   },
-  dropdownPanel: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    overflow: 'hidden',
-    backgroundColor: colorTokens.white
-  },
-  dropdownItem: {
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colorTokens.border
-  },
-  dropdownItemActive: {
-    backgroundColor: colorTokens.bgLight
-  },
-  dropdownItemText: {
-    color: colorTokens.textMain,
+  priceBadgeUnit: {
+    color: colorTokens.textMuted,
     ...typographyTokens.caption
   },
-  dropdownItemTextActive: {
-    color: colorTokens.primary,
-    fontWeight: '700'
-  },
-  suggestionsList: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.white,
-    overflow: 'hidden'
-  },
-  suggestionItem: {
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colorTokens.border
-  },
-  suggestionLabel: {
-    color: colorTokens.primary,
-    ...typographyTokens.body
-  },
-  vehicleHeroImage: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    borderRadius: radiusTokens.input,
-    backgroundColor: colorTokens.bgLight
-  },
-  vehicleHeroImageDesktop: {
-    height: 150
-  },
-  imagePlaceholder: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    borderRadius: radiusTokens.input,
-    backgroundColor: colorTokens.bgLight,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacingTokens.md
-  },
-  imagePlaceholderText: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption,
-    textAlign: 'center'
-  },
-  vehicleGrid: {
-    width: '100%',
-    gap: spacingTokens.md
-  },
-  vehicleGridDesktop: {
-    maxWidth: 1100,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center'
-  },
-  desktopListCard: {
-    width: '31%',
-    minWidth: 250,
-    maxWidth: 320
-  },
-  vehicleTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  vehicleBody: {
+    padding: spacingTokens.lg,
     gap: spacingTokens.sm
   },
   vehicleTitle: {
-    flex: 1,
     color: colorTokens.primary,
-    fontSize: 18,
-    lineHeight: 24,
-    fontWeight: '700'
+    ...typographyTokens.h3
   },
-  vehiclePrice: {
-    color: colorTokens.secondary,
-    ...typographyTokens.sectionLabel
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4
   },
-  vehicleLocation: {
+  metaText: {
+    flex: 1,
     color: colorTokens.textMuted,
     ...typographyTokens.caption
   },
-  vehicleMetaChips: {
+  chipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacingTokens.xs
+    gap: 6
   },
-  ownerInlineRow: {
+  ownerInline: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacingTokens.sm
-  },
-  ownerInlineTap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacingTokens.sm
-  },
-  ownerAvatarInline: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: colorTokens.border
-  },
-  ownerAvatarInlineFallback: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    backgroundColor: colorTokens.bgLight,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  ownerAvatarInlineFallbackText: {
-    color: colorTokens.secondary,
-    ...typographyTokens.caption
+    alignSelf: 'flex-start',
+    gap: spacingTokens.sm,
+    marginTop: spacingTokens.xs,
+    minHeight: 32
   },
   ownerInlineName: {
-    color: colorTokens.primary,
-    ...typographyTokens.caption
+    color: colorTokens.secondary,
+    ...typographyTokens.captionStrong
   },
-  ownerCard: {
+  mapRoot: {
+    flex: 1,
+    backgroundColor: colorTokens.bgLight
+  },
+  mapOverlay: {
+    paddingHorizontal: spacingTokens.lg,
+    gap: spacingTokens.sm,
+    alignItems: 'center'
+  },
+  mapControlsCard: {
+    width: '100%',
+    padding: spacingTokens.md,
+    borderRadius: radiusTokens.lg,
+    backgroundColor: 'rgba(255,255,255,0.97)',
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    ...shadowTokens.raised
+  },
+  mapStatus: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacingTokens.md,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    padding: spacingTokens.md,
-    backgroundColor: colorTokens.white
+    gap: spacingTokens.sm,
+    paddingHorizontal: spacingTokens.md,
+    paddingVertical: 6,
+    borderRadius: radiusTokens.pill,
+    backgroundColor: colorTokens.white,
+    ...shadowTokens.card
   },
-  ownerAvatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 1,
-    borderColor: colorTokens.border
+  mapStatusError: {
+    backgroundColor: colorTokens.alertSoft
   },
-  ownerAvatarFallback: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    backgroundColor: colorTokens.bgLight,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  ownerAvatarFallbackText: {
+  mapStatusText: {
     color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
+    ...typographyTokens.captionStrong
   },
-  ownerInfo: {
-    flex: 1,
+  mapRetry: {
+    color: colorTokens.alertText,
+    textDecorationLine: 'underline',
+    ...typographyTokens.captionStrong
+  },
+  detailWide: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacingTokens.xl
+  },
+  detailWideMain: {
+    flex: 3
+  },
+  detailWideSide: {
+    flex: 2
+  },
+  bookingCardWide: {
+    // En escritorio la tarjeta de reserva acompaña al scroll de la ficha.
+    ...(Platform.OS === 'web' ? ({ position: 'sticky', top: spacingTokens.lg } as object) : null)
+  },
+  detailColumn: {
+    gap: spacingTokens.lg
+  },
+  detailTitleBlock: {
+    gap: spacingTokens.xs
+  },
+  detailPrice: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
     gap: 2
   },
-  ownerLabel: {
+  detailPriceValue: {
+    color: colorTokens.primary,
+    ...typographyTokens.h2
+  },
+  detailPriceUnit: {
     color: colorTokens.textMuted,
-    ...typographyTokens.caption
+    ...typographyTokens.body
+  },
+  specGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacingTokens.sm
+  },
+  specTile: {
+    flexGrow: 1,
+    flexBasis: '45%',
+    gap: 2,
+    padding: spacingTokens.md,
+    borderRadius: radiusTokens.card,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    backgroundColor: colorTokens.white
+  },
+  specValue: {
+    color: colorTokens.primary,
+    ...typographyTokens.bodyStrong
+  },
+  ownerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.md
   },
   ownerName: {
     color: colorTokens.primary,
     ...typographyTokens.sectionLabel
   },
-  galleryRow: {
-    gap: spacingTokens.sm,
-    paddingVertical: spacingTokens.xs
-  },
-  galleryImage: {
-    width: 260,
-    height: 170,
+  mapWrap: {
     borderRadius: radiusTokens.input,
+    overflow: 'hidden'
+  },
+  skeletonStack: {
+    gap: spacingTokens.sm
+  },
+  priceSummary: {
+    gap: spacingTokens.xs,
+    padding: spacingTokens.md,
+    borderRadius: radiusTokens.input,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
     backgroundColor: colorTokens.bgLight
   },
-  detailGrid: {
+  priceRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacingTokens.sm
+  },
+  priceTotal: {
+    color: colorTokens.primary,
+    ...typographyTokens.sectionLabel,
+    fontSize: 17
+  },
+  blockedList: {
     gap: spacingTokens.xs
   },
-  locationText: {
-    color: colorTokens.secondary,
-    ...typographyTokens.body
-  },
-  descriptionText: {
-    color: colorTokens.textMain,
-    ...typographyTokens.body
-  },
-  bookingCard: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    padding: spacingTokens.md,
-    backgroundColor: colorTokens.white,
-    gap: spacingTokens.sm
-  },
-  dataBlockList: {
-    gap: spacingTokens.sm
-  },
-  dataBlockItem: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    padding: spacingTokens.md,
-    gap: spacingTokens.xs,
-    backgroundColor: colorTokens.white
-  },
-  dataBlockLabel: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  dataBlockValue: {
-    color: colorTokens.primary,
-    ...typographyTokens.body
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(11,15,20,0.86)',
-    padding: spacingTokens.lg,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 940,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.bgDark,
-    padding: spacingTokens.lg,
-    gap: spacingTokens.md
-  },
-  modalTopRow: {
+  blockedItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between'
-  },
-  modalTitle: {
-    color: colorTokens.white,
-    ...typographyTokens.sectionLabel
-  },
-  modalCloseButton: {
-    borderWidth: 1,
-    borderColor: colorTokens.white,
-    borderRadius: radiusTokens.pill,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.xs
-  },
-  modalCloseText: {
-    color: colorTokens.white,
-    ...typographyTokens.caption
-  },
-  modalImage: {
-    width: '100%',
-    height: 420,
-    borderRadius: radiusTokens.input,
-    backgroundColor: '#000000'
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacingTokens.sm
+    gap: spacingTokens.xs
   }
 });

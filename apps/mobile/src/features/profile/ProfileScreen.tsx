@@ -1,24 +1,53 @@
-import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useMemo, useState } from 'react';
-import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import Constants from 'expo-constants';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { httpClient } from '../../api/http';
-import { UploadTarget, uploadImageToApi } from '../../api/uploads';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
-import { EmptyState } from '../../app/components/ui/EmptyState';
-import { SectionHeader } from '../../app/components/ui/SectionHeader';
-import { StatusChip, StatusChipTone } from '../../app/components/ui/StatusChip';
-import { styles } from '../../app/styles';
+import { UploadTarget, uploadImageToApi } from '../../api/uploads';
+import { colorTokens, layoutTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 import { AppTabKey } from '../../app/types';
-import { colorTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import { BOOKING_STATUS_LABEL, BOOKING_STATUS_TONE, BookingStatus } from '../../shared/booking';
+import { getApiErrorMessage } from '../../shared/errors';
+import {
+  formatCurrencyEUR,
+  formatDateMadrid,
+  formatDateRangeMadrid,
+  formatMonthYearMadrid,
+  getDisplayName,
+  pluralize
+} from '../../shared/format';
+import { canUseCamera, ImagePermissionError, ImageSource, pickImages } from '../../shared/imagePicker';
+import {
+  Avatar,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  InlineMessage,
+  KeyValueRow,
+  ListItemSkeleton,
+  OptionList,
+  Screen,
+  ScreenHeader,
+  Sheet,
+  Skeleton,
+  StarRating,
+  StatusChip,
+  TextField,
+  confirmAction,
+  toast
+} from '../../shared/ui';
+import { useBackHandler } from '../../shared/useBackHandler';
+import { OwnerPayoutsCard } from '../payments/OwnerPayoutsCard';
 import { hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
-import { useUserProfileStore } from '../../store/useUserProfileStore';
-import { OwnerPayoutsCard } from '../payments/OwnerPayoutsCard';
+import { UserProfile, useUserProfileStore } from '../../store/useUserProfileStore';
 
 type ProfileMode = 'overview' | 'personal' | 'documents';
-
-type BookingStatus = 'pending' | 'accepted' | 'rejected' | 'paid_confirmed' | 'in_progress' | 'completed' | 'cancelled';
+type ProfileUploadTarget = Extract<UploadTarget, 'avatar' | 'id_document' | 'driver_license'>;
+type LegalDoc = 'terms' | 'privacy' | 'cancellation';
 
 type BookingItem = {
   id: string;
@@ -49,8 +78,6 @@ type VehicleMiniInfo = {
   year: number;
 };
 
-type VehicleItem = VehicleMiniInfo;
-
 type UserMiniProfile = {
   id: string;
   firstName: string;
@@ -65,1601 +92,1125 @@ type StatsState = {
 };
 
 type ProfileScreenProps = {
+  topPadding?: number;
+  bottomPadding?: number;
   onNavigateToTab?: (tab: AppTabKey) => void;
 };
 
-const BOOKING_STATUS_LABEL: Record<BookingStatus, string> = {
-  pending: 'Pendiente',
-  accepted: 'Aceptada',
-  rejected: 'Rechazada',
-  paid_confirmed: 'Pago confirmado',
-  in_progress: 'En curso',
-  completed: 'Completada',
-  cancelled: 'Cancelada'
+type UploadState = { target: ProfileUploadTarget; stage: 'processing' | 'uploading'; progress?: number } | null;
+
+const PHONE_PATTERN = /^\+?[0-9\s-]{9,15}$/;
+
+const DOCUMENTS: Array<{ target: 'id_document' | 'driver_license'; field: 'idDocumentUrl' | 'driverLicenseUrl'; title: string; hint: string; icon: keyof typeof Ionicons.glyphMap }> = [
+  {
+    target: 'id_document',
+    field: 'idDocumentUrl',
+    title: 'DNI / documento de identidad',
+    hint: 'Foto nítida de la cara delantera, sin reflejos.',
+    icon: 'card-outline'
+  },
+  {
+    target: 'driver_license',
+    field: 'driverLicenseUrl',
+    title: 'Permiso de conducir',
+    hint: 'Debe estar en vigor y ser legible.',
+    icon: 'car-outline'
+  }
+];
+
+const LEGAL_CONTENT: Record<LegalDoc, { title: string; paragraphs: string[] }> = {
+  terms: {
+    title: 'Términos y condiciones',
+    paragraphs: [
+      'LynkDrive es una plataforma que pone en contacto a propietarios de vehículos con conductores particulares. El contrato de alquiler se celebra entre ambas partes.',
+      'Para reservar o publicar es obligatorio tener el perfil completo y la documentación (DNI y permiso de conducir) verificada.',
+      'El conductor se compromete a usar el vehículo de forma responsable y a devolverlo en las condiciones y fechas acordadas. Los checklists de entrega y devolución sirven como evidencia del estado del vehículo.',
+      'Las valoraciones deben ser veraces y respetuosas. LynkDrive puede retirar contenido que incumpla estas normas.'
+    ]
+  },
+  privacy: {
+    title: 'Política de privacidad',
+    paragraphs: [
+      'Tratamos tus datos (nombre, teléfono, email, documentos e imágenes) para gestionar tu cuenta, verificar tu identidad y permitir las reservas, conforme al RGPD.',
+      'Los documentos de identidad y las fotos de los checklists se guardan en almacenamiento privado y solo se usan para verificación y resolución de incidencias.',
+      'Tu método de contacto solo se comparte con el conductor cuando aceptas una reserva.',
+      'Puedes ejercer tus derechos de acceso, rectificación y supresión escribiendo al equipo de LynkDrive.'
+    ]
+  },
+  cancellation: {
+    title: 'Política de cancelación',
+    paragraphs: [
+      'Mientras la solicitud está pendiente, conductor y propietario pueden cancelarla sin coste.',
+      'Con la reserva pagada: cancelación gratuita si faltan 48 horas o más para el inicio; reembolso del 50% si faltan entre 48 y 24 horas; sin reembolso si faltan menos de 24 horas.',
+      'Las cancelaciones solo son posibles antes del inicio del viaje.'
+    ]
+  }
 };
 
-function getBookingStatusTone(status: BookingStatus): StatusChipTone {
-  if (status === 'completed' || status === 'paid_confirmed') {
-    return 'success';
-  }
-
-  if (status === 'pending') {
-    return 'warning';
-  }
-
-  if (status === 'accepted' || status === 'in_progress') {
-    return 'info';
-  }
-
-  if (status === 'rejected') {
-    return 'danger';
-  }
-
-  return 'neutral';
+function profilePayload(profile: UserProfile | null) {
+  return {
+    firstName: profile?.firstName ?? '',
+    lastName: profile?.lastName ?? '',
+    phoneNumber: profile?.phoneNumber ?? null,
+    avatarUrl: profile?.avatarUrl ?? null,
+    idDocumentUrl: profile?.idDocumentUrl ?? null,
+    driverLicenseUrl: profile?.driverLicenseUrl ?? null
+  };
 }
 
-function getApiErrorMessage(error: unknown, fallback: string): string {
-  if (!error || typeof error !== 'object') {
-    return fallback;
-  }
-
-  const response = (error as { response?: { data?: { message?: string | string[] } } }).response;
-  const message = response?.data?.message;
-
-  if (Array.isArray(message)) {
-    return message.join('. ');
-  }
-
-  if (typeof message === 'string' && message.trim()) {
-    return message;
-  }
-
-  return fallback;
-}
-
-function formatDateTimeMadrid(value: string): string {
-  return new Intl.DateTimeFormat('es-ES', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'Europe/Madrid'
-  }).format(new Date(value));
-}
-
-function formatMonthYearMadrid(value: string): string {
-  return new Intl.DateTimeFormat('es-ES', {
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'Europe/Madrid'
-  }).format(new Date(value));
-}
-
-function formatCurrencyEUR(value: number): string {
-  return new Intl.NumberFormat('es-ES', {
-    style: 'currency',
-    currency: 'EUR',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value);
-}
-
-function getInitials(firstName?: string | null, lastName?: string | null): string {
-  const first = firstName?.[0] ?? '';
-  const last = lastName?.[0] ?? '';
-  const initials = `${first}${last}`.toUpperCase();
-
-  return initials || 'U';
-}
-
-function getDisplayName(firstName?: string | null, lastName?: string | null): string {
-  const fullName = `${firstName ?? ''} ${lastName ?? ''}`.trim();
-  return fullName || 'Usuario';
-}
-
-type ActionButtonVariant = 'primary' | 'ghost' | 'danger' | 'accent';
-
-type ActionButtonProps = {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  variant?: ActionButtonVariant;
-};
-
-function ActionButton({ label, onPress, disabled = false, variant = 'primary' }: ActionButtonProps) {
-  const buttonVariantStyle =
-    variant === 'ghost'
-      ? localStyles.actionButtonGhost
-      : variant === 'danger'
-        ? localStyles.actionButtonDanger
-        : variant === 'accent'
-          ? localStyles.actionButtonAccent
-        : localStyles.actionButtonPrimary;
-
-  const textVariantStyle =
-    variant === 'ghost'
-      ? localStyles.actionButtonGhostText
-      : variant === 'danger'
-        ? localStyles.actionButtonDangerText
-        : variant === 'accent'
-          ? localStyles.actionButtonAccentText
-        : localStyles.actionButtonPrimaryText;
-
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[localStyles.actionButton, buttonVariantStyle, disabled ? localStyles.actionButtonDisabled : undefined]}
-    >
-      <Text style={[localStyles.actionButtonText, textVariantStyle]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-type LabeledInputProps = {
-  label: string;
-  value: string;
-  onChangeText: (value: string) => void;
-  placeholder: string;
-  keyboardType?: 'default' | 'phone-pad' | 'email-address';
-  secureTextEntry?: boolean;
-  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
-};
-
-function LabeledInput({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-  keyboardType = 'default',
-  secureTextEntry = false,
-  autoCapitalize = 'sentences'
-}: LabeledInputProps) {
-  return (
-    <View style={localStyles.inputFieldWrap}>
-      <Text style={localStyles.inputLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        style={localStyles.inputField}
-        placeholder={placeholder}
-        keyboardType={keyboardType}
-        secureTextEntry={secureTextEntry}
-        autoCapitalize={autoCapitalize}
-        autoCorrect={false}
-        placeholderTextColor={colorTokens.textMuted}
-      />
-    </View>
-  );
-}
-
-type MenuActionCardProps = {
-  title: string;
-  subtitle: string;
-  badge?: string;
-  onPress: () => void;
-  disabled?: boolean;
-};
-
-type ModePillProps = {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-};
-
-function MenuActionCard({ title, subtitle, badge, onPress, disabled = false }: MenuActionCardProps) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[localStyles.menuActionCard, disabled ? localStyles.actionButtonDisabled : undefined]}
-    >
-      <View style={localStyles.menuActionTextWrap}>
-        <Text style={localStyles.menuActionTitle}>{title}</Text>
-        <Text style={localStyles.menuActionSubtitle}>{subtitle}</Text>
-      </View>
-      <View style={localStyles.menuActionSide}>
-        {badge ? <Text style={localStyles.menuActionBadge}>{badge}</Text> : null}
-        <Text style={localStyles.menuActionChevron}>{'>'}</Text>
-      </View>
-    </Pressable>
-  );
-}
-
-function ModePill({ label, active, onPress }: ModePillProps) {
-  return (
-    <Pressable onPress={onPress} style={[localStyles.modePill, active ? localStyles.modePillActive : undefined]}>
-      <Text style={[localStyles.modePillText, active ? localStyles.modePillTextActive : undefined]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function SectionShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
-  return (
-    <View style={localStyles.sheetCard}>
-      <View style={localStyles.sheetHeader}>
-        <Text style={localStyles.sheetTitle}>{title}</Text>
-        <Text style={localStyles.sheetSubtitle}>{subtitle}</Text>
-      </View>
-      <View style={localStyles.sheetContent}>{children}</View>
-    </View>
-  );
-}
-
-function DataRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={localStyles.dataRow}>
-      <Text style={localStyles.dataLabel}>{label}</Text>
-      <Text style={localStyles.dataValue}>{value}</Text>
-    </View>
-  );
-}
-
-function SectionPlaceholder({ height = 96 }: { height?: number }) {
-  return <View style={[localStyles.sectionPlaceholder, { height }]} />;
-}
-
-function StatCard({ label, value, loading }: { label: string; value: string; loading: boolean }) {
-  return (
-    <View style={localStyles.statCard}>
-      <Text style={localStyles.statLabel}>{label}</Text>
-      {loading ? <SectionPlaceholder height={36} /> : <Text style={localStyles.statValue}>{value}</Text>}
-    </View>
-  );
-}
-
-function Stars({ rating }: { rating: number }) {
-  return (
-    <Text style={localStyles.starsText}>{'★'.repeat(rating)}{'☆'.repeat(Math.max(0, 5 - rating))}</Text>
-  );
-}
-
-export function ProfileScreen({ onNavigateToTab }: ProfileScreenProps) {
-  const { width } = useWindowDimensions();
-  const isDesktopWeb = Platform.OS === 'web' && width >= 1024;
+export function ProfileScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab }: ProfileScreenProps) {
   const [mode, setMode] = useState<ProfileMode>('overview');
   const [firstNameInput, setFirstNameInput] = useState('');
   const [lastNameInput, setLastNameInput] = useState('');
   const [phoneInput, setPhoneInput] = useState('');
-  const [avatarInput, setAvatarInput] = useState('');
-  const [idDocumentInput, setIdDocumentInput] = useState('');
-  const [driverLicenseInput, setDriverLicenseInput] = useState('');
-  const [profileUploadingField, setProfileUploadingField] = useState<UploadTarget | null>(null);
-  const [profileUploadMessage, setProfileUploadMessage] = useState<string | null>(null);
-  const [overviewStats, setOverviewStats] = useState<StatsState>({
-    tripsCompleted: 0,
-    averageRating: null,
-    vehiclesPublished: 0
-  });
+  const [fieldErrors, setFieldErrors] = useState<{ firstName?: string; lastName?: string; phone?: string }>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [upload, setUpload] = useState<UploadState>(null);
+  const [sourcePickerFor, setSourcePickerFor] = useState<ProfileUploadTarget | null>(null);
+  const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null);
+  const [showAllReviews, setShowAllReviews] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const [overviewStats, setOverviewStats] = useState<StatsState>({ tripsCompleted: 0, averageRating: null, vehiclesPublished: 0 });
   const [driverBookings, setDriverBookings] = useState<BookingItem[]>([]);
   const [receivedReviews, setReceivedReviews] = useState<ReviewItem[]>([]);
   const [vehicleById, setVehicleById] = useState<Record<string, VehicleMiniInfo>>({});
   const [reviewerById, setReviewerById] = useState<Record<string, UserMiniProfile>>({});
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [tripsLoading, setTripsLoading] = useState(false);
-  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewLoaded, setOverviewLoaded] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
 
-  const {
-    profile,
-    saving,
-    error,
-    mutationMessage,
-    fetchMyProfile,
-    updateMyProfile
-  } = useUserProfileStore();
+  const { profile, loading: profileLoading, saving, error: profileError, fetchMyProfile, updateMyProfile } =
+    useUserProfileStore();
+  const { userId: authUserId, email: authEmail, loading: authLoading, signOut } = useAuthStore();
+  const [accountAction, setAccountAction] = useState<'export' | 'delete' | null>(null);
 
-  const {
-    userId: authUserId,
-    email: authEmail,
-    loading: authLoading,
-    error: authError,
-    message: authMessage,
-    signOut
-  } = useAuthStore();
-
-  useEffect(() => {
+  const resetPersonalInputs = useCallback(() => {
     setFirstNameInput(profile?.firstName ?? '');
     setLastNameInput(profile?.lastName ?? '');
     setPhoneInput(profile?.phoneNumber ?? '');
-    setAvatarInput(profile?.avatarUrl ?? '');
-    setIdDocumentInput(profile?.idDocumentUrl ?? '');
-    setDriverLicenseInput(profile?.driverLicenseUrl ?? '');
-  }, [profile]);
-
-  const resolvedProfileAvatarUrl = useMemo(
-    () => resolveStoredImageUrl(profile?.avatarUrl ?? null),
-    [profile?.avatarUrl]
-  );
-
-  const hasProfileMinimum = hasMinimumProfileData(profile);
-  const fullName = `${firstNameInput} ${lastNameInput}`.trim() || 'Completa tu perfil';
-
-  const heroChips = useMemo(() => {
-    const chips: Array<{ label: string; tone: StatusChipTone }> = [];
-
-    if (profile?.isVerified) {
-      chips.push({ label: 'Cuenta verificada', tone: 'success' });
-    }
-
-    if (profile?.idDocumentUrl && profile?.driverLicenseUrl) {
-      chips.push({ label: 'Documentos subidos', tone: 'neutral' });
-    }
-
-    return chips;
-  }, [profile?.driverLicenseUrl, profile?.idDocumentUrl, profile?.isVerified]);
-
-  const tripReviewByBookingId = useMemo(() => {
-    return receivedReviews.reduce<Record<string, ReviewItem>>((acc, review) => {
-      if (!acc[review.bookingId]) {
-        acc[review.bookingId] = review;
-      }
-      return acc;
-    }, {});
-  }, [receivedReviews]);
-
-  const latestTrips = useMemo(() => {
-    return [...driverBookings]
-      .sort((a, b) => new Date(b.startDatetime).getTime() - new Date(a.startDatetime).getTime())
-      .slice(0, 3);
-  }, [driverBookings]);
-
-  const latestReviews = useMemo(() => {
-    return [...receivedReviews]
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 2);
-  }, [receivedReviews]);
-
-  const hasUnsavedPersonalChanges = useMemo(() => {
-    return (
-      firstNameInput.trim() !== (profile?.firstName ?? '') ||
-      lastNameInput.trim() !== (profile?.lastName ?? '') ||
-      (phoneInput.trim() || '') !== (profile?.phoneNumber ?? '') ||
-      (avatarInput.trim() || '') !== (profile?.avatarUrl ?? '')
-    );
-  }, [
-    avatarInput,
-    firstNameInput,
-    lastNameInput,
-    phoneInput,
-    profile?.avatarUrl,
-    profile?.firstName,
-    profile?.lastName,
-    profile?.phoneNumber
-  ]);
-
-  const hasUnsavedDocumentChanges = useMemo(() => {
-    return (
-      (idDocumentInput.trim() || '') !== (profile?.idDocumentUrl ?? '') ||
-      (driverLicenseInput.trim() || '') !== (profile?.driverLicenseUrl ?? '')
-    );
-  }, [driverLicenseInput, idDocumentInput, profile?.driverLicenseUrl, profile?.idDocumentUrl]);
-
-  const hasValidPersonalData = Boolean(firstNameInput.trim() && lastNameInput.trim());
+    setFieldErrors({});
+    setSaveError(null);
+  }, [profile?.firstName, profile?.lastName, profile?.phoneNumber]);
 
   useEffect(() => {
-    if (!authUserId || mode !== 'overview') {
-      setOverviewStats({ tripsCompleted: 0, averageRating: null, vehiclesPublished: 0 });
-      setDriverBookings([]);
-      setReceivedReviews([]);
-      setVehicleById({});
-      setReviewerById({});
-      setOverviewError(null);
+    resetPersonalInputs();
+  }, [resetPersonalInputs]);
+
+  const resolvedAvatarUrl = useMemo(() => resolveStoredImageUrl(profile?.avatarUrl ?? null), [profile?.avatarUrl]);
+  const hasProfileMinimum = hasMinimumProfileData(profile);
+  const displayName = getDisplayName(profile?.firstName, profile?.lastName, 'Completa tu perfil');
+
+  const hasUnsavedPersonalChanges =
+    firstNameInput.trim() !== (profile?.firstName ?? '') ||
+    lastNameInput.trim() !== (profile?.lastName ?? '') ||
+    phoneInput.trim() !== (profile?.phoneNumber ?? '');
+
+  const latestTrips = useMemo(
+    () =>
+      [...driverBookings]
+        .sort((a, b) => new Date(b.startDatetime).getTime() - new Date(a.startDatetime).getTime())
+        .slice(0, 3),
+    [driverBookings]
+  );
+
+  const sortedReviews = useMemo(
+    () => [...receivedReviews].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [receivedReviews]
+  );
+  const visibleReviews = showAllReviews ? sortedReviews : sortedReviews.slice(0, 3);
+
+  const loadOverviewData = useCallback(async () => {
+    if (!authUserId) {
       return;
     }
 
-    let cancelled = false;
+    setOverviewLoading(true);
+    setOverviewError(null);
 
-    const loadOverviewData = async () => {
-      setStatsLoading(true);
-      setTripsLoading(true);
-      setReviewsLoading(true);
-      setOverviewError(null);
+    try {
+      const [bookingsResponse, reviewsResponse, vehiclesResponse] = await Promise.all([
+        httpClient.get<BookingItem[]>('/bookings/mine/as-driver'),
+        httpClient.get<ReviewItem[]>('/reviews'),
+        httpClient.get<VehicleMiniInfo[]>('/vehicles/mine/list')
+      ]);
 
-      try {
-        const [bookingsResponse, reviewsResponse, vehiclesResponse] = await Promise.all([
-          httpClient.get<BookingItem[]>('/bookings/mine/as-driver'),
-          httpClient.get<ReviewItem[]>('/reviews'),
-          httpClient.get<VehicleItem[]>('/vehicles/mine/list')
-        ]);
+      const allDriverBookings = bookingsResponse.data;
+      const userReceivedReviews = reviewsResponse.data.filter((review) => review.revieweeId === authUserId);
 
-        if (cancelled) {
-          return;
-        }
-
-        const allDriverBookings = bookingsResponse.data;
-        const allReviews = reviewsResponse.data;
-        const userReceivedReviews = allReviews.filter((review) => review.revieweeId === authUserId);
-        const completedTrips = allDriverBookings.filter((booking) => booking.status === 'completed').length;
-        const averageRating =
+      setOverviewStats({
+        tripsCompleted: allDriverBookings.filter((booking) => booking.status === 'completed').length,
+        averageRating:
           userReceivedReviews.length > 0
             ? userReceivedReviews.reduce((sum, review) => sum + review.rating, 0) / userReceivedReviews.length
-            : null;
+            : null,
+        vehiclesPublished: vehiclesResponse.data.length
+      });
+      setDriverBookings(allDriverBookings);
+      setReceivedReviews(userReceivedReviews);
+      setOverviewLoaded(true);
 
-        setOverviewStats({
-          tripsCompleted: completedTrips,
-          averageRating,
-          vehiclesPublished: vehiclesResponse.data.length
-        });
+      const vehicleIds = Array.from(
+        new Set(
+          [...allDriverBookings]
+            .sort((a, b) => new Date(b.startDatetime).getTime() - new Date(a.startDatetime).getTime())
+            .slice(0, 3)
+            .map((booking) => booking.vehicleId)
+        )
+      );
+      const reviewerIds = Array.from(new Set(userReceivedReviews.map((review) => review.reviewerId)));
 
-        setDriverBookings(allDriverBookings);
-        setReceivedReviews(userReceivedReviews);
+      const [vehicleRows, reviewerRows] = await Promise.all([
+        Promise.allSettled(vehicleIds.map(async (id) => (await httpClient.get<VehicleMiniInfo>(`/vehicles/${id}`)).data)),
+        Promise.allSettled(reviewerIds.map(async (id) => (await httpClient.get<UserMiniProfile>(`/users/${id}`)).data))
+      ]);
 
-        const latestBookingSlice = [...allDriverBookings]
-          .sort((a, b) => new Date(b.startDatetime).getTime() - new Date(a.startDatetime).getTime())
-          .slice(0, 3);
+      setVehicleById(
+        Object.fromEntries(
+          vehicleRows.flatMap((result) => (result.status === 'fulfilled' ? [[result.value.id, result.value]] : []))
+        )
+      );
+      setReviewerById(
+        Object.fromEntries(
+          reviewerRows.flatMap((result) => (result.status === 'fulfilled' ? [[result.value.id, result.value]] : []))
+        )
+      );
+    } catch (fetchError: unknown) {
+      setOverviewError(getApiErrorMessage(fetchError, 'No se pudo cargar tu actividad.'));
+    } finally {
+      setOverviewLoading(false);
+    }
+  }, [authUserId]);
 
-        const vehicleIds = Array.from(new Set(latestBookingSlice.map((booking) => booking.vehicleId)));
-        const reviewerIds = Array.from(new Set(userReceivedReviews.map((review) => review.reviewerId)));
-
-        const [vehicleRows, reviewerRows] = await Promise.all([
-          Promise.all(
-            vehicleIds.map(async (vehicleId) => {
-              const response = await httpClient.get<VehicleMiniInfo>(`/vehicles/${vehicleId}`);
-              return response.data;
-            })
-          ),
-          Promise.all(
-            reviewerIds.map(async (reviewerId) => {
-              const response = await httpClient.get<UserMiniProfile>(`/users/${reviewerId}`);
-              return response.data;
-            })
-          )
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        setVehicleById(
-          vehicleRows.reduce<Record<string, VehicleMiniInfo>>((acc, item) => {
-            acc[item.id] = item;
-            return acc;
-          }, {})
-        );
-
-        setReviewerById(
-          reviewerRows.reduce<Record<string, UserMiniProfile>>((acc, item) => {
-            acc[item.id] = item;
-            return acc;
-          }, {})
-        );
-      } catch (fetchError: unknown) {
-        if (!cancelled) {
-          setOverviewError(getApiErrorMessage(fetchError, 'No se pudo cargar el resumen de perfil.'));
-        }
-      } finally {
-        if (!cancelled) {
-          setStatsLoading(false);
-          setTripsLoading(false);
-          setReviewsLoading(false);
-        }
-      }
-    };
-
+  useEffect(() => {
     void loadOverviewData();
+  }, [loadOverviewData]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [authUserId, mode]);
-
-  const completionPercent = useMemo(() => {
-    let done = 0;
-    const total = 3;
-
-    if (hasProfileMinimum) {
-      done += 1;
-    }
-
-    if (profile?.idDocumentUrl) {
-      done += 1;
-    }
-
-    if (profile?.driverLicenseUrl) {
-      done += 1;
-    }
-
-    return Math.round((done / total) * 100);
-  }, [hasProfileMinimum, profile?.idDocumentUrl, profile?.driverLicenseUrl]);
-
-  const buildPayload = () => ({
-    firstName: firstNameInput.trim(),
-    lastName: lastNameInput.trim(),
-    phoneNumber: phoneInput.trim() || null,
-    avatarUrl: avatarInput.trim() || null,
-    idDocumentUrl: idDocumentInput.trim() || null,
-    driverLicenseUrl: driverLicenseInput.trim() || null
-  });
-
-  const pickSingleImage = async () => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permissionResult.granted) {
-      throw new Error('Permiso de galeria denegado');
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false,
-      quality: 0.85
-    });
-
-    if (result.canceled || !result.assets[0]) {
-      return null;
-    }
-
-    return result.assets[0];
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([fetchMyProfile(), loadOverviewData()]);
+    setRefreshing(false);
   };
 
-  const uploadPickedImage = async (target: UploadTarget, ownerId?: string) => {
-    const asset = await pickSingleImage();
+  const leaveEditMode = useCallback(async () => {
+    if (mode === 'personal' && hasUnsavedPersonalChanges) {
+      const confirmed = await confirmAction({
+        title: '¿Salir sin guardar?',
+        message: 'Perderás los cambios en tus datos personales.',
+        confirmLabel: 'Salir',
+        cancelLabel: 'Seguir editando',
+        destructive: true
+      });
 
-    if (!asset) {
-      return null;
-    }
-
-    const prepared = await prepareUploadImage(asset, target);
-
-    const uploaded = await uploadImageToApi({
-      target,
-      ownerId,
-      fileUri: prepared.fileUri,
-      fileName: prepared.fileName,
-      mimeType: prepared.mimeType,
-      webFile: prepared.webFile
-    });
-
-    return uploaded.persistedValue;
-  };
-
-  const handleUploadUserImage = async (target: 'avatar' | 'id_document' | 'driver_license') => {
-    try {
-      setProfileUploadingField(target);
-      setProfileUploadMessage(null);
-
-      const uploadedUrl = await uploadPickedImage(target, authUserId ?? undefined);
-
-      if (!uploadedUrl) {
+      if (!confirmed) {
         return;
       }
 
-      if (target === 'avatar') {
-        setAvatarInput(uploadedUrl);
-        await updateMyProfile({ ...buildPayload(), avatarUrl: uploadedUrl });
-      }
+      resetPersonalInputs();
+    }
 
-      if (target === 'id_document') {
-        setIdDocumentInput(uploadedUrl);
-      }
+    setMode('overview');
+  }, [mode, hasUnsavedPersonalChanges, resetPersonalInputs]);
 
-      if (target === 'driver_license') {
-        setDriverLicenseInput(uploadedUrl);
-      }
+  useBackHandler(mode !== 'overview', () => void leaveEditMode());
 
-      if (target === 'avatar') {
-        setProfileUploadMessage(null);
-      } else {
-        setProfileUploadMessage(null);
-      }
-    } catch {
-      setProfileUploadMessage(null);
-    } finally {
-      setProfileUploadingField(null);
+  const handleSavePersonal = async () => {
+    const errors: typeof fieldErrors = {};
+
+    if (!firstNameInput.trim()) errors.firstName = 'Indica tu nombre.';
+    if (!lastNameInput.trim()) errors.lastName = 'Indica tus apellidos.';
+    if (!phoneInput.trim()) {
+      errors.phone = 'El teléfono es necesario para reservar.';
+    } else if (!PHONE_PATTERN.test(phoneInput.trim())) {
+      errors.phone = 'Introduce un teléfono válido (ej. +34 600 123 123).';
+    }
+
+    setFieldErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
+
+    setSaveError(null);
+    const ok = await updateMyProfile({
+      ...profilePayload(profile),
+      firstName: firstNameInput.trim(),
+      lastName: lastNameInput.trim(),
+      phoneNumber: phoneInput.trim()
+    });
+
+    if (!ok) {
+      setSaveError(useUserProfileStore.getState().mutationMessage ?? 'No se pudieron guardar los cambios.');
+      return;
+    }
+
+    toast.success('Datos personales guardados.');
+    setMode('overview');
+  };
+
+  const startUpload = (target: ProfileUploadTarget) => {
+    if (upload) {
+      return;
+    }
+
+    if (canUseCamera()) {
+      setSourcePickerFor(target);
+    } else {
+      void handleUploadUserImage(target, 'library');
     }
   };
 
-  const renderOverview = () => {
-    const firstInitial = (firstNameInput[0] ?? '?').toUpperCase();
-    const lastInitial = (lastNameInput[0] ?? '').toUpperCase();
+  const handleUploadUserImage = async (target: ProfileUploadTarget, source: ImageSource) => {
+    try {
+      const [asset] = await pickImages(source);
 
-    return (
-      <>
-        <SectionHeader
-          title="Perfil"
-          subtitle="Tu resumen de cuenta, actividad y validaciones en una sola vista."
-          centered={isDesktopWeb}
-        />
+      if (!asset) {
+        return;
+      }
 
-        <View style={localStyles.heroCard}>
-          <View style={localStyles.heroContent}>
-            <View style={localStyles.heroTopRow}>
-              <Pressable
-                onPress={() => void handleUploadUserImage('avatar')}
-                disabled={!authUserId || profileUploadingField !== null}
-                style={localStyles.heroAvatarPressable}
-              >
-                {resolvedProfileAvatarUrl ? (
-                  <Image source={{ uri: resolvedProfileAvatarUrl }} style={localStyles.heroAvatar} resizeMode="cover" />
-                ) : (
-                  <View style={localStyles.heroAvatarFallback}>
-                    <Text style={localStyles.heroInitials}>{firstInitial}{lastInitial}</Text>
-                  </View>
-                )}
-              </Pressable>
+      setUpload({ target, stage: 'processing' });
+      const prepared = await prepareUploadImage(asset, target);
+      setUpload({ target, stage: 'uploading', progress: 0 });
 
-              <View style={localStyles.heroIdentityBlock}>
-                <Text style={localStyles.heroName}>{fullName}</Text>
-                <Text style={localStyles.heroMail}>{authEmail ?? 'Sin sesion iniciada'}</Text>
-                {heroChips.length > 0 ? (
-                  <View style={localStyles.heroChipRow}>
-                    {heroChips.map((chip) => (
-                      <StatusChip key={chip.label} label={chip.label} tone={chip.tone} compact />
-                    ))}
-                  </View>
-                ) : null}
-              </View>
-            </View>
+      const uploaded = await uploadImageToApi({
+        target,
+        ownerId: authUserId ?? undefined,
+        fileUri: prepared.fileUri,
+        fileName: prepared.fileName,
+        mimeType: prepared.mimeType,
+        webFile: prepared.webFile,
+        onProgress: (fraction) => setUpload({ target, stage: 'uploading', progress: fraction })
+      });
 
-            <View style={localStyles.inlineActions}>
-              <ActionButton label="Editar perfil" onPress={() => setMode('personal')} disabled={!authUserId} variant="accent" />
-              <ActionButton
-                label="Cerrar sesion"
-                onPress={() => void signOut()}
-                disabled={authLoading || !authUserId}
-                variant="danger"
-              />
-            </View>
-          </View>
-        </View>
+      const field = target === 'avatar' ? 'avatarUrl' : target === 'id_document' ? 'idDocumentUrl' : 'driverLicenseUrl';
+      const ok = await updateMyProfile({ ...profilePayload(useUserProfileStore.getState().profile), [field]: uploaded.persistedValue });
 
-        <View style={localStyles.statsRow}>
-          <StatCard
-            label="Viajes realizados"
-            value={String(overviewStats.tripsCompleted)}
-            loading={statsLoading}
-          />
-          <StatCard
-            label="Valoracion media"
-            value={
-              overviewStats.averageRating === null
-                ? '—'
-                : `${overviewStats.averageRating.toFixed(1)} / 5`
-            }
-            loading={statsLoading}
-          />
-          <StatCard
-            label="Vehiculos publicados"
-            value={String(overviewStats.vehiclesPublished)}
-            loading={statsLoading}
-          />
-        </View>
+      if (!ok) {
+        throw new Error(useUserProfileStore.getState().mutationMessage ?? 'No se pudo guardar la imagen.');
+      }
 
-        <View style={styles.card}>
-          <Text style={localStyles.sectionTitle}>Datos personales</Text>
-          <DataRow label="Nombre completo" value={getDisplayName(profile?.firstName, profile?.lastName)} />
-          {profile?.phoneNumber ? <DataRow label="Telefono" value={profile.phoneNumber} /> : null}
-          <DataRow label="Email" value={authEmail ?? 'Sin email en sesion'} />
-          <DataRow
-            label="Miembro desde"
-            value={profile?.createdAt ? formatMonthYearMadrid(profile.createdAt) : 'No disponible'}
-          />
-        </View>
-
-        <View style={styles.card}>
-          <Text style={localStyles.sectionTitle}>Documentacion</Text>
-          <View style={localStyles.docsGrid}>
-            <View style={localStyles.docCardReadOnly}>
-              <View style={localStyles.docHeaderRow}>
-                <Text style={localStyles.docIcon}>🪪</Text>
-                <View style={localStyles.docHeaderTextWrap}>
-                  <Text style={localStyles.docTitle}>DNI / Documento de identidad</Text>
-                  <Text style={localStyles.docStatus}>{profile?.idDocumentUrl ? 'Subido' : 'Pendiente'}</Text>
-                </View>
-              </View>
-              {profile?.idDocumentUrl ? (
-                <StatusChip
-                  label={profile?.isVerified ? 'Verificado' : 'Subido · en revision'}
-                  tone={profile?.isVerified ? 'success' : 'warning'}
-                />
-              ) : (
-                <View style={localStyles.inlineActions}>
-                  <StatusChip label="Pendiente" tone="neutral" />
-                  <ActionButton label="Subir" onPress={() => setMode('documents')} variant="ghost" />
-                </View>
-              )}
-            </View>
-
-            <View style={localStyles.docCardReadOnly}>
-              <View style={localStyles.docHeaderRow}>
-                <Text style={localStyles.docIcon}>🚘</Text>
-                <View style={localStyles.docHeaderTextWrap}>
-                  <Text style={localStyles.docTitle}>Permiso de conducir</Text>
-                  <Text style={localStyles.docStatus}>{profile?.driverLicenseUrl ? 'Subido' : 'Pendiente'}</Text>
-                </View>
-              </View>
-              {profile?.driverLicenseUrl ? (
-                <StatusChip
-                  label={profile?.isVerified ? 'Verificado' : 'Subido · en revision'}
-                  tone={profile?.isVerified ? 'success' : 'warning'}
-                />
-              ) : (
-                <View style={localStyles.inlineActions}>
-                  <StatusChip label="Pendiente" tone="neutral" />
-                  <ActionButton label="Subir" onPress={() => setMode('documents')} variant="ghost" />
-                </View>
-              )}
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          {isDesktopWeb ? (
-            <View style={localStyles.sectionWithActionRow}>
-              <Text style={localStyles.sectionTitle}>Ultimos viajes como conductor</Text>
-              <ActionButton
-                label="Ver todos"
-                onPress={() => onNavigateToTab?.('trips')}
-                variant="ghost"
-                disabled={!onNavigateToTab}
-              />
-            </View>
-          ) : (
-            <>
-              <Text style={localStyles.sectionTitle}>Ultimos viajes como conductor</Text>
-              <View style={localStyles.mobileSectionActionWrap}>
-                <ActionButton
-                  label="Ver todos"
-                  onPress={() => onNavigateToTab?.('trips')}
-                  variant="ghost"
-                  disabled={!onNavigateToTab}
-                />
-              </View>
-            </>
-          )}
-
-          {tripsLoading ? (
-            <SectionPlaceholder height={140} />
-          ) : latestTrips.length === 0 ? (
-            <EmptyState
-              title="Sin viajes"
-              description="Cuando tengas reservas como conductor apareceran aqui."
-            />
-          ) : (
-            <View style={localStyles.tripList}>
-              {latestTrips.map((booking) => {
-                const vehicle = vehicleById[booking.vehicleId];
-                const vehicleLabel = vehicle
-                  ? `${vehicle.brand} ${vehicle.model} ${vehicle.year}`
-                  : 'Vehiculo';
-                const bookingReview = booking.status === 'completed' ? tripReviewByBookingId[booking.id] : undefined;
-                const reviewer = bookingReview ? reviewerById[bookingReview.reviewerId] : undefined;
-
-                return (
-                  <View key={booking.id} style={localStyles.tripCard}>
-                    <View style={localStyles.tripTitleRow}>
-                      <Text style={localStyles.tripTitle}>{vehicleLabel}</Text>
-                      <StatusChip
-                        label={BOOKING_STATUS_LABEL[booking.status]}
-                        tone={getBookingStatusTone(booking.status)}
-                        compact
-                      />
-                    </View>
-
-                    <Text style={localStyles.tripMeta}>
-                      {formatDateTimeMadrid(booking.startDatetime)} - {formatDateTimeMadrid(booking.endDatetime)}
-                    </Text>
-                    <Text style={localStyles.tripPrice}>{formatCurrencyEUR(booking.totalPrice)}</Text>
-
-                    {bookingReview && reviewer ? (
-                      <View style={localStyles.tripReviewInline}>
-                        <Stars rating={bookingReview.rating} />
-                        <Text style={localStyles.tripMeta}>Review de {getDisplayName(reviewer.firstName, reviewer.lastName)}</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
-
-        {latestReviews.length > 0 ? (
-          <View style={styles.card}>
-            <View style={localStyles.sectionWithActionRow}>
-              <Text style={localStyles.sectionTitle}>Valoraciones recibidas</Text>
-              {receivedReviews.length > 2 ? (
-                <ActionButton
-                  label="Ver todas"
-                  onPress={() => onNavigateToTab?.('trips')}
-                  variant="ghost"
-                  disabled={!onNavigateToTab}
-                />
-              ) : null}
-            </View>
-
-            {reviewsLoading ? (
-              <SectionPlaceholder height={120} />
-            ) : (
-              <View style={localStyles.reviewList}>
-                {latestReviews.map((review) => {
-                  const reviewer = reviewerById[review.reviewerId];
-                  const reviewerAvatarUrl = resolveStoredImageUrl(reviewer?.avatarUrl ?? null);
-                  const reviewerInitials = getInitials(reviewer?.firstName, reviewer?.lastName);
-
-                  return (
-                    <View key={review.id} style={localStyles.reviewCard}>
-                      <View style={localStyles.reviewHeaderRow}>
-                        <View style={localStyles.reviewAuthorRow}>
-                          {reviewerAvatarUrl ? (
-                            <Image source={{ uri: reviewerAvatarUrl }} style={localStyles.reviewAvatar} resizeMode="cover" />
-                          ) : (
-                            <View style={localStyles.reviewAvatarFallback}>
-                              <Text style={localStyles.reviewAvatarInitials}>{reviewerInitials}</Text>
-                            </View>
-                          )}
-                          <View>
-                            <Text style={localStyles.reviewAuthorName}>
-                              {getDisplayName(reviewer?.firstName, reviewer?.lastName)}
-                            </Text>
-                            <Text style={localStyles.reviewDate}>{formatDateTimeMadrid(review.createdAt)}</Text>
-                          </View>
-                        </View>
-                        <Stars rating={review.rating} />
-                      </View>
-                      {review.comment ? <Text style={localStyles.reviewComment}>{review.comment}</Text> : null}
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-          </View>
-        ) : null}
-
-        <OwnerPayoutsCard />
-
-        <View style={styles.card}>
-          <Text style={localStyles.sectionTitle}>Legal</Text>
-          <View style={localStyles.legalList}>
-            <Pressable style={localStyles.legalRow}>
-              <Text style={localStyles.legalText}>Terminos y condiciones</Text>
-            </Pressable>
-            <Pressable style={localStyles.legalRow}>
-              <Text style={localStyles.legalText}>Politica de privacidad</Text>
-            </Pressable>
-            <Pressable style={localStyles.legalRow}>
-              <Text style={localStyles.legalText}>Politica de cancelaciones</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={localStyles.logoutCard}>
-          <Text style={localStyles.sectionTitle}>Cerrar sesion</Text>
-          <Text style={localStyles.sectionSubtitle}>Cierra tu sesion en este dispositivo de forma segura.</Text>
-          <View style={localStyles.inlineActions}>
-            <ActionButton
-              label="Cerrar sesion"
-              onPress={() => void signOut()}
-              disabled={authLoading || !authUserId}
-              variant="danger"
-            />
-          </View>
-        </View>
-
-        {overviewError ? <Text style={styles.error}>{overviewError}</Text> : null}
-      </>
-    );
+      toast.success(target === 'avatar' ? 'Foto de perfil actualizada.' : 'Documento subido. Lo revisaremos en breve.');
+    } catch (uploadError: unknown) {
+      const message =
+        uploadError instanceof ImagePermissionError
+          ? uploadError.message
+          : getApiErrorMessage(
+              uploadError,
+              uploadError instanceof Error && uploadError.message ? uploadError.message : 'No se pudo subir la imagen.'
+            );
+      toast.error(message);
+    } finally {
+      setUpload(null);
+    }
   };
 
-  const renderPersonalMode = () => (
-    <SectionShell title="Datos personales" subtitle="Cuida tu primera impresion con una ficha clara y profesional.">
-      <View style={localStyles.personalAvatarRow}>
-        <Pressable
-          onPress={() => void handleUploadUserImage('avatar')}
-          disabled={!authUserId || profileUploadingField !== null}
-          style={localStyles.personalAvatarPressable}
-        >
-          {resolvedProfileAvatarUrl ? (
-            <Image source={{ uri: resolvedProfileAvatarUrl }} style={localStyles.personalAvatar} resizeMode="cover" />
-          ) : (
-            <View style={localStyles.personalAvatarFallback}>
-              <Text style={localStyles.personalAvatarText}>Foto</Text>
+  const handleRemoveDocument = async (field: 'idDocumentUrl' | 'driverLicenseUrl', title: string) => {
+    const confirmed = await confirmAction({
+      title: `¿Eliminar ${title.toLowerCase()}?`,
+      message: 'Sin este documento no podrás reservar ni gestionar viajes.',
+      confirmLabel: 'Eliminar',
+      destructive: true
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    const ok = await updateMyProfile({ ...profilePayload(profile), [field]: null });
+
+    if (ok) {
+      toast.success('Documento eliminado.');
+    } else {
+      toast.error(useUserProfileStore.getState().mutationMessage ?? 'No se pudo eliminar el documento.');
+    }
+  };
+
+  const handleExportData = async () => {
+    setAccountAction('export');
+
+    try {
+      const { data } = await httpClient.get('/users/me/export');
+      const json = JSON.stringify(data, null, 2);
+
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `lynkdrive-mis-datos-${new Date().toISOString().slice(0, 10)}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        toast.success('Descarga iniciada.');
+      } else {
+        await Share.share({ title: 'Mis datos de LynkDrive', message: json });
+      }
+    } catch (exportError: unknown) {
+      toast.error(getApiErrorMessage(exportError, 'No se pudieron exportar tus datos.'));
+    } finally {
+      setAccountAction(null);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirmed = await confirmAction({
+      title: '¿Eliminar tu cuenta?',
+      message:
+        'Se borrarán tu perfil, tus documentos y tus vehículos publicados. Las reservas finalizadas se conservan sin tus datos personales. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar cuenta',
+      destructive: true
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    setAccountAction('delete');
+
+    try {
+      await httpClient.delete('/users/me');
+      toast.success('Tu cuenta se ha eliminado.');
+      await signOut();
+    } catch (deleteError: unknown) {
+      toast.error(
+        getApiErrorMessage(
+          deleteError,
+          'No se pudo eliminar la cuenta. Si tienes reservas activas, finalízalas o cancélalas primero.'
+        )
+      );
+    } finally {
+      setAccountAction(null);
+    }
+  };
+
+  const handleSignOut = async () => {
+    const confirmed = await confirmAction({
+      title: '¿Cerrar sesión?',
+      message: 'Tendrás que volver a introducir tu email y contraseña.',
+      confirmLabel: 'Cerrar sesión',
+      destructive: true
+    });
+
+    if (confirmed) {
+      await signOut();
+    }
+  };
+
+  const uploadLabel = (target: ProfileUploadTarget) =>
+    upload?.target === target
+      ? upload.stage === 'processing'
+        ? 'Optimizando…'
+        : `Subiendo ${Math.round((upload.progress ?? 0) * 100)}%`
+      : null;
+
+  const avatarEditor = (size: number) => (
+    <Pressable
+      onPress={() => startUpload('avatar')}
+      disabled={!!upload}
+      accessibilityRole="button"
+      accessibilityLabel="Cambiar foto de perfil"
+      style={({ pressed }) => [styles.avatarWrap, pressed ? styles.pressed : null]}
+    >
+      <Avatar uri={resolvedAvatarUrl} name={displayName} size={size} />
+      {upload?.target === 'avatar' ? (
+        <View style={[styles.avatarOverlay, { borderRadius: size / 2 }]}>
+          <ActivityIndicator color={colorTokens.white} />
+        </View>
+      ) : null}
+      <View style={styles.avatarBadge}>
+        <Ionicons name="camera" size={14} color={colorTokens.white} />
+      </View>
+    </Pressable>
+  );
+
+  const sheets = (
+    <>
+      <Sheet visible={!!sourcePickerFor} onClose={() => setSourcePickerFor(null)} title="Añadir imagen">
+        <OptionList
+          options={[
+            { value: 'camera', label: 'Hacer foto', icon: 'camera-outline' },
+            { value: 'library', label: 'Elegir de la galería', icon: 'images-outline' }
+          ]}
+          onSelect={(value) => {
+            const target = sourcePickerFor;
+            setSourcePickerFor(null);
+            if (target) {
+              // Esperamos al cierre de la hoja para no solapar modales en iOS.
+              setTimeout(() => void handleUploadUserImage(target, value as ImageSource), 350);
+            }
+          }}
+        />
+      </Sheet>
+      <Sheet
+        visible={!!legalDoc}
+        onClose={() => setLegalDoc(null)}
+        title={legalDoc ? LEGAL_CONTENT[legalDoc].title : undefined}
+        centered
+      >
+        {legalDoc
+          ? LEGAL_CONTENT[legalDoc].paragraphs.map((paragraph, index) => (
+              <Text key={index} style={styles.legalParagraph}>
+                {paragraph}
+              </Text>
+            ))
+          : null}
+      </Sheet>
+    </>
+  );
+
+  const screenProps = { topPadding, bottomPadding, maxWidth: layoutTokens.formMaxWidth };
+
+  /* ------------------------------------------------------------------------ */
+  /* Datos personales                                                         */
+  /* ------------------------------------------------------------------------ */
+
+  if (mode === 'personal') {
+    return (
+      <Screen
+        {...screenProps}
+        header={
+          <ScreenHeader
+            title="Datos personales"
+            subtitle="Así te verán propietarios y conductores."
+            onBack={() => void leaveEditMode()}
+            backLabel="Perfil"
+          />
+        }
+      >
+        <Card>
+          <View style={styles.avatarRow}>
+            {avatarEditor(72)}
+            <View style={styles.flex1}>
+              <Text style={styles.strong}>Foto de perfil</Text>
+              <Text style={styles.caption}>{uploadLabel('avatar') ?? 'Una foto real genera más confianza.'}</Text>
             </View>
-          )}
-        </Pressable>
-        <View style={localStyles.personalAvatarInfo}>
-          <Text style={localStyles.personalAvatarTitle}>Imagen de perfil</Text>
-          <Text style={localStyles.personalAvatarHint}>Toca la foto para cambiarla al instante.</Text>
-        </View>
-      </View>
-
-      <View style={localStyles.formGrid}>
-        <LabeledInput
-          label="Nombre"
-          value={firstNameInput}
-          onChangeText={setFirstNameInput}
-          placeholder="Tu nombre"
-          autoCapitalize="words"
-        />
-        <LabeledInput
-          label="Apellidos"
-          value={lastNameInput}
-          onChangeText={setLastNameInput}
-          placeholder="Tus apellidos"
-          autoCapitalize="words"
-        />
-        <LabeledInput
-          label="Telefono"
-          value={phoneInput}
-          onChangeText={setPhoneInput}
-          placeholder="+34..."
-          keyboardType="phone-pad"
-          autoCapitalize="none"
-        />
-      </View>
-
-      <View style={localStyles.accountStatusCard}>
-        <Text style={localStyles.accountStatusLabel}>Email de cuenta</Text>
-        <Text style={localStyles.accountStatusValue}>{authEmail ?? 'Sin email en sesion'}</Text>
-      </View>
-
-      <View style={localStyles.inlineActions}>
-        <ActionButton
-          label={saving ? 'Guardando...' : 'Guardar cambios'}
-          onPress={() => void updateMyProfile(buildPayload())}
-          disabled={saving || !authUserId || !hasUnsavedPersonalChanges || !hasValidPersonalData}
-        />
-      </View>
-
-      <View style={localStyles.inlineActions}>
-        <ActionButton label="Volver" onPress={() => setMode('overview')} variant="ghost" />
-      </View>
-    </SectionShell>
-  );
-
-  const renderDocumentsMode = () => (
-    <SectionShell title="Documentacion" subtitle="Sube tus documentos de forma segura para habilitar transacciones.">
-      <View style={localStyles.docsGrid}>
-        <View style={localStyles.docCard}>
-          <Text style={localStyles.docTitle}>Documento de identidad</Text>
-          <Text style={localStyles.docStatus}>{idDocumentInput ? 'Subido' : 'Pendiente'}</Text>
-          <View style={localStyles.inlineActions}>
-            <ActionButton
-              label={profileUploadingField === 'id_document' ? 'Subiendo...' : idDocumentInput ? 'Reemplazar DNI' : 'Subir DNI'}
-              onPress={() => void handleUploadUserImage('id_document')}
-              disabled={profileUploadingField !== null || !authUserId}
-              variant="ghost"
-            />
-            {idDocumentInput ? (
-              <ActionButton label="Eliminar" onPress={() => setIdDocumentInput('')} variant="danger" />
-            ) : null}
           </View>
-        </View>
+        </Card>
+        <Card>
+          <TextField
+            label="Nombre"
+            required
+            value={firstNameInput}
+            onChangeText={(value) => {
+              setFirstNameInput(value);
+              setFieldErrors((current) => ({ ...current, firstName: undefined }));
+            }}
+            placeholder="Tu nombre"
+            autoCapitalize="words"
+            autoComplete="given-name"
+            textContentType="givenName"
+            error={fieldErrors.firstName}
+          />
+          <TextField
+            label="Apellidos"
+            required
+            value={lastNameInput}
+            onChangeText={(value) => {
+              setLastNameInput(value);
+              setFieldErrors((current) => ({ ...current, lastName: undefined }));
+            }}
+            placeholder="Tus apellidos"
+            autoCapitalize="words"
+            autoComplete="family-name"
+            textContentType="familyName"
+            error={fieldErrors.lastName}
+          />
+          <TextField
+            label="Teléfono"
+            required
+            value={phoneInput}
+            onChangeText={(value) => {
+              setPhoneInput(value);
+              setFieldErrors((current) => ({ ...current, phone: undefined }));
+            }}
+            placeholder="+34 600 123 123"
+            keyboardType="phone-pad"
+            autoComplete="tel"
+            textContentType="telephoneNumber"
+            leftIcon="call-outline"
+            error={fieldErrors.phone}
+          />
+          <TextField label="Email" value={authEmail ?? ''} readOnlyValue leftIcon="mail-outline" hint="El email de acceso no se puede cambiar." />
+          {saveError ? <InlineMessage tone="error" message={saveError} /> : null}
+          <Button
+            label="Guardar cambios"
+            icon="save-outline"
+            onPress={() => void handleSavePersonal()}
+            loading={saving}
+            disabled={!hasUnsavedPersonalChanges}
+            fullWidth
+          />
+        </Card>
+        {sheets}
+      </Screen>
+    );
+  }
 
-        <View style={localStyles.docCard}>
-          <Text style={localStyles.docTitle}>Permiso de conducir</Text>
-          <Text style={localStyles.docStatus}>{driverLicenseInput ? 'Subido' : 'Pendiente'}</Text>
-          <View style={localStyles.inlineActions}>
-            <ActionButton
-              label={profileUploadingField === 'driver_license' ? 'Subiendo...' : driverLicenseInput ? 'Reemplazar carnet' : 'Subir carnet'}
-              onPress={() => void handleUploadUserImage('driver_license')}
-              disabled={profileUploadingField !== null || !authUserId}
-              variant="ghost"
-            />
-            {driverLicenseInput ? (
-              <ActionButton label="Eliminar" onPress={() => setDriverLicenseInput('')} variant="danger" />
-            ) : null}
-          </View>
-        </View>
-      </View>
+  /* ------------------------------------------------------------------------ */
+  /* Documentación                                                            */
+  /* ------------------------------------------------------------------------ */
 
-      <View style={localStyles.inlineActions}>
-        <ActionButton
-          label={saving ? 'Guardando...' : 'Guardar cambios'}
-          onPress={() => void updateMyProfile(buildPayload())}
-          disabled={saving || !authUserId || !hasUnsavedDocumentChanges}
+  if (mode === 'documents') {
+    return (
+      <Screen
+        {...screenProps}
+        header={
+          <ScreenHeader
+            title="Documentación"
+            subtitle="La necesitamos para verificar tu identidad antes de reservar."
+            onBack={() => void leaveEditMode()}
+            backLabel="Perfil"
+          />
+        }
+      >
+        <InlineMessage
+          tone={profile?.isVerified ? 'success' : 'info'}
+          title={profile?.isVerified ? 'Cuenta verificada' : 'Verificación pendiente'}
+          message={
+            profile?.isVerified
+              ? 'Tu documentación está verificada. Ya puedes reservar y publicar.'
+              : 'Sube ambos documentos. El equipo los revisa y activa tu cuenta. Se guardan de forma privada.'
+          }
         />
-        <ActionButton label="Volver" onPress={() => setMode('overview')} variant="ghost" />
-      </View>
-    </SectionShell>
-  );
+        {DOCUMENTS.map((doc) => {
+          const uploaded = !!profile?.[doc.field];
+          const busyLabel = uploadLabel(doc.target);
+
+          return (
+            <Card key={doc.target}>
+              <CardHeader
+                title={doc.title}
+                icon={doc.icon}
+                subtitle={doc.hint}
+                right={
+                  <StatusChip
+                    compact
+                    label={uploaded ? (profile?.isVerified ? 'Verificado' : 'En revisión') : 'Pendiente'}
+                    tone={uploaded ? (profile?.isVerified ? 'success' : 'warning') : 'neutral'}
+                  />
+                }
+              />
+              {busyLabel ? (
+                <View style={styles.progressRow}>
+                  <ActivityIndicator color={colorTokens.primary} size="small" />
+                  <Text style={styles.caption}>{busyLabel}</Text>
+                  {upload?.stage === 'uploading' ? (
+                    <View style={styles.progressTrack}>
+                      <View style={[styles.progressFill, { width: `${Math.round((upload.progress ?? 0) * 100)}%` }]} />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+              <View style={styles.rowActions}>
+                <Button
+                  label={uploaded ? 'Reemplazar' : 'Subir documento'}
+                  icon={uploaded ? 'refresh' : 'cloud-upload-outline'}
+                  variant={uploaded ? 'secondary' : 'primary'}
+                  onPress={() => startUpload(doc.target)}
+                  disabled={!!upload || saving}
+                  style={styles.flex1}
+                />
+                {uploaded ? (
+                  <Button
+                    label="Eliminar"
+                    variant="dangerGhost"
+                    onPress={() => void handleRemoveDocument(doc.field, doc.title)}
+                    disabled={!!upload || saving}
+                  />
+                ) : null}
+              </View>
+            </Card>
+          );
+        })}
+        {sheets}
+      </Screen>
+    );
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Resumen                                                                  */
+  /* ------------------------------------------------------------------------ */
+
+  const verificationSteps = [
+    { label: 'Nombre, apellidos y teléfono', done: hasProfileMinimum, onPress: () => setMode('personal') },
+    { label: 'DNI subido', done: !!profile?.idDocumentUrl, onPress: () => setMode('documents') },
+    { label: 'Permiso de conducir subido', done: !!profile?.driverLicenseUrl, onPress: () => setMode('documents') },
+    { label: 'Revisión de LynkDrive', done: !!profile?.isVerified, onPress: undefined }
+  ];
+  const appVersion = Constants.expoConfig?.version ?? '1.0.0';
 
   return (
-    <View style={styles.sectionCard}>
-      <View style={localStyles.modePillsWrap}>
-        <ModePill label="Resumen" active={mode === 'overview'} onPress={() => setMode('overview')} />
-        <ModePill label="Personal" active={mode === 'personal'} onPress={() => setMode('personal')} />
-        <ModePill label="Docs" active={mode === 'documents'} onPress={() => setMode('documents')} />
+    <Screen
+      {...screenProps}
+      refreshing={refreshing}
+      onRefresh={() => void handleRefresh()}
+      header={<ScreenHeader title="Perfil" />}
+    >
+      <Card>
+        <View style={styles.hero}>
+          {avatarEditor(80)}
+          <View style={styles.heroText}>
+            {profileLoading && !profile ? (
+              <>
+                <Skeleton width="70%" height={22} />
+                <Skeleton width="50%" height={14} />
+              </>
+            ) : (
+              <>
+                <Text style={styles.heroName} numberOfLines={2}>
+                  {displayName}
+                </Text>
+                <Text style={styles.caption} numberOfLines={1}>
+                  {authEmail ?? ''}
+                </Text>
+                <View style={styles.chipRow}>
+                  <StatusChip
+                    compact
+                    icon={profile?.isVerified ? 'shield-checkmark' : 'shield-outline'}
+                    label={profile?.isVerified ? 'Verificado' : 'Sin verificar'}
+                    tone={profile?.isVerified ? 'success' : 'warning'}
+                  />
+                  {profile?.createdAt ? (
+                    <StatusChip compact label={`Desde ${formatMonthYearMadrid(profile.createdAt).toLowerCase()}`} />
+                  ) : null}
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+        {uploadLabel('avatar') ? <Text style={styles.caption}>{uploadLabel('avatar')}</Text> : null}
+        <Button label="Editar datos personales" icon="create-outline" variant="secondary" onPress={() => setMode('personal')} fullWidth />
+      </Card>
+
+      {profileError && !profile ? (
+        <InlineMessage tone="error" message={profileError} actionLabel="Reintentar" onAction={() => void fetchMyProfile()} />
+      ) : null}
+
+      {profile && !profile.isVerified ? (
+        <Card>
+          <CardHeader
+            title="Verifica tu cuenta"
+            icon="shield-checkmark-outline"
+            subtitle="Necesario para reservar, pagar y gestionar viajes."
+          />
+          {verificationSteps.map((step) => (
+            <Pressable
+              key={step.label}
+              onPress={step.onPress}
+              disabled={!step.onPress || step.done}
+              accessibilityRole={step.onPress && !step.done ? 'button' : 'text'}
+              accessibilityState={{ checked: step.done }}
+              style={({ pressed }) => [styles.stepRow, pressed ? styles.pressed : null]}
+            >
+              <Ionicons
+                name={step.done ? 'checkmark-circle' : 'ellipse-outline'}
+                size={22}
+                color={step.done ? colorTokens.success : colorTokens.borderStrong}
+              />
+              <Text style={[styles.stepText, step.done ? styles.stepTextDone : null]}>{step.label}</Text>
+              {step.onPress && !step.done ? <Ionicons name="chevron-forward" size={18} color={colorTokens.textMuted} /> : null}
+            </Pressable>
+          ))}
+        </Card>
+      ) : null}
+
+      <View style={styles.stats}>
+        <StatTile label="Viajes" value={String(overviewStats.tripsCompleted)} loading={overviewLoading && !overviewLoaded} />
+        <StatTile
+          label="Valoración"
+          value={overviewStats.averageRating === null ? '—' : overviewStats.averageRating.toFixed(1)}
+          loading={overviewLoading && !overviewLoaded}
+          icon={overviewStats.averageRating === null ? undefined : 'star'}
+        />
+        <StatTile label="Vehículos" value={String(overviewStats.vehiclesPublished)} loading={overviewLoading && !overviewLoaded} />
       </View>
 
-      {mode === 'overview' ? renderOverview() : null}
-      {mode === 'personal' ? renderPersonalMode() : null}
-      {mode === 'documents' ? renderDocumentsMode() : null}
+      {overviewError ? (
+        <InlineMessage tone="error" message={overviewError} actionLabel="Reintentar" onAction={() => void loadOverviewData()} />
+      ) : null}
 
-      {authError ? <Text style={styles.error}>{authError}</Text> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Card>
+        <CardHeader
+          title="Documentación"
+          icon="document-lock-outline"
+          right={<Button label="Gestionar" size="sm" variant="ghost" onPress={() => setMode('documents')} />}
+        />
+        {DOCUMENTS.map((doc) => {
+          const uploaded = !!profile?.[doc.field];
+          return (
+            <View key={doc.target} style={styles.docRow}>
+              <Ionicons name={doc.icon} size={20} color={colorTokens.secondary} />
+              <Text style={[styles.strong, styles.flex1]}>{doc.title}</Text>
+              <StatusChip
+                compact
+                label={uploaded ? (profile?.isVerified ? 'Verificado' : 'En revisión') : 'Pendiente'}
+                tone={uploaded ? (profile?.isVerified ? 'success' : 'warning') : 'neutral'}
+              />
+            </View>
+          );
+        })}
+      </Card>
+
+      <Card>
+        <CardHeader title="Datos personales" icon="person-outline" />
+        <View>
+          <KeyValueRow label="Nombre" value={getDisplayName(profile?.firstName, profile?.lastName, '—')} />
+          <KeyValueRow label="Teléfono" value={profile?.phoneNumber || 'Sin teléfono'} />
+          <KeyValueRow label="Email" value={authEmail ?? '—'} last />
+        </View>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Últimos viajes"
+          icon="map-outline"
+          subtitle="Como conductor"
+          right={
+            onNavigateToTab && driverBookings.length > 0 ? (
+              <Button label="Ver todos" size="sm" variant="ghost" onPress={() => onNavigateToTab('trips')} />
+            ) : undefined
+          }
+        />
+        {overviewLoading && !overviewLoaded ? (
+          <ListItemSkeleton lines={2} />
+        ) : latestTrips.length === 0 ? (
+          <EmptyState
+            compact
+            icon="car-outline"
+            title="Sin viajes todavía"
+            description="Cuando reserves un coche aparecerá aquí."
+            actionLabel={onNavigateToTab ? 'Explorar vehículos' : undefined}
+            onAction={onNavigateToTab ? () => onNavigateToTab('explore') : undefined}
+          />
+        ) : (
+          latestTrips.map((booking) => {
+            const vehicle = vehicleById[booking.vehicleId];
+            return (
+              <View key={booking.id} style={styles.tripRow}>
+                <View style={styles.flex1}>
+                  <Text style={styles.strong} numberOfLines={1}>
+                    {vehicle ? `${vehicle.brand} ${vehicle.model}` : 'Vehículo'}
+                  </Text>
+                  <Text style={styles.caption}>{formatDateRangeMadrid(booking.startDatetime, booking.endDatetime)}</Text>
+                </View>
+                <View style={styles.tripRight}>
+                  <StatusChip compact label={BOOKING_STATUS_LABEL[booking.status]} tone={BOOKING_STATUS_TONE[booking.status]} />
+                  <Text style={styles.strong}>{formatCurrencyEUR(booking.totalPrice)}</Text>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Valoraciones recibidas"
+          icon="star-outline"
+          subtitle={receivedReviews.length > 0 ? pluralize(receivedReviews.length, 'valoración', 'valoraciones') : undefined}
+        />
+        {overviewLoading && !overviewLoaded ? (
+          <ListItemSkeleton lines={2} />
+        ) : visibleReviews.length === 0 ? (
+          <Text style={styles.caption}>Aún no tienes valoraciones. Aparecerán aquí tras completar viajes.</Text>
+        ) : (
+          <>
+            {visibleReviews.map((review) => {
+              const reviewer = reviewerById[review.reviewerId];
+              const reviewerName = getDisplayName(reviewer?.firstName, reviewer?.lastName);
+              return (
+                <View key={review.id} style={styles.review}>
+                  <View style={styles.reviewHead}>
+                    <Avatar uri={resolveStoredImageUrl(reviewer?.avatarUrl ?? null)} name={reviewerName} size={36} />
+                    <View style={styles.flex1}>
+                      <Text style={styles.strong}>{reviewerName}</Text>
+                      <Text style={styles.caption}>{formatDateMadrid(review.createdAt)}</Text>
+                    </View>
+                    <StarRating value={review.rating} size={14} />
+                  </View>
+                  {review.comment ? <Text style={styles.reviewComment}>{review.comment}</Text> : null}
+                </View>
+              );
+            })}
+            {sortedReviews.length > 3 ? (
+              <Button
+                label={showAllReviews ? 'Ver menos' : `Ver todas (${sortedReviews.length})`}
+                size="sm"
+                variant="ghost"
+                onPress={() => setShowAllReviews((current) => !current)}
+                style={styles.alignStart}
+              />
+            ) : null}
+          </>
+        )}
+      </Card>
+
+      <OwnerPayoutsCard />
+
+      <Card padding={spacingTokens.sm}>
+        {(
+          [
+            { key: 'terms', icon: 'document-text-outline' },
+            { key: 'privacy', icon: 'lock-closed-outline' },
+            { key: 'cancellation', icon: 'return-up-back-outline' }
+          ] as Array<{ key: LegalDoc; icon: keyof typeof Ionicons.glyphMap }>
+        ).map((item) => (
+          <Pressable
+            key={item.key}
+            onPress={() => setLegalDoc(item.key)}
+            accessibilityRole="button"
+            android_ripple={{ color: 'rgba(13,27,42,0.06)' }}
+            style={({ pressed }) => [styles.menuRow, pressed ? styles.pressed : null]}
+          >
+            <Ionicons name={item.icon} size={20} color={colorTokens.secondary} />
+            <Text style={[styles.strong, styles.flex1]}>{LEGAL_CONTENT[item.key].title}</Text>
+            <Ionicons name="chevron-forward" size={18} color={colorTokens.textMuted} />
+          </Pressable>
+        ))}
+      </Card>
+
+      <Card>
+        <CardHeader title="Privacidad y cuenta" icon="shield-checkmark-outline" />
+        <Text style={styles.caption}>
+          Puedes descargar una copia de todos tus datos o eliminar tu cuenta. Para eliminarla no debes tener reservas en curso.
+        </Text>
+        <View style={styles.accountActions}>
+          <Button
+            label="Descargar mis datos"
+            icon="download-outline"
+            variant="secondary"
+            size="sm"
+            onPress={() => void handleExportData()}
+            loading={accountAction === 'export'}
+            disabled={accountAction !== null}
+          />
+          <Button
+            label="Eliminar cuenta"
+            icon="trash-outline"
+            variant="dangerGhost"
+            size="sm"
+            onPress={() => void handleDeleteAccount()}
+            loading={accountAction === 'delete'}
+            disabled={accountAction !== null}
+          />
+        </View>
+      </Card>
+
+      <Button
+        label="Cerrar sesión"
+        icon="log-out-outline"
+        variant="dangerGhost"
+        onPress={() => void handleSignOut()}
+        loading={authLoading}
+        fullWidth
+      />
+      <Text style={styles.version}>LynkDrive · versión {appVersion}</Text>
+      {sheets}
+    </Screen>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  loading,
+  icon
+}: {
+  label: string;
+  value: string;
+  loading: boolean;
+  icon?: keyof typeof Ionicons.glyphMap;
+}) {
+  return (
+    <View style={styles.statTile} accessible accessibilityLabel={`${label}: ${value}`}>
+      {loading ? (
+        <Skeleton width={40} height={24} />
+      ) : (
+        <View style={styles.statValueRow}>
+          {icon ? <Ionicons name={icon} size={18} color={colorTokens.accent1} /> : null}
+          <Text style={styles.statValue}>{value}</Text>
+        </View>
+      )}
+      <Text style={styles.caption}>{label}</Text>
     </View>
   );
 }
 
-const localStyles = StyleSheet.create({
-  modePillsWrap: {
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1
+  },
+  accountActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacingTokens.sm,
-    marginBottom: spacingTokens.md,
-    backgroundColor: '#F2F5FA',
-    borderRadius: 14,
-    padding: spacingTokens.xs
+    marginTop: spacingTokens.md
   },
-  modePill: {
-    borderWidth: 1,
-    borderColor: 'transparent',
-    backgroundColor: 'transparent',
-    borderRadius: radiusTokens.pill,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.xs + 1
+  alignStart: {
+    alignSelf: 'flex-start'
   },
-  modePillActive: {
-    borderColor: '#D4DEEA',
-    backgroundColor: colorTokens.white,
-    shadowColor: '#0B0F14',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2
+  pressed: {
+    opacity: 0.75
   },
-  modePillText: {
-    color: '#4B5563',
+  caption: {
+    color: colorTokens.textMuted,
     ...typographyTokens.caption
   },
-  modePillTextActive: {
-    color: '#0F172A',
-    fontWeight: '700'
+  strong: {
+    color: colorTokens.primary,
+    ...typographyTokens.bodyStrong
   },
-  sectionPlaceholder: {
-    width: '100%',
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.bgLight,
-    borderWidth: 1,
-    borderColor: colorTokens.border
-  },
-  heroCard: {
-    borderWidth: 1,
-    borderColor: colorTokens.primary,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.primary,
-    padding: spacingTokens.lg,
-    minHeight: 160,
-    shadowColor: '#0B0F14',
-    shadowOpacity: 0.16,
-    shadowRadius: 12,
-    shadowOffset: {
-      width: 0,
-      height: 5
-    },
-    elevation: 4
-  },
-  heroContent: {
-    gap: spacingTokens.lg,
-    zIndex: 2
-  },
-  heroAvatarPressable: {
-    position: 'relative'
-  },
-  heroTopRow: {
+  hero: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacingTokens.md
+    gap: spacingTokens.lg
   },
-  heroAvatar: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 2,
-    borderColor: 'rgba(244,211,94,0.45)'
+  heroText: {
+    flex: 1,
+    gap: 4
   },
-  heroAvatarFallback: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 2,
-    borderColor: 'rgba(244,211,94,0.45)',
-    backgroundColor: 'rgba(255,255,255,0.16)',
+  heroName: {
+    color: colorTokens.primary,
+    ...typographyTokens.h2
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 2
+  },
+  avatarWrap: {
+    position: 'relative'
+  },
+  avatarOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(13,27,42,0.55)',
     alignItems: 'center',
     justifyContent: 'center'
   },
-  heroInitials: {
-    color: colorTokens.accent1,
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: '700',
-    letterSpacing: 0.4
+  avatarBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: colorTokens.white,
+    backgroundColor: colorTokens.accent2,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  heroIdentityBlock: {
-    flex: 1,
-    gap: spacingTokens.xs
-  },
-  heroName: {
-    color: colorTokens.white,
-    fontSize: 22,
-    lineHeight: 28,
-    fontWeight: '700'
-  },
-  heroMail: {
-    color: 'rgba(255,255,255,0.5)',
-    ...typographyTokens.caption
-  },
-  heroChipRow: {
+  avatarRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacingTokens.xs,
-    marginTop: spacingTokens.xs
+    alignItems: 'center',
+    gap: spacingTokens.lg
   },
-  statsRow: {
+  stats: {
     flexDirection: 'row',
     gap: spacingTokens.sm
   },
-  statCard: {
+  statTile: {
     flex: 1,
+    gap: 4,
+    padding: spacingTokens.md,
+    borderRadius: radiusTokens.card,
     borderWidth: 1,
     borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
     backgroundColor: colorTokens.white,
-    padding: spacingTokens.md,
-    gap: spacingTokens.xs
+    alignItems: 'center'
   },
-  statLabel: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
+  statValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4
   },
   statValue: {
     color: colorTokens.primary,
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: '700'
+    ...typographyTokens.h2
   },
-  sectionTitle: {
-    color: colorTokens.primary,
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: '700'
-  },
-  sectionSubtitle: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.body
-  },
-  sectionWithActionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacingTokens.sm
-  },
-  mobileSectionActionWrap: {
-    marginTop: spacingTokens.sm,
-    alignSelf: 'flex-start'
-  },
-  dataRow: {
-    paddingVertical: spacingTokens.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: colorTokens.border,
-    gap: 2
-  },
-  dataLabel: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  dataValue: {
-    color: colorTokens.primary,
-    ...typographyTokens.body
-  },
-  qualityList: {
-    borderWidth: 0,
-    borderRadius: 14,
-    overflow: 'hidden',
-    backgroundColor: colorTokens.white,
-    shadowColor: '#0B0F14',
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2
-  },
-  qualityRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.md,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEF2F7',
-    backgroundColor: '#FFFFFF'
-  },
-  qualityLabel: {
-    color: colorTokens.secondary,
-    ...typographyTokens.body
-  },
-  qualityOk: {
-    color: colorTokens.accent2,
-    ...typographyTokens.caption
-  },
-  qualityPending: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  menuList: {
-    gap: spacingTokens.sm,
-    marginTop: spacingTokens.sm
-  },
-  menuActionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E5EAF1',
-    backgroundColor: colorTokens.white,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.md,
-    shadowColor: '#0B0F14',
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1
-  },
-  menuActionTextWrap: {
-    flex: 1,
-    gap: 2,
-    paddingRight: spacingTokens.sm
-  },
-  menuActionTitle: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  menuActionSubtitle: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  menuActionSide: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    gap: spacingTokens.xs
-  },
-  menuActionBadge: {
-    color: '#0B6B3A',
-    ...typographyTokens.caption
-  },
-  menuActionChevron: {
-    color: '#64748B',
-    fontSize: 18,
-    lineHeight: 20,
-    fontWeight: '700'
-  },
-  sheetCard: {
-    borderWidth: 1,
-    borderColor: '#E6ECF3',
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: colorTokens.white,
-    shadowColor: '#0B0F14',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3
-  },
-  sheetHeader: {
-    backgroundColor: '#F8FAFC',
-    paddingHorizontal: spacingTokens.lg,
-    paddingVertical: spacingTokens.md,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E6ECF3',
-    gap: spacingTokens.xs
-  },
-  sheetTitle: {
-    color: colorTokens.primary,
-    fontSize: 19,
-    lineHeight: 24,
-    fontWeight: '700'
-  },
-  sheetSubtitle: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  sheetContent: {
-    padding: spacingTokens.lg,
-    gap: spacingTokens.md
-  },
-  formGrid: {
-    gap: spacingTokens.md
-  },
-  personalAvatarRow: {
+  stepRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacingTokens.md,
-    borderWidth: 1,
-    borderColor: '#E6ECF3',
-    borderRadius: 14,
-    backgroundColor: '#F8FAFC',
-    padding: spacingTokens.md
+    minHeight: 44
   },
-  personalAvatarPressable: {
-    position: 'relative'
-  },
-  personalAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 2,
-    borderColor: '#0EA5E9'
-  },
-  personalAvatarFallback: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 2,
-    borderColor: '#0EA5E9',
-    backgroundColor: '#E0F2FE',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  personalAvatarText: {
-    color: '#0369A1',
-    ...typographyTokens.caption
-  },
-  personalAvatarInfo: {
+  stepText: {
     flex: 1,
-    gap: spacingTokens.xs
-  },
-  personalAvatarTitle: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  personalAvatarHint: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  inputFieldWrap: {
-    gap: spacingTokens.xs
-  },
-  inputLabel: {
-    color: colorTokens.secondary,
-    ...typographyTokens.caption
-  },
-  inputField: {
-    borderWidth: 1,
-    borderColor: '#D8E1EC',
-    borderRadius: 14,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.md,
     color: colorTokens.textMain,
-    backgroundColor: '#FBFDFF',
     ...typographyTokens.body
   },
-  inlineActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacingTokens.sm
-  },
-  docsGrid: {
-    gap: spacingTokens.md
-  },
-  docCardReadOnly: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.white,
-    padding: spacingTokens.md,
-    gap: spacingTokens.sm
-  },
-  docHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacingTokens.sm
-  },
-  docIcon: {
-    fontSize: 20,
-    lineHeight: 24
-  },
-  docHeaderTextWrap: {
-    flex: 1,
-    gap: 2
-  },
-  docCard: {
-    borderWidth: 1,
-    borderColor: '#E6ECF3',
-    borderRadius: 14,
-    backgroundColor: '#F8FAFC',
-    padding: spacingTokens.md,
-    gap: spacingTokens.sm
-  },
-  docTitle: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  docStatus: {
+  stepTextDone: {
     color: colorTokens.textMuted,
-    ...typographyTokens.caption
+    textDecorationLine: 'line-through'
   },
-  tripList: {
-    gap: spacingTokens.sm
-  },
-  tripCard: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.white,
-    padding: spacingTokens.md,
-    gap: spacingTokens.xs
-  },
-  tripTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacingTokens.sm
-  },
-  tripTitle: {
-    flex: 1,
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  tripMeta: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  tripPrice: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  tripReviewInline: {
+  docRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacingTokens.sm
+    gap: spacingTokens.md,
+    minHeight: 40
   },
-  starsText: {
-    color: colorTokens.accent1,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '700'
-  },
-  reviewList: {
-    gap: spacingTokens.sm
-  },
-  reviewCard: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.white,
-    padding: spacingTokens.md,
-    gap: spacingTokens.sm
-  },
-  reviewHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacingTokens.sm
-  },
-  reviewAuthorRow: {
+  tripRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacingTokens.md,
+    paddingVertical: spacingTokens.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colorTokens.border
+  },
+  tripRight: {
+    alignItems: 'flex-end',
+    gap: 4
+  },
+  review: {
     gap: spacingTokens.sm,
-    flex: 1
+    paddingVertical: spacingTokens.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colorTokens.border
   },
-  reviewAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colorTokens.border
-  },
-  reviewAvatarFallback: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
+  reviewHead: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colorTokens.bgLight
-  },
-  reviewAvatarInitials: {
-    color: colorTokens.primary,
-    ...typographyTokens.caption
-  },
-  reviewAuthorName: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  reviewDate: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
+    gap: spacingTokens.md
   },
   reviewComment: {
     color: colorTokens.textMain,
     ...typographyTokens.body
   },
-  legalList: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    overflow: 'hidden'
-  },
-  legalRow: {
-    borderBottomWidth: 1,
-    borderBottomColor: colorTokens.border,
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.md,
+    minHeight: 52,
     paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.md,
-    backgroundColor: colorTokens.white
+    borderRadius: radiusTokens.input
   },
-  legalText: {
-    color: colorTokens.primary,
+  legalParagraph: {
+    color: colorTokens.textMain,
     ...typographyTokens.body
   },
-  logoutCard: {
-    borderWidth: 1,
-    borderColor: colorTokens.alert,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.bgLight,
-    padding: spacingTokens.lg,
+  rowActions: {
+    flexDirection: 'row',
     gap: spacingTokens.sm
   },
-  actionButton: {
-    minHeight: 44,
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingHorizontal: spacingTokens.lg,
-    paddingVertical: spacingTokens.sm,
+  progressRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#0B0F14',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 1
+    gap: spacingTokens.sm
   },
-  actionButtonDisabled: {
-    opacity: 0.45
+  progressTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colorTokens.surfaceMuted,
+    overflow: 'hidden'
   },
-  actionButtonText: {
+  progressFill: {
+    height: 4,
+    backgroundColor: colorTokens.accent2
+  },
+  version: {
+    textAlign: 'center',
+    color: colorTokens.textSubtle,
     ...typographyTokens.caption
-  },
-  actionButtonPrimary: {
-    backgroundColor: '#0F172A',
-    borderColor: '#0F172A'
-  },
-  actionButtonPrimaryText: {
-    color: colorTokens.white,
-    fontWeight: '700'
-  },
-  actionButtonAccent: {
-    backgroundColor: '#f97316',
-    borderColor: '#f97316'
-  },
-  actionButtonAccentText: {
-    color: colorTokens.white,
-    fontWeight: '700'
-  },
-  actionButtonGhost: {
-    backgroundColor: '#EEF4FF',
-    borderColor: '#CBDCF7'
-  },
-  actionButtonGhostText: {
-    color: '#1D4ED8',
-    fontWeight: '700'
-  },
-  actionButtonDanger: {
-    backgroundColor: '#FFF1F2',
-    borderColor: '#FECDD3'
-  },
-  actionButtonDangerText: {
-    color: colorTokens.alert,
-    fontWeight: '700'
-  },
-  accountStatusCard: {
-    borderWidth: 1,
-    borderColor: '#E6ECF3',
-    borderRadius: 12,
-    backgroundColor: '#F8FAFC',
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.md,
-    gap: spacingTokens.xs
-  },
-  accountStatusLabel: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  accountStatusValue: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
+  }
 });

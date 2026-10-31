@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { httpClient } from '../api/http';
+import { getApiErrorMessage } from '../shared/errors';
 
-interface UserProfile {
+export interface UserProfile {
   id: string;
   firstName: string;
   lastName: string;
@@ -29,7 +30,8 @@ interface UserProfileState {
   error: string | null;
   mutationMessage: string | null;
   fetchMyProfile: () => Promise<void>;
-  updateMyProfile: (payload: UserProfileMutation) => Promise<void>;
+  updateMyProfile: (payload: UserProfileMutation) => Promise<boolean>;
+  reset: () => void;
 }
 
 export const useUserProfileStore = create<UserProfileState>((set, get) => ({
@@ -48,11 +50,12 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
         profile: response.data,
         loading: false
       });
-    } catch {
+    } catch (error: unknown) {
+      // Conservamos el perfil previo si existía: un fallo puntual de red no debe
+      // "desverificar" al usuario en la UI.
       set({
         loading: false,
-        profile: null,
-        error: 'No se pudo cargar /users/me. Revisa token de autenticacion.'
+        error: getApiErrorMessage(error, 'No se pudo cargar tu perfil. Comprueba tu conexión.')
       });
     }
   },
@@ -63,11 +66,14 @@ export const useUserProfileStore = create<UserProfileState>((set, get) => ({
       await httpClient.put('/users/me', payload);
       await get().fetchMyProfile();
       set({ saving: false });
-    } catch {
+      return true;
+    } catch (error: unknown) {
       set({
         saving: false,
-        mutationMessage: 'No se pudo actualizar /users/me.'
+        mutationMessage: getApiErrorMessage(error, 'No se pudieron guardar los cambios del perfil.')
       });
+      return false;
     }
-  }
+  },
+  reset: () => set({ profile: null, loading: false, saving: false, error: null, mutationMessage: null })
 }));

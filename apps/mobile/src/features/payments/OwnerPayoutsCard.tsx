@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { StatusChip, StatusChipTone } from '../../app/components/ui/StatusChip';
-import { styles } from '../../app/styles';
-import { colorTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import { Linking, StyleSheet, Text, View } from 'react-native';
+import { colorTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import { Button, Card, CardHeader, InlineMessage, StatusChip, StatusChipTone } from '../../shared/ui';
 import {
   ConnectStatus,
   createConnectDashboardLink,
@@ -24,14 +23,14 @@ function describeStatus(status: ConnectStatus): PayoutState {
   }
 
   if (status.transfersActive && status.payoutsEnabled) {
-    return { label: 'Activa', tone: 'success', hint: 'Recibiras los pagos de tus reservas en tu cuenta bancaria.' };
+    return { label: 'Activa', tone: 'success', hint: 'Recibirás los pagos de tus reservas en tu cuenta bancaria.' };
   }
 
   if (status.detailsSubmitted) {
-    return { label: 'En revision', tone: 'info', hint: 'Stripe esta verificando tus datos. Vuelve a comprobarlo en unos minutos.' };
+    return { label: 'En revisión', tone: 'info', hint: 'Stripe está verificando tus datos. Vuelve a comprobarlo en unos minutos.' };
   }
 
-  return { label: 'Pendiente', tone: 'warning', hint: 'Completa la configuracion en Stripe para empezar a cobrar.' };
+  return { label: 'Pendiente', tone: 'warning', hint: 'Completa la configuración en Stripe para empezar a cobrar.' };
 }
 
 /**
@@ -94,108 +93,48 @@ export function OwnerPayoutsCard() {
   const isActive = !!status?.transfersActive && !!status?.payoutsEnabled;
 
   return (
-    <View style={styles.card}>
-      <View style={localStyles.header}>
-        <Text style={localStyles.title}>Cobros como propietario</Text>
-        {described ? <StatusChip label={described.label} tone={described.tone} compact /> : null}
-      </View>
+    <Card>
+      <CardHeader
+        title="Cobros como propietario"
+        icon="wallet-outline"
+        right={described ? <StatusChip label={described.label} tone={described.tone} compact /> : null}
+      />
       <Text style={localStyles.hint}>{described?.hint ?? 'Consultando estado de cobros...'}</Text>
-      {error ? <Text style={localStyles.error}>{error}</Text> : null}
+      {error ? <InlineMessage tone="error" message={error} /> : null}
       <View style={localStyles.actions}>
         {isActive ? (
-          <SmallButton label="Ver panel de cobros" onPress={() => void openLink(createConnectDashboardLink)} disabled={loading} />
-        ) : (
-          <SmallButton
-            label={status?.accountId ? 'Completar configuracion' : 'Configurar cobros'}
-            onPress={() => void openLink(createConnectOnboardingLink)}
+          <Button
+            label="Ver panel de cobros"
+            icon="open-outline"
+            size="sm"
+            onPress={() => void openLink(createConnectDashboardLink)}
             disabled={loading}
           />
+        ) : (
+          <Button
+            label={status?.accountId ? 'Completar configuración' : 'Configurar cobros'}
+            icon="card-outline"
+            size="sm"
+            onPress={() => void openLink(createConnectOnboardingLink)}
+            loading={loading}
+          />
         )}
-        <SmallButton label="Actualizar estado" variant="ghost" onPress={() => void loadStatus()} disabled={loading} />
+        <Button label="Actualizar estado" variant="ghost" size="sm" onPress={() => void loadStatus()} disabled={loading} />
       </View>
-    </View>
-  );
-}
-
-function SmallButton({
-  label,
-  onPress,
-  disabled,
-  variant = 'primary'
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  variant?: 'primary' | 'ghost';
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[
-        localStyles.button,
-        variant === 'primary' ? localStyles.buttonPrimary : localStyles.buttonGhost,
-        disabled ? localStyles.buttonDisabled : undefined
-      ]}
-    >
-      <Text style={[localStyles.buttonText, variant === 'ghost' ? localStyles.buttonGhostText : undefined]}>{label}</Text>
-    </Pressable>
+    </Card>
   );
 }
 
 const localStyles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacingTokens.sm
-  },
-  title: {
-    ...typographyTokens.sectionLabel,
-    color: colorTokens.textMain
-  },
   hint: {
     ...typographyTokens.caption,
     color: colorTokens.textMuted,
-    marginTop: spacingTokens.sm
-  },
-  error: {
-    ...typographyTokens.caption,
-    color: colorTokens.alert,
-    marginTop: spacingTokens.xs
+    marginBottom: spacingTokens.sm
   },
   actions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacingTokens.sm,
-    marginTop: spacingTokens.md
-  },
-  button: {
-    minHeight: 44,
-    paddingHorizontal: spacingTokens.lg,
-    paddingVertical: spacingTokens.sm,
-    borderRadius: radiusTokens.input,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  buttonPrimary: {
-    backgroundColor: colorTokens.primary,
-    borderColor: colorTokens.primary
-  },
-  buttonGhost: {
-    backgroundColor: colorTokens.white,
-    borderColor: colorTokens.border
-  },
-  buttonDisabled: {
-    opacity: 0.6
-  },
-  buttonText: {
-    ...typographyTokens.caption,
-    fontWeight: '700',
-    color: colorTokens.white
-  },
-  buttonGhostText: {
-    color: colorTokens.secondary
+    marginTop: spacingTokens.sm
   }
 });
