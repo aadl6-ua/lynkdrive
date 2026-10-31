@@ -110,7 +110,7 @@ No se puede cancelar una reserva una vez pasada su fecha de inicio; solo el cond
 - **Búsqueda espacial con PostGIS.** `vehicles.location` es `GEOMETRY(Point, 4326)` con índice GiST; la búsqueda usa `ST_DWithin` sobre `geography` para trabajar en metros reales. El siguiente paso es un índice de expresión sobre `location::geography`.
 - **Ficheros privados con URLs firmadas.** DNI, carnet y fotos de checklist van a buckets privados; la API sube con la service role key y devuelve URLs firmadas temporales (por defecto 3600 s).
 - **Compresión en cliente.** Antes de subir, la app convierte a JPEG, redimensiona (1024 px avatar, 1920 px resto) y baja la calidad hasta 500 KB (avatar) o 2 MB (resto); si no lo consigue, cancela la subida.
-- **Monorepo con tipos compartidos.** npm workspaces con API, app y `packages/shared` (`BookingStatus`, `FuelType`, `Transmission`, DTOs de vehículo). Hoy la API y el cliente replican esos tipos; importarlos directamente está en la hoja de ruta.
+- **Monorepo con contratos compartidos.** npm workspaces con API, app y `packages/shared` (`@lynkdrive/shared`), que define el contrato de la API: enums de reservas, checklists, vehículos y subidas, y la forma de peticiones y respuestas de vehículos, reservas, checklists, reseñas, pagos y usuarios. Las respuestas son genéricas en el tipo de fecha: los DTOs de la API las implementan con `Date` y la app las consume con strings ISO. Ambas apps usan solo `import type`, así que no cambia nada en runtime; el paquete se compila a `dist/` con su script `prepare` al hacer `npm install`/`npm ci`.
 - **Otras.** UTC en almacenamiento y lógica (Europe/Madrid en la UI), borrado lógico, `ON DELETE RESTRICT` en reservas y `TYPEORM_SYNCHRONIZE=false` fuera de local.
 
 ## Modelo de datos
@@ -151,9 +151,11 @@ Las variables de entorno de la API y de la app están documentadas en el [README
 
 ## Pruebas
 
-- Tests unitarios (Jest, API): máquina de estados y precios de reservas, solapes y margen de 2 h, rechazo automático de solapadas, checklists, reseñas, subidas (con validación del contenido real de la imagen), guard JWT, webhooks de Stripe y exportación/borrado de cuenta. `npm run test`.
+- Tests unitarios de la API (Jest + `@nestjs/testing`, `apps/api/src/**/*.spec.ts`): máquina de estados y precios de reservas, solapes y margen de 2 h, rechazo automático de solapadas, checklists, reseñas, subidas (con validación del contenido real de la imagen), guard JWT, webhooks de Stripe, exportación/borrado de cuenta y que los enums de validación coinciden con `@lynkdrive/shared`.
+- Tests unitarios de la app (Jest con preset `jest-expo`, `apps/mobile/src/**/__tests__/*.test.ts`): formato de fechas en Europe/Madrid y EUR (con cambios de hora), días facturables, helpers de estado de reserva, mensajes de error de la API, verificación, compresión de imágenes (`prepareUploadImage` con `expo-image-manipulator` y `fetch` mockeados), resolución de URLs de Storage, reglas de disponibilidad del calendario (colchón de 2 h, `pending` no bloquea) y stores de Zustand con Axios y Supabase mockeados. Se ejecutan con la zona horaria del dispositivo en `America/New_York` para comprobar que la presentación en Madrid no depende del dispositivo.
+- `npm run test` ejecuta los de la API y los de la app (`npm run test -w @lynkdrive/mobile` solo la app).
 - Tests e2e de la API contra Postgres + PostGIS local (el esquema se recrea en cada ejecución; no apuntar nunca a Supabase): `npm run test:e2e` con `TEST_DATABASE_URL`.
-- CI en GitHub Actions: lint, typecheck, build, tests unitarios y e2e en cada push y PR a `dev` y `main`.
+- CI en GitHub Actions: lint, typecheck, build (incluido `expo export --platform web`), tests unitarios de API y app y e2e en cada push y PR a `main`, `dev` e `integracion`.
 
 Scripts de smoke (bash + curl + node) contra la API en marcha:
 
@@ -169,7 +171,6 @@ BASE_URL=http://localhost:3000/api ./scripts/smoke_bookings.sh
 ## Hoja de ruta
 
 - Panel "Mis ingresos".
-- Usar `@lynkdrive/shared` desde la API y la app.
 - Chat, emails transaccionales, notificaciones push y backoffice.
 - Verificación de identidad fuerte (eIDAS / DNIe / Cl@ve).
 
