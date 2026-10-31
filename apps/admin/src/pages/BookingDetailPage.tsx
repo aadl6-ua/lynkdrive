@@ -8,6 +8,7 @@ import {
   fullName,
   INCIDENT_STATUS_LABELS,
   incidentTone,
+  PAYOUT_STATUS_LABELS,
   shortId
 } from '../lib/format';
 import { href } from '../lib/router';
@@ -49,7 +50,7 @@ export function BookingDetailPage({ id }: { id: string }) {
                       ['Precio/día', formatMoney(booking.pricePerDayAtBooking)],
                       ['Total', formatMoney(booking.totalPrice)],
                       ['PaymentIntent', booking.paymentIntentId ? <span className="mono">{booking.paymentIntentId}</span> : '—'],
-                      ['Pago al propietario', booking.payoutStatus],
+                      ['Pago al propietario', PAYOUT_STATUS_LABELS[booking.payoutStatus] ?? booking.payoutStatus],
                       ['Reseñas', booking.reviewIds.length]
                     ]}
                   />

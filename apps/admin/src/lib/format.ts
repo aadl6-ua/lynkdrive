@@ -50,6 +50,13 @@ export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   cancelled: 'Cancelada'
 };
 
+export const PAYOUT_STATUS_LABELS: Record<string, string> = {
+  pending: 'Pendiente',
+  processing: 'En proceso',
+  paid: 'Pagado',
+  failed: 'Fallido'
+};
+
 export const INCIDENT_STATUS_LABELS: Record<IncidentStatus, string> = {
   open: 'Abierta',
   in_progress: 'En gestión',
