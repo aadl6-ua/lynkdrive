@@ -49,6 +49,7 @@ describe('BookingsService', () => {
   let service: BookingsService;
   let bookingRow: Row | null;
   let conflictRows: Row[];
+  let checklistRows: Row[];
   let executedSql: Array<{ sql: string; params: unknown[] }>;
 
   const bookingsQuery = jest.fn();
@@ -78,6 +79,7 @@ describe('BookingsService', () => {
     jest.clearAllMocks();
     bookingRow = buildRow();
     conflictRows = [];
+    checklistRows = [{ exists: 1 }];
     executedSql = [];
 
     bookingsRepository.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
@@ -94,6 +96,10 @@ describe('BookingsService', () => {
           total_price: String(params[6])
         });
         return [{ id: BOOKING_ID }];
+      }
+
+      if (sql.includes('FROM booking_checklists')) {
+        return checklistRows;
       }
 
       if (sql.includes('FOR UPDATE')) {
@@ -250,6 +256,24 @@ describe('BookingsService', () => {
 
       expect(result.status).toBe('accepted');
       expect(result.ownerContactMethod).toBe('whatsapp 600111222');
+    });
+  });
+
+  describe('updateStatus: checklists obligatorios', () => {
+    it('no inicia el viaje sin checklist de entrega', async () => {
+      bookingRow = buildRow({ status: 'paid_confirmed', owner_contact_method: 'tel' });
+      checklistRows = [];
+      await expect(service.updateStatus(BOOKING_ID, asUser(OWNER_ID), { status: 'in_progress' })).rejects.toThrow(
+        'check-in'
+      );
+    });
+
+    it('no completa el viaje sin checklist de devolucion', async () => {
+      bookingRow = buildRow({ status: 'in_progress', owner_contact_method: 'tel' });
+      checklistRows = [];
+      await expect(service.updateStatus(BOOKING_ID, asUser(OWNER_ID), { status: 'completed' })).rejects.toThrow(
+        'check-out'
+      );
     });
   });
 

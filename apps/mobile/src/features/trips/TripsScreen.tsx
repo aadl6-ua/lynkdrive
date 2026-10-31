@@ -592,7 +592,8 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
       },
       paid_confirmed: {
         title: 'Confirmar pago',
-        message: `Se cargará ${formatCurrencyEUR(selectedBooking.totalPrice)} y la reserva quedará confirmada.`,
+        // Este camino solo se usa en modo prototipo (con Stripe paga el PaymentSheet).
+        message: `Modo demostración: no se hará ningún cargo real. La reserva de ${formatCurrencyEUR(selectedBooking.totalPrice)} quedará confirmada.`,
         confirmLabel: 'Pagar'
       },
       in_progress: {
@@ -1134,7 +1135,9 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     const busy = statusUpdating !== null;
     const isClosed = status === 'rejected' || status === 'cancelled';
 
-    const actionButtons: Array<{ status: BookingStatus; label: string; variant?: 'primary' | 'accent' | 'dangerGhost' | 'secondary'; icon?: keyof typeof Ionicons.glyphMap }> = [];
+    const actionButtons: Array<{ status: BookingStatus; label: string; variant?: 'primary' | 'accent' | 'dangerGhost' | 'secondary'; icon?: keyof typeof Ionicons.glyphMap; blockedReason?: string }> = [];
+    // La API exige el checklist correspondiente antes de iniciar o completar el viaje.
+    const hasChecklist = (type: BookingChecklistType) => checklists.some((item) => item.type === type);
 
     if (isOwner && status === 'pending') {
       actionButtons.push(
@@ -1148,12 +1151,24 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     }
     if (isOwner && status === 'paid_confirmed') {
       actionButtons.push(
-        { status: 'in_progress', label: 'Iniciar viaje', icon: 'key-outline' },
+        {
+          status: 'in_progress',
+          label: 'Iniciar viaje',
+          icon: 'key-outline',
+          blockedReason: hasChecklist('check_in') ? undefined : 'Podrás iniciar el viaje cuando el conductor envíe el checklist de entrega.'
+        },
         { status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' }
       );
     }
     if (isOwner && status === 'in_progress') {
-      actionButtons.push({ status: 'completed', label: 'Marcar como completada', icon: 'flag-outline' });
+      actionButtons.push({
+        status: 'completed',
+        label: 'Marcar como completada',
+        icon: 'flag-outline',
+        blockedReason: hasChecklist('check_out')
+          ? undefined
+          : 'Podrás completarla cuando el conductor envíe el checklist de devolución.'
+      });
     }
     if (!isOwner && status === 'pending') {
       actionButtons.push({ status: 'cancelled', label: 'Cancelar solicitud', variant: 'dangerGhost' });
@@ -1243,16 +1258,18 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
                     onPaid={refreshAll}
                   />
                 ) : (
-                  <Button
-                    key={action.status}
-                    label={action.label}
-                    icon={action.icon}
-                    variant={action.variant ?? 'primary'}
-                    onPress={() => void handleUpdateBookingStatus(action.status)}
-                    loading={statusUpdating === action.status}
-                    disabled={busy || !canTransact}
-                    fullWidth
-                  />
+                  <View key={action.status} style={styles.actionWithHint}>
+                    <Button
+                      label={action.label}
+                      icon={action.icon}
+                      variant={action.variant ?? 'primary'}
+                      onPress={() => void handleUpdateBookingStatus(action.status)}
+                      loading={statusUpdating === action.status}
+                      disabled={busy || !canTransact || !!action.blockedReason}
+                      fullWidth
+                    />
+                    {action.blockedReason ? <Text style={styles.caption}>{action.blockedReason}</Text> : null}
+                  </View>
                 )
               )}
               {['accepted', 'paid_confirmed'].includes(status) ? (
@@ -1785,6 +1802,9 @@ const styles = StyleSheet.create({
   },
   timeline: {
     flexDirection: 'row'
+  },
+  actionWithHint: {
+    gap: spacingTokens.xs
   },
   timelineStep: {
     flex: 1,

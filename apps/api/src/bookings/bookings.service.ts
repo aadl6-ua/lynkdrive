@@ -282,6 +282,25 @@ export class BookingsService {
       throw new BadRequestException('Payment must be completed through Stripe (/payments) in stripe mode');
     }
 
+    // Máquina de estados: el viaje empieza tras el check-in y termina tras el check-out.
+    const requiredChecklist =
+      updateStatusDto.status === 'in_progress' ? 'check_in' : updateStatusDto.status === 'completed' ? 'check_out' : null;
+
+    if (requiredChecklist) {
+      const checklistRows = await this.bookingsRepository.query(
+        `SELECT 1 FROM booking_checklists WHERE booking_id = $1 AND type = $2 LIMIT 1`,
+        [id, requiredChecklist]
+      );
+
+      if (!checklistRows[0]) {
+        throw new BadRequestException(
+          requiredChecklist === 'check_in'
+            ? 'Falta el checklist de entrega (check-in) para iniciar el viaje'
+            : 'Falta el checklist de devolución (check-out) para completar el viaje'
+        );
+      }
+    }
+
     if (updateStatusDto.status === 'cancelled' && row.status === 'paid_confirmed') {
       // Reembolso antes de cancelar: si Stripe falla, la reserva no se cancela.
       await this.paymentsService.refundBookingOnCancellation(id, role);
