@@ -26,7 +26,7 @@ export const LEGAL_CONTENT: Record<LegalDoc, LegalDocument> = {
       {
         heading: 'Qué es LynkDrive',
         paragraphs: [
-          `LynkDrive, operada por ${OWNER_NAME}, es una plataforma que pone en contacto a particulares que alquilan su vehículo (propietarios) con particulares que lo necesitan (conductores). El contrato de alquiler se celebra directamente entre propietario y conductor; LynkDrive facilita la reserva, el pago y la documentación del estado del vehículo.`
+          `${OWNER_NAME === 'LynkDrive' ? 'LynkDrive' : `LynkDrive, operada por ${OWNER_NAME},`} es una plataforma que pone en contacto a particulares que alquilan su vehículo (propietarios) con particulares que lo necesitan (conductores). El contrato de alquiler se celebra directamente entre propietario y conductor; LynkDrive facilita la reserva, el pago y la documentación del estado del vehículo.`
         ]
       },
       {
