@@ -59,6 +59,12 @@ export interface VehicleSearchFilters {
   lat?: number;
   lng?: number;
   radiusKm?: number;
+  /**
+   * Fechas del alquiler (ISO, se envían juntas): solo vehículos con una ventana de disponibilidad
+   * que cubra el rango y sin reservas confirmadas que choquen (con el colchón de entrega).
+   */
+  from?: IsoDateString;
+  to?: IsoDateString;
 }
 
 /** Respuesta de `/vehicle-images`. */

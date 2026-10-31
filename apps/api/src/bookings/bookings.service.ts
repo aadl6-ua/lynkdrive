@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, IsNull, Repository } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
+import { HANDOVER_BUFFER_HOURS } from '../common/booking-rules';
 import { BookingEmailEvent, BookingNotificationsService } from '../notifications/booking-notifications.service';
 import { PaymentsService } from '../payments/payments.service';
 import { BookingPushEvent, PushNotificationsService } from '../push-notifications/push-notifications.service';
@@ -21,7 +22,7 @@ import { BookingStatus, UpdateBookingStatusDto } from './dto/update-booking-stat
 import { BookingEntity } from './entities/booking.entity';
 
 // Colchon operativo (entrega/recogida) que cada reserva bloquea tras su fin real.
-export const HANDOVER_BUFFER_HOURS = 2;
+export { HANDOVER_BUFFER_HOURS };
 
 const BLOCKING_STATUSES_SQL = `'accepted', 'paid_confirmed', 'in_progress', 'completed'`;
 

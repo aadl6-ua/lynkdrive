@@ -219,6 +219,24 @@ describe('API e2e (Postgres + PostGIS)', () => {
         .expect(409);
     });
 
+    it('Explorar filtra por fechas: ventana de disponibilidad, reservas confirmadas y colchon', async () => {
+      const ids = async (from: string, to: string) =>
+        (await api().get('/api/vehicles').query({ from, to }).expect(200)).body.map((v: { id: string }) => v.id);
+
+      expect(await ids(futureDate(25), futureDate(27))).toContain(vehicleId);
+      // Choca con la reserva aceptada (dias 10-12) y con su colchon de 2 h tras la devolucion.
+      expect(await ids(futureDate(11), futureDate(11, 18))).not.toContain(vehicleId);
+      expect(await ids(futureDate(12, 11), futureDate(13))).not.toContain(vehicleId);
+      // Fuera de la ventana de disponibilidad (dias 1-60).
+      expect(await ids(futureDate(55), futureDate(65))).not.toContain(vehicleId);
+      // Las solicitudes pending no bloquean (la C es de los dias 20-21).
+      expect(await ids(futureDate(20), futureDate(21))).toContain(vehicleId);
+
+      await api().get('/api/vehicles').query({ from: futureDate(25) }).expect(400);
+      await api().get('/api/vehicles').query({ from: futureDate(27), to: futureDate(25) }).expect(400);
+      await api().get('/api/vehicles').query({ from: 'no-es-fecha', to: futureDate(25) }).expect(400);
+    });
+
     it('el precio de la reserva queda congelado aunque cambie el precio del vehiculo', async () => {
       await api()
         .put(`/api/vehicles/${vehicleId}`)
