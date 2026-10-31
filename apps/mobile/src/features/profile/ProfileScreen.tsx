@@ -98,7 +98,7 @@ type ProfileScreenProps = {
 
 type UploadState = { target: ProfileUploadTarget; stage: 'processing' | 'uploading'; progress?: number } | null;
 
-const PHONE_PATTERN = /^\+?[0-9 ]{9,16}$/;
+const PHONE_PATTERN = /^\+?[0-9\s-]{9,15}$/;
 
 const DOCUMENTS: Array<{ target: 'id_document' | 'driver_license'; field: 'idDocumentUrl' | 'driverLicenseUrl'; title: string; hint: string; icon: keyof typeof Ionicons.glyphMap }> = [
   {

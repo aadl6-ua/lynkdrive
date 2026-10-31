@@ -885,25 +885,27 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
                     <Ionicons name="calendar" size={18} color={colorTokens.primary} />
                   </View>
                   <View style={styles.flex1}>
-                    <Text style={styles.windowText}>Desde {formatDateTimeMadrid(window.startDatetime)}</Text>
-                    <Text style={styles.windowText}>Hasta {formatDateTimeMadrid(window.endDatetime)}</Text>
+                    <Text style={styles.windowText}>{formatDateTimeMadrid(window.startDatetime)}</Text>
+                    <Text style={styles.caption}>hasta {formatDateTimeMadrid(window.endDatetime)}</Text>
                   </View>
-                  <View style={styles.windowActions}>
-                    <Button
-                      label="Editar"
-                      size="sm"
-                      variant="secondary"
-                      onPress={() => handleEditAvailabilityWindow(window.id)}
-                      disabled={availabilityWindowsSaving}
-                    />
-                    <Button
-                      label="Eliminar"
-                      size="sm"
-                      variant="dangerGhost"
-                      onPress={() => void handleDeleteAvailabilityWindow(window.id)}
-                      disabled={availabilityWindowsSaving}
-                    />
-                  </View>
+                </View>
+                <View style={styles.windowActions}>
+                  <Button
+                    label="Editar"
+                    size="sm"
+                    icon="create-outline"
+                    variant="secondary"
+                    onPress={() => handleEditAvailabilityWindow(window.id)}
+                    disabled={availabilityWindowsSaving}
+                  />
+                  <Button
+                    label="Eliminar"
+                    size="sm"
+                    icon="trash-outline"
+                    variant="dangerGhost"
+                    onPress={() => void handleDeleteAvailabilityWindow(window.id)}
+                    disabled={availabilityWindowsSaving}
+                  />
                 </View>
               </Card>
             ))}
@@ -1477,8 +1479,7 @@ const styles = StyleSheet.create({
   windowRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacingTokens.md,
-    flexWrap: 'wrap'
+    gap: spacingTokens.md
   },
   windowIcon: {
     width: 36,
@@ -1495,6 +1496,7 @@ const styles = StyleSheet.create({
   },
   windowActions: {
     flexDirection: 'row',
+    justifyContent: 'flex-end',
     gap: spacingTokens.sm
   }
 });
