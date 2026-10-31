@@ -18,7 +18,7 @@ type AddressSearchProps = {
 
 /** Buscador de dirección con sugerencias del backend (Nominatim). */
 export function AddressSearch({ value, selected, onChange, onSelect, onClear, placeholder, label, required, error: fieldError }: AddressSearchProps) {
-  const { suggestions, loading, error } = useGeocodingSuggestions(selected ? '' : value);
+  const { suggestions, loading, error, searched } = useGeocodingSuggestions(selected ? '' : value);
 
   return (
     <View style={styles.addressSearch}>
@@ -45,6 +45,9 @@ export function AddressSearch({ value, selected, onChange, onSelect, onClear, pl
         hint={selected ? 'Ubicación seleccionada' : undefined}
       />
       {error ? <Text style={styles.addressError}>{error}</Text> : null}
+      {!selected && !loading && !error && searched && suggestions.length === 0 ? (
+        <Text style={styles.addressEmpty}>Sin resultados. Prueba con otra dirección o una ciudad.</Text>
+      ) : null}
       {!selected && suggestions.length > 0 ? (
         <View style={styles.suggestions}>
           {suggestions.map((suggestion, index) => (
@@ -76,6 +79,10 @@ const styles = StyleSheet.create({
   },
   addressError: {
     color: colorTokens.alertText,
+    ...typographyTokens.caption
+  },
+  addressEmpty: {
+    color: colorTokens.textMuted,
     ...typographyTokens.caption
   },
   suggestions: {

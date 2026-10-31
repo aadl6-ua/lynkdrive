@@ -5,15 +5,19 @@ type UseGeocodingSuggestionsResult = {
   suggestions: GeocodingSuggestion[];
   loading: boolean;
   error: string | null;
+  /** La búsqueda de la consulta actual terminó sin errores (permite distinguir "sin resultados"). */
+  searched: boolean;
 };
 
 export function useGeocodingSuggestions(query: string): UseGeocodingSuggestionsResult {
   const [suggestions, setSuggestions] = useState<GeocodingSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searched, setSearched] = useState(false);
 
   useEffect(() => {
     const trimmed = query.trim();
+    setSearched(false);
 
     if (trimmed.length < 3) {
       setSuggestions([]);
@@ -33,11 +37,12 @@ export function useGeocodingSuggestions(query: string): UseGeocodingSuggestionsR
 
           if (!isCancelled) {
             setSuggestions(data);
+            setSearched(true);
           }
         } catch {
           if (!isCancelled) {
             setSuggestions([]);
-            setError('No se pudieron cargar sugerencias de direccion.');
+            setError('No se pudieron cargar sugerencias de dirección. Inténtalo de nuevo.');
           }
         } finally {
           if (!isCancelled) {
@@ -58,6 +63,7 @@ export function useGeocodingSuggestions(query: string): UseGeocodingSuggestionsR
   return {
     suggestions,
     loading,
-    error
+    error,
+    searched
   };
 }
