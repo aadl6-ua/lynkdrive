@@ -248,6 +248,9 @@ describe('AdminService', () => {
             { id: 'image-2', checklist_id: 'checklist-1', image_url: 'no-es-una-referencia' }
           ];
         }
+        if (sql.includes('FROM booking_messages m')) {
+          return [{ id: 'm1', sender_id: 'user-1', body: 'Hola', created_at: new Date(), read_at: null, sender_first_name: 'Ana', sender_last_name: 'López' }];
+        }
         return [];
       });
 
@@ -257,6 +260,9 @@ describe('AdminService', () => {
       expect(result.history.map((entry) => entry.toStatus)).toEqual(['pending', 'accepted']);
       expect(result.checklists[0].images.map((image) => image.file.url)).toEqual(['https://signed.example/doc', null]);
       expect(createSignedUrl).toHaveBeenCalledWith('b/1.jpg', expect.any(Number));
+      expect(result.messages).toEqual([
+        expect.objectContaining({ id: 'm1', body: 'Hola', readAt: null, sender: { id: 'user-1', firstName: 'Ana', lastName: 'López' } })
+      ]);
     });
 
     it('lanza 404 si la reserva no existe', async () => {

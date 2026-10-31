@@ -1102,3 +1102,43 @@ textarea.input {
     margin: 0 -24px;
   }
 }
+
+/* Chat de la reserva (solo lectura) */
+.chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+.chat-log__item {
+  align-self: flex-start;
+  max-width: 80%;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.chat-log__item--owner {
+  align-self: flex-end;
+  background: var(--color-bg);
+}
+
+.chat-log__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.chat-log__body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
