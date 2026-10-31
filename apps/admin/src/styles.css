@@ -107,7 +107,8 @@ a:hover {
 
 .shell {
   display: grid;
-  grid-template-columns: 248px 1fr;
+  /* minmax(0, 1fr): una tabla ancha no debe ensanchar la columna (scroll dentro de .table-wrap). */
+  grid-template-columns: 248px minmax(0, 1fr);
   min-height: 100vh;
   /* El fondo pinta la columna lateral aunque el contenido sea más alto que el sidebar sticky. */
   background: linear-gradient(to right, var(--color-primary) 248px, var(--color-bg) 248px);
@@ -1049,7 +1050,7 @@ textarea.input {
 
 @media (max-width: 767px) {
   .shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     background: var(--color-bg);
   }
 
