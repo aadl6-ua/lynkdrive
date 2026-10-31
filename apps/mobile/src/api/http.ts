@@ -20,3 +20,29 @@ httpClient.interceptors.request.use((config) => {
 
   return config;
 });
+
+// Mensaje del guard de la API para usuarios bloqueados desde el backoffice.
+export const ACCOUNT_BLOCKED_MESSAGE = 'Cuenta bloqueada por la administración';
+
+type AccountBlockedListener = () => void;
+const accountBlockedListeners = new Set<AccountBlockedListener>();
+
+/** Avisa cuando la API rechaza una petición porque la cuenta está bloqueada. */
+export const onAccountBlocked = (listener: AccountBlockedListener): (() => void) => {
+  accountBlockedListeners.add(listener);
+  return () => {
+    accountBlockedListeners.delete(listener);
+  };
+};
+
+httpClient.interceptors.response.use(undefined, (error: unknown) => {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { message?: unknown } | undefined;
+
+    if (error.response?.status === 403 && data?.message === ACCOUNT_BLOCKED_MESSAGE) {
+      accountBlockedListeners.forEach((listener) => listener());
+    }
+  }
+
+  return Promise.reject(error);
+});

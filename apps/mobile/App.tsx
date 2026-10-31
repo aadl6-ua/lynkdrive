@@ -14,6 +14,8 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { TabBar } from './src/app/components/TabBar';
 import { colorTokens, layoutTokens, spacingTokens, typographyTokens } from './src/app/theme/tokens';
 import { AppTabKey } from './src/app/types';
+import { onAccountBlocked } from './src/api/http';
+import { AccountBlockedScreen } from './src/features/auth/AccountBlockedScreen';
 import { AuthScreen } from './src/features/auth/AuthScreen';
 import { getWebRecoveryTokens, PasswordResetScreen } from './src/features/auth/PasswordResetScreen';
 import { ExploreScreen } from './src/features/explore/ExploreScreen';
@@ -50,11 +52,20 @@ function AppShell() {
   const bottomPadding = isDesktopLike ? insets.bottom : layoutTokens.bottomTabHeight + insets.bottom;
 
   const fetchMyProfile = useUserProfileStore((state) => state.fetchMyProfile);
-  const { userId: authUserId, hasHydrated, hydrateSession } = useAuthStore();
+  const { userId: authUserId, hasHydrated, hydrateSession, signOut } = useAuthStore();
+  const [accountBlocked, setAccountBlocked] = useState(false);
 
   useEffect(() => {
     void hydrateSession();
   }, [hydrateSession]);
+
+  // La API responde 403 a las cuentas bloqueadas desde el backoffice: en vez de errores
+  // sueltos en cada pantalla se muestra un aviso único con la opción de cerrar sesión.
+  useEffect(() => onAccountBlocked(() => setAccountBlocked(true)), []);
+
+  useEffect(() => {
+    setAccountBlocked(false);
+  }, [authUserId]);
 
   const openTripsTab = useCallback(() => setActiveTab('trips'), []);
   usePushNotifications(authUserId, openTripsTab);
@@ -96,6 +107,15 @@ function AppShell() {
         <AuthScreen topInset={insets.top} bottomInset={insets.bottom} />
         <ToastHost />
         <ConfirmHost />
+        <StatusBar style="dark" />
+      </View>
+    );
+  }
+
+  if (accountBlocked) {
+    return (
+      <View style={styles.container}>
+        <AccountBlockedScreen topInset={insets.top} onSignOut={() => void signOut()} />
         <StatusBar style="dark" />
       </View>
     );
