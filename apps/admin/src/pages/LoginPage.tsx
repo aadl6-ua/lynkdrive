@@ -55,7 +55,7 @@ export function LoginPage({ initialError, onSignedIn }: { initialError?: string;
               onChange={(e) => setPassword(e.target.value)}
             />
           </label>
-          {error ? <p className="form-error">{error}</p> : null}
+          {error ? <p className="form-error" role="alert">{error}</p> : null}
           <button className="btn btn--primary btn--block" type="submit" disabled={busy}>
             {busy ? 'Entrando…' : 'Entrar'}
           </button>

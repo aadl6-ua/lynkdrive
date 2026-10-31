@@ -57,11 +57,11 @@ export function UsersPage() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Nombre</th>
-                      <th>Email</th>
-                      <th>Teléfono</th>
-                      <th>Estado</th>
-                      <th>Alta</th>
+                      <th scope="col">Nombre</th>
+                      <th scope="col">Email</th>
+                      <th scope="col">Teléfono</th>
+                      <th scope="col">Estado</th>
+                      <th scope="col">Alta</th>
                     </tr>
                   </thead>
                   <tbody>

@@ -32,13 +32,13 @@ export function BookingsPage() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Reserva</th>
-                      <th>Vehículo</th>
-                      <th>Conductor</th>
-                      <th>Propietario</th>
-                      <th>Inicio</th>
-                      <th>Total</th>
-                      <th>Estado</th>
+                      <th scope="col">Reserva</th>
+                      <th scope="col">Vehículo</th>
+                      <th scope="col">Conductor</th>
+                      <th scope="col">Propietario</th>
+                      <th scope="col">Inicio</th>
+                      <th scope="col">Total</th>
+                      <th scope="col">Estado</th>
                     </tr>
                   </thead>
                   <tbody>

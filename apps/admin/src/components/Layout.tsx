@@ -41,7 +41,7 @@ export function Layout({
         </div>
         <nav className="nav" aria-label="Secciones">
           {NAV_ITEMS.map((item) => (
-            <a key={item.path} href={href(item.path)} className={isActive(path, item.path) ? 'nav__item nav__item--active' : 'nav__item'}>
+            <a key={item.path} href={href(item.path)} aria-current={isActive(path, item.path) ? "page" : undefined} className={isActive(path, item.path) ? 'nav__item nav__item--active' : 'nav__item'}>
               {item.label}
             </a>
           ))}

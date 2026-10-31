@@ -1102,3 +1102,9 @@ textarea.input {
     margin: 0 -24px;
   }
 }
+
+/* Foco visible para navegación por teclado (no aparece con ratón). */
+:where(a, button, select, textarea, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent-2);
+  outline-offset: 2px;
+}
