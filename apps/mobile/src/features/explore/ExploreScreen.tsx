@@ -1072,6 +1072,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
                   onPress={() => handleOpenVehicleDetails(vehicle.id)}
                   accessibilityLabel={`${vehicle.brand} ${vehicle.model}, ${formatPriceCompact(vehicle.pricePerDay)} por día`}
                   accessibilityHint="Abre la ficha del vehículo"
+                  accessibilityRole="link"
                   style={[styles.vehicleCard, { width: cardWidth }]}
                 >
                   <View>
