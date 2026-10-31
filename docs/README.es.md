@@ -27,6 +27,7 @@ LynkDrive conecta a ambas partes. El propietario publica su coche con fotos, pre
 - Búsqueda de dirección mediante el endpoint de geocoding de la API (Nominatim), sin introducir coordenadas.
 - Galería con foto principal y ventanas de disponibilidad.
 - Activar/desactivar anuncios; borrado lógico.
+- Panel "Mis ingresos" (`GET /api/earnings/mine`): neto del mes actual, mes anterior, año y total (calendario Europe/Madrid), desglose por vehículo y por reserva (bruto, comisión, neto, estado de reserva y de pago al propietario) y filtro opcional `from`/`to`.
 
 **Conductores (Explorar)**
 - Búsqueda por radio alrededor del usuario (PostGIS `ST_DWithin`) en lista y mapa (Leaflet en web, `react-native-maps` en nativo).
@@ -221,7 +222,6 @@ BASE_URL=http://localhost:3000/api ./scripts/smoke_bookings.sh
 
 ## Hoja de ruta
 
-- Panel "Mis ingresos".
 - Chat interno.
 - Verificación de identidad fuerte (eIDAS / DNIe / Cl@ve).
 

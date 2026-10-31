@@ -20,6 +20,7 @@ import { VehiclesModule } from './vehicles/vehicles.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { EarningsModule } from './earnings/earnings.module';
 
 @Module({
   imports: [
@@ -65,7 +66,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     VehiclesModule,
     UploadsModule,
     GeocodingModule,
-    AdminModule
+    AdminModule,
+    EarningsModule
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }]

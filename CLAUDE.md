@@ -63,6 +63,14 @@
     - Ambas apps importan el paquete **solo con `import type`** (sin impacto en runtime ni en el bundle). El paquete se compila a `dist/` con su script `prepare` en `npm install`/`npm ci`; si se cambia, ejecutar `npm run build -w @lynkdrive/shared` antes de typecheck/tests. Metro lo resuelve vía el symlink de workspaces (verificado con import en runtime).
     - Cualquier cambio en la forma de una respuesta o petición de la API debe reflejarse primero en `packages/shared`.
     - CI se ejecuta también en `integracion` e incluye el export web de mobile (`npm run build -w @lynkdrive/mobile`).
+- **Panel Mis ingresos (2026-10-31):**
+    - Endpoint `GET /api/earnings/mine` (JWT; solo reservas de vehículos cuyo `owner_id` es el `sub`, incluidos vehículos con soft-delete). Módulo `apps/api/src/earnings` de solo lectura.
+    - Cuentan solo reservas `paid_confirmed`, `in_progress` y `completed`. Las `cancelled` no cuentan (aunque tuvieran reembolso parcial): el importe reembolsado no se persiste en BD, así que no se puede calcular de forma fiable.
+    - Importes: bruto = `total_price`; comisión = `platform_fee` si es > 0, si no `STRIPE_APPLICATION_FEE_PERCENT` % del bruto (misma regla que la `application_fee` de Stripe Connect; se aplica también en `prototype` como estimación); neto = bruto - comisión. Cálculo en céntimos.
+    - Periodos (`summary.currentMonth`, `previousMonth`, `currentYear`, `total`) naturales en **Europe/Madrid**, imputando cada reserva por su `start_datetime`, siempre sobre todas las reservas (no les afecta el rango).
+    - Filtro opcional `from`/`to` (ISO o `YYYY-MM-DD`; `to` sin hora incluye el día completo en UTC) sobre `start_datetime`: afecta a `rangeTotals`, `byVehicle` y `bookings`. Fechas inválidas o `from > to` → 400.
+    - Respuesta: `{ currency: 'EUR', timeZone, mode, feePercent, range, summary, rangeTotals, byVehicle[], bookings[] }`; cada reserva incluye fechas, vehículo, conductor resumido (`displayName` = nombre + inicial del apellido), bruto, comisión, neto, `status` y `payoutStatus`.
+    - Mobile: tarjeta "Mis ingresos" en Mis Vehículos que abre pantalla secundaria full-view `apps/mobile/src/features/earnings/EarningsScreen.tsx` (volver + back de Android), con tarjetas de resumen, selector de rango (Todo / 90 días / Este año), desglose por vehículo e historial; skeleton, vacío con CTA "Publicar vehículo", error con reintentar y pull-to-refresh. En `prototype` muestra aviso de que no se mueve dinero real.
 
 ---
 
@@ -230,6 +238,8 @@ Plataforma **peer-to-peer (P2P) de alquiler de vehículos entre particulares**, 
             - `POST /api/payments/webhook` (público, sin JWT; firma verificada con `STRIPE_WEBHOOK_SECRET` sobre raw body)
             - `GET /api/payments/connect/return` y `/refresh` (páginas públicas de retorno del onboarding)
             - Reembolsos automáticos al cancelar desde `paid_confirmed` (ver Decisiones Cerradas).
+    - Earnings (JWT requerido; solo datos del propietario autenticado):
+        - `GET /api/earnings/mine?from=...&to=...` (resumen por periodos, desglose por vehículo e historial por reserva; ver Decisiones Cerradas)
 - Frontend mobile:
     - Cliente Supabase (`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`).
     - Gestión de sesión: `hydrateSession`, `signIn`, `signUp`, `signOut`.

@@ -60,6 +60,7 @@ LynkDrive connects both sides. Owners publish their car with photos, price and a
 - Address search through the API's geocoding endpoint (OpenStreetMap Nominatim), so nobody types coordinates.
 - Photo gallery with a primary image, and availability windows that define when the car can be booked.
 - Activate / deactivate listings; soft-delete everywhere.
+- "My earnings" panel (`GET /api/earnings/mine`): net earnings for this month, last month, this year and all time (Europe/Madrid calendar), breakdown per vehicle and per booking (gross, platform fee, net, booking and payout status), with an optional `from`/`to` date range.
 
 **Drivers (Explore)**
 - Radius search around the user's location (PostGIS `ST_DWithin`) with list and map views (Leaflet on web, `react-native-maps` on native).
@@ -134,7 +135,7 @@ flowchart LR
 
     subgraph API["NestJS API (/api)"]
         Guard["SupabaseJwtAuthGuard<br/>(jose + JWKS)"]
-        Modules["Modules: users, vehicles, vehicle-images,<br/>availability-windows, bookings, payments,<br/>booking-checklists, checklist-images,<br/>reviews, uploads, geocoding"]
+        Modules["Modules: users, vehicles, vehicle-images,<br/>availability-windows, bookings, payments,<br/>booking-checklists, checklist-images,<br/>reviews, uploads, geocoding, earnings"]
         Guard --> Modules
     end
 
@@ -531,6 +532,7 @@ lynkdrive/
 │   │       ├── vehicle-availability-windows/
 │   │       ├── bookings/         # booking state machine, overlap check, price snapshot
 │   │       ├── payments/         # Stripe PaymentIntents / prototype mode
+│   │       ├── earnings/         # owner "My earnings" panel (read-only aggregates)
 │   │       ├── booking-checklists/
 │   │       ├── checklist-images/
 │   │       ├── reviews/
@@ -603,7 +605,6 @@ The payments smoke test works in both modes: real Stripe (with `STRIPE_SECRET_KE
 
 ## Roadmap
 
-- "My earnings" panel for owners.
 - In-app chat.
 - Strong identity verification (eIDAS / DNIe / Cl@ve) instead of manual document review.
 
