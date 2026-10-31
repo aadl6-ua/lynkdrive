@@ -141,6 +141,10 @@ ALTER TABLE users
     ADD COLUMN blocked_at TIMESTAMP WITH TIME ZONE,
     ADD COLUMN blocked_reason VARCHAR(500);
 
+-- Set when an admin deactivates the listing; the owner cannot reactivate it
+ALTER TABLE vehicles
+    ADD COLUMN disabled_by_admin_at TIMESTAMP WITH TIME ZONE;
+
 ALTER TABLE reviews
     ADD COLUMN hidden_at TIMESTAMP WITH TIME ZONE,
     ADD COLUMN hidden_reason VARCHAR(500);

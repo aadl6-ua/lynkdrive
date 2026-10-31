@@ -128,7 +128,19 @@ describe('Backoffice admin e2e', () => {
     const list = await asAdmin(api().get('/api/admin/vehicles?status=inactive&search=ibiza')).expect(200);
     expect(list.body.total).toBe(1);
 
-    await asAdmin(api().put(`/api/admin/vehicles/${VEHICLE_ID}/status`)).send({ status: 'active' }).expect(200);
+    expect(res.body.disabledByAdmin).toBe(true);
+
+    // El propietario no puede reactivar un vehículo moderado.
+    await api()
+      .put(`/api/vehicles/${VEHICLE_ID}`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ status: 'active' })
+      .expect(403);
+
+    const reactivated = await asAdmin(api().put(`/api/admin/vehicles/${VEHICLE_ID}/status`))
+      .send({ status: 'active' })
+      .expect(200);
+    expect(reactivated.body.disabledByAdmin).toBe(false);
   });
 
   it('oculta reseñas: dejan de contar en el perfil público', async () => {

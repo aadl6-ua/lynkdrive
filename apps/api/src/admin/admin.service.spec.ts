@@ -186,6 +186,24 @@ describe('AdminService', () => {
   });
 
   describe('setVehicleStatus', () => {
+    it('desactivar marca el vehículo como moderado y activar levanta la marca', async () => {
+      const { service, calls } = buildService((sql) => {
+        if (sql.startsWith('UPDATE vehicles')) return [[{ id: 'vehicle-1' }], 1];
+        if (sql.includes('FROM vehicles v')) return [{ id: 'vehicle-1', status: 'inactive', disabled_by_admin_at: new Date() }];
+        return [];
+      });
+
+      const result = await service.setVehicleStatus('vehicle-1', 'inactive');
+      await service.setVehicleStatus('vehicle-1', 'active');
+
+      const updates = calls.filter((call) => call.sql.startsWith('UPDATE vehicles'));
+      expect(updates.map((call) => call.params)).toEqual([
+        ['vehicle-1', 'inactive', true],
+        ['vehicle-1', 'active', false]
+      ]);
+      expect(result.disabledByAdmin).toBe(true);
+    });
+
     it('lanza 404 si el vehículo no existe', async () => {
       const { service } = buildService(() => [[], 0]);
       await expect(service.setVehicleStatus('missing', 'inactive')).rejects.toBeInstanceOf(NotFoundException);

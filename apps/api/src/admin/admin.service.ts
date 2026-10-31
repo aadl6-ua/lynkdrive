@@ -266,7 +266,7 @@ export class AdminService {
     const from = `FROM vehicles v INNER JOIN users u ON u.id = v.owner_id WHERE ${where.join(' AND ')}`;
 
     return this.paginate(
-      `SELECT v.id, v.brand, v.model, v.year, v.license_plate, v.price_per_day, v.location_address, v.status,
+      `SELECT v.id, v.brand, v.model, v.year, v.license_plate, v.price_per_day, v.location_address, v.status, v.disabled_by_admin_at,
               v.created_at, v.owner_id, u.first_name AS owner_first_name, u.last_name AS owner_last_name,
               (SELECT image_url FROM vehicle_images vi WHERE vi.vehicle_id = v.id
                ORDER BY vi.is_primary DESC, vi.created_at ASC LIMIT 1) AS primary_image_url,
@@ -281,8 +281,12 @@ export class AdminService {
 
   async setVehicleStatus(id: string, status: 'active' | 'inactive') {
     const rows = await this.dataSource.query(
-      `UPDATE vehicles SET status = $2 WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
-      [id, status]
+      // Desactivar marca el vehículo como moderado (el propietario no puede reactivarlo);
+      // activarlo desde aquí levanta la marca.
+      `UPDATE vehicles SET status = $2,
+         disabled_by_admin_at = CASE WHEN $3 THEN COALESCE(disabled_by_admin_at, NOW()) ELSE NULL END
+       WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
+      [id, status, status === 'inactive']
     );
 
     if (!this.firstReturned(rows)) {
@@ -290,7 +294,7 @@ export class AdminService {
     }
 
     const result = await this.dataSource.query(
-      `SELECT v.id, v.brand, v.model, v.year, v.license_plate, v.price_per_day, v.location_address, v.status,
+      `SELECT v.id, v.brand, v.model, v.year, v.license_plate, v.price_per_day, v.location_address, v.status, v.disabled_by_admin_at,
               v.created_at, v.owner_id, u.first_name AS owner_first_name, u.last_name AS owner_last_name,
               NULL AS primary_image_url, (SELECT COUNT(*) FROM bookings b WHERE b.vehicle_id = v.id) AS bookings
        FROM vehicles v INNER JOIN users u ON u.id = v.owner_id WHERE v.id = $1`,
@@ -684,6 +688,7 @@ export class AdminService {
       pricePerDay: Number(row.price_per_day),
       locationAddress: row.location_address as string,
       status: row.status as 'active' | 'inactive',
+      disabledByAdmin: Boolean(row.disabled_by_admin_at),
       primaryImageUrl: this.publicUrlOrNull(row.primary_image_url),
       bookings: Number(row.bookings ?? 0),
       createdAt: row.created_at as Date,

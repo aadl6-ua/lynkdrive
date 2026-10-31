@@ -44,7 +44,7 @@ LynkDrive conecta a ambas partes. El propietario publica su coche con fotos, pre
 **Backoffice de administración (web)**
 - Panel de métricas: usuarios, vehículos, reservas por estado e ingresos (volumen cobrado, comisión estimada y últimos seis meses).
 - Usuarios: búsqueda, revisión de documentos con URLs firmadas de caducidad corta, verificar o retirar verificación y bloquear o desbloquear (una cuenta bloqueada recibe `403` en toda la API y queda baneada en Supabase Auth).
-- Vehículos: activar y desactivar anuncios. Reseñas: ocultar y volver a mostrar con motivo de moderación (las ocultas no cuentan en la valoración).
+- Vehículos: activar y desactivar anuncios (si lo desactiva un admin, el propietario no puede reactivarlo). Reseñas: ocultar y volver a mostrar con motivo de moderación (las ocultas no cuentan en la valoración).
 - Reservas: historial completo de estados (registrado por un trigger en la BD) y fotos de los checklists mediante URLs firmadas.
 - Incidencias: crear, listar, cambiar de estado y añadir notas internas.
 
@@ -160,7 +160,7 @@ Las variables de entorno de la API y de la app están documentadas en el [README
 
 `apps/admin` es una SPA sencilla con Vite + React + TypeScript para operar la plataforma. Inicia sesión con las mismas cuentas de Supabase Auth que la app y solo consume la API bajo `/api/admin`, protegida por `AdminGuard`: JWT de Supabase válido **y** `users.is_admin = true` en la base de datos (el rol nunca se toma de los claims del token).
 
-**1. Aplicar la migración.** `infra/db/migrations/202610310900_admin_backoffice.sql` (idempotente) añade `users.is_admin`, `users.blocked_at`, las columnas de moderación de reseñas, la tabla `booking_status_history` con su trigger y las tablas `incidents` e `incident_notes`:
+**1. Aplicar la migración.** `infra/db/migrations/202610310900_admin_backoffice.sql` (idempotente) añade `users.is_admin`, `users.blocked_at`, `vehicles.disabled_by_admin_at`, las columnas de moderación de reseñas, la tabla `booking_status_history` con su trigger y las tablas `incidents` e `incident_notes`:
 
 ```bash
 npm run db:migrate:remote

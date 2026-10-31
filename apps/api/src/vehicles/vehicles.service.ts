@@ -330,12 +330,25 @@ export class VehiclesService {
       throw new ForbiddenException('You do not own this vehicle');
     }
 
+    if (updateVehicleDto.status === 'active' && (await this.isDisabledByAdmin(id))) {
+      throw new ForbiddenException('Vehículo desactivado por la administración: contacta con soporte para reactivarlo');
+    }
+
     const sanitizedUpdate = {
       ...updateVehicleDto,
       ownerId
     };
 
     return this.update(id, sanitizedUpdate);
+  }
+
+  private async isDisabledByAdmin(id: string): Promise<boolean> {
+    const rows = await this.vehiclesRepository.query(
+      `SELECT disabled_by_admin_at FROM vehicles WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+
+    return Boolean((rows[0] as { disabled_by_admin_at: Date | null } | undefined)?.disabled_by_admin_at);
   }
 
   async softDelete(id: string): Promise<void> {

@@ -77,6 +77,7 @@ export type AdminVehicle = {
   pricePerDay: number;
   locationAddress: string;
   status: 'active' | 'inactive';
+  disabledByAdmin: boolean;
   primaryImageUrl: string | null;
   bookings: number;
   createdAt: string;

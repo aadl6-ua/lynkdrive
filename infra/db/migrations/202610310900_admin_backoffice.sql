@@ -15,6 +15,12 @@ ALTER TABLE public.users
 CREATE INDEX IF NOT EXISTS idx_users_is_admin ON public.users (id) WHERE is_admin = TRUE;
 
 -- ------------------------------------------------------------------
+-- Vehículos: desactivación por la administración (el propietario no puede reactivarlo)
+-- ------------------------------------------------------------------
+ALTER TABLE public.vehicles
+  ADD COLUMN IF NOT EXISTS disabled_by_admin_at TIMESTAMP WITH TIME ZONE;
+
+-- ------------------------------------------------------------------
 -- Reseñas: moderación (ocultar sin borrar)
 -- ------------------------------------------------------------------
 ALTER TABLE public.reviews

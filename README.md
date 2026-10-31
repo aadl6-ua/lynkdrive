@@ -77,7 +77,7 @@ LynkDrive connects both sides. Owners publish their car with photos, price and a
 **Admin back office (web)**
 - Dashboard with users, vehicles, bookings by status and revenue (gross volume, estimated platform fee, last six months).
 - Users: search, document review through short-lived signed URLs, verify / unverify, block / unblock (blocked accounts get `403` on the whole API and are banned in Supabase Auth).
-- Vehicles: activate / deactivate listings. Reviews: hide / show with a moderation reason (hidden reviews do not count in ratings).
+- Vehicles: activate / deactivate listings (a listing deactivated by an admin cannot be reactivated by its owner). Reviews: hide / show with a moderation reason (hidden reviews do not count in ratings).
 - Bookings: full status history (recorded by a database trigger) and check-in/check-out evidence photos via signed URLs.
 - Incidents: create, list, change status and keep internal notes.
 
@@ -255,6 +255,7 @@ erDiagram
         enum transmission
         int seats
         enum status "active | inactive"
+        timestamptz disabled_by_admin_at
         timestamptz deleted_at
     }
     VEHICLE_IMAGES {
@@ -408,7 +409,7 @@ npm run test:e2e   # API e2e tests against a local Postgres + PostGIS (see Testi
 
 `apps/admin` is a small Vite + React single-page app for operating the platform. It signs in with the same Supabase Auth accounts as the mobile app and only talks to the API under `/api/admin`, which is protected by `AdminGuard`: a valid Supabase JWT **and** `users.is_admin = true` in the database (token claims are never trusted for the role).
 
-**1. Apply the migration.** `infra/db/migrations/202610310900_admin_backoffice.sql` (idempotent) adds `users.is_admin`, `users.blocked_at`, review moderation columns, the `booking_status_history` table with its trigger, and the `incidents` / `incident_notes` tables:
+**1. Apply the migration.** `infra/db/migrations/202610310900_admin_backoffice.sql` (idempotent) adds `users.is_admin`, `users.blocked_at`, `vehicles.disabled_by_admin_at`, review moderation columns, the `booking_status_history` table with its trigger, and the `incidents` / `incident_notes` tables:
 
 ```bash
 npm run db:migrate:remote

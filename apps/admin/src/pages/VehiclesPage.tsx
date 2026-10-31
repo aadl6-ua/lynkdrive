@@ -85,9 +85,13 @@ export function VehiclesPage() {
                         <td>{formatMoney(vehicle.pricePerDay)}</td>
                         <td>{vehicle.bookings}</td>
                         <td>
-                          <Badge tone={vehicle.status === 'active' ? 'success' : 'neutral'}>
-                            {vehicle.status === 'active' ? 'Activo' : 'Inactivo'}
-                          </Badge>
+                          {vehicle.disabledByAdmin ? (
+                            <Badge tone="danger">Retirado por admin</Badge>
+                          ) : (
+                            <Badge tone={vehicle.status === 'active' ? 'success' : 'neutral'}>
+                              {vehicle.status === 'active' ? 'Activo' : 'Inactivo'}
+                            </Badge>
+                          )}
                         </td>
                         <td className="table__actions">
                           <button className={`btn btn--small ${vehicle.status === 'active' ? 'btn--secondary' : 'btn--primary'}`} onClick={() => setPending(vehicle)}>
@@ -109,7 +113,7 @@ export function VehiclesPage() {
           title={pending.status === 'active' ? 'Desactivar vehículo' : 'Activar vehículo'}
           description={
             pending.status === 'active'
-              ? `${pending.brand} ${pending.model} (${pending.licensePlate}) dejará de aparecer en la búsqueda. Las reservas existentes no se modifican.`
+              ? `${pending.brand} ${pending.model} (${pending.licensePlate}) dejará de aparecer en la búsqueda y el propietario no podrá reactivarlo. Las reservas existentes no se modifican.`
               : `${pending.brand} ${pending.model} (${pending.licensePlate}) volverá a aparecer en la búsqueda.`
           }
           confirmLabel={pending.status === 'active' ? 'Desactivar' : 'Activar'}
