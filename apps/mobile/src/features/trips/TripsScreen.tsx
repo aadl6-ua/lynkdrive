@@ -1319,7 +1319,10 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
             <KeyValueRow label="Devolución" value={formatDateTimeMadrid(selectedBooking.endDatetime)} />
             <KeyValueRow label="Duración" value={pluralize(days, 'día', 'días')} />
             <KeyValueRow label="Precio por día" value={formatCurrencyEUR(selectedBooking.pricePerDayAtBooking)} />
-            <KeyValueRow label="Comisión de servicio" value={formatCurrencyEUR(selectedBooking.platformFee)} />
+            {/* Sin comisión guardada en la reserva no se muestra un 0,00 € engañoso (Mis ingresos la estima). */}
+            {Number(selectedBooking.platformFee) > 0 ? (
+              <KeyValueRow label="Comisión de servicio" value={formatCurrencyEUR(selectedBooking.platformFee)} />
+            ) : null}
             {isOwner ? <KeyValueRow label="Cobro al propietario" value={PAYOUT_STATUS_LABEL[selectedBooking.payoutStatus]} /> : null}
             <KeyValueRow label="Total" value={formatCurrencyEUR(selectedBooking.totalPrice)} emphasis last />
           </View>
