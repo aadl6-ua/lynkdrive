@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, QueryFailedError, Repository } from 'typeorm';
 import {
   getStorageBuckets,
   getSupabaseAdminClient,
@@ -69,7 +69,7 @@ export class UsersService {
       deletedAt: null
     });
 
-    const savedUser = await this.usersRepository.save(userToSave);
+    const savedUser = await this.saveUser(userToSave);
 
     return this.toResponseDto(savedUser);
   }
@@ -112,7 +112,7 @@ export class UsersService {
       updatedUser.isVerified = false;
     }
 
-    const savedUser = await this.usersRepository.save(updatedUser);
+    const savedUser = await this.saveUser(updatedUser);
 
     await this.removeReplacedFiles(id, [
       [previous.avatarUrl, savedUser.avatarUrl],
@@ -215,6 +215,26 @@ export class UsersService {
       isVerified: user.isVerified,
       createdAt: user.createdAt
     };
+  }
+
+  /** Guarda el usuario traduciendo el teléfono duplicado (índice único) a un 409 legible. */
+  private async saveUser(user: UserEntity): Promise<UserEntity> {
+    try {
+      return await this.usersRepository.save(user);
+    } catch (error) {
+      const driverError = (error as QueryFailedError & { driverError?: { code?: string; constraint?: string } })
+        .driverError;
+
+      if (
+        error instanceof QueryFailedError &&
+        driverError?.code === '23505' &&
+        driverError.constraint === 'users_phone_number_key'
+      ) {
+        throw new ConflictException('Ese teléfono ya está asociado a otra cuenta.');
+      }
+
+      throw error;
+    }
   }
 
   private toResponseDto(user: UserEntity): UserResponseDto {
