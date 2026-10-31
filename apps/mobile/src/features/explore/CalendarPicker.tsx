@@ -3,20 +3,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colorTokens, HIT_SIZE, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 import { getBillableDays, madridWallTimeToDate, pluralize } from '../../shared/format';
+import {
+  AvailabilityWindowItem,
+  BookingItem,
+  DayStatus,
+  getDayStatus,
+  getOwnerDayStatus
+} from './calendarAvailability';
 import { IconButton } from '../../shared/ui';
-
-type AvailabilityWindowItem = {
-  id: string;
-  startDatetime: string;
-  endDatetime: string;
-};
-
-type BookingItem = {
-  id: string;
-  startDatetime: string;
-  endDatetime: string;
-  status: 'pending' | 'accepted' | 'rejected' | 'paid_confirmed' | 'in_progress' | 'completed' | 'cancelled';
-};
 
 type DateRange = {
   startDate: Date | null;
@@ -38,11 +32,8 @@ interface CalendarPickerProps {
   mode?: 'explore' | 'owner';
 }
 
-type DayStatus = 'past' | 'unavailable' | 'partial' | 'available';
 type PickerMode = 'start' | 'end' | null;
 
-const HOUR_MS = 60 * 60 * 1000;
-const OPERATIONAL_BUFFER_MS = 2 * HOUR_MS;
 const MIN_HOUR = 9;
 const MAX_HOUR = 20;
 const WEEK_DAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -60,78 +51,6 @@ const MONTH_NAMES = [
   'Noviembre',
   'Diciembre'
 ];
-
-/** Límites del día de calendario en hora de Madrid (independiente del dispositivo). */
-function getMadridDayBounds(date: Date): { start: number; end: number } {
-  const start = madridWallTimeToDate(date.getFullYear(), date.getMonth(), date.getDate(), 0).getTime();
-  const end = madridWallTimeToDate(date.getFullYear(), date.getMonth(), date.getDate() + 1, 0).getTime();
-  return { start, end };
-}
-
-function getDayStatus(date: Date, availabilityWindows: AvailabilityWindowItem[], bookings: BookingItem[]): DayStatus {
-  const { start: dayStart, end: dayEnd } = getMadridDayBounds(date);
-
-  if (dayEnd <= Date.now()) {
-    return 'past';
-  }
-
-  // Reservas confirmadas (pending/rechazadas/canceladas no bloquean) + 2h operativas.
-  const blocked = bookings
-    .filter((booking) => booking.status !== 'pending' && booking.status !== 'rejected' && booking.status !== 'cancelled')
-    .map((booking) => ({
-      start: new Date(booking.startDatetime).getTime(),
-      end: new Date(booking.endDatetime).getTime() + OPERATIONAL_BUFFER_MS
-    }));
-
-  let longestFreeMs = 0;
-  let totalFreeMs = 0;
-
-  for (const window of availabilityWindows) {
-    const realStart = Math.max(new Date(window.startDatetime).getTime(), dayStart, Date.now());
-    const realEnd = Math.min(new Date(window.endDatetime).getTime(), dayEnd);
-
-    if (realEnd <= realStart) {
-      continue;
-    }
-
-    // Tramos libres dentro de la ventana tras restar bloqueos.
-    const overlaps = blocked
-      .filter((item) => item.start < realEnd && item.end > realStart)
-      .sort((a, b) => a.start - b.start);
-
-    let cursor = realStart;
-
-    for (const item of overlaps) {
-      if (item.start > cursor) {
-        const free = item.start - cursor;
-        totalFreeMs += free;
-        longestFreeMs = Math.max(longestFreeMs, free);
-      }
-
-      cursor = Math.max(cursor, item.end);
-    }
-
-    if (realEnd > cursor) {
-      const free = realEnd - cursor;
-      totalFreeMs += free;
-      longestFreeMs = Math.max(longestFreeMs, free);
-    }
-  }
-
-  if (longestFreeMs >= 10 * HOUR_MS) {
-    return 'available';
-  }
-
-  return totalFreeMs > 0 ? 'partial' : 'unavailable';
-}
-
-function hasOwnerWindow(date: Date, availabilityWindows: AvailabilityWindowItem[]): boolean {
-  const { start, end } = getMadridDayBounds(date);
-
-  return availabilityWindows.some(
-    (window) => new Date(window.startDatetime).getTime() < end && new Date(window.endDatetime).getTime() > start
-  );
-}
 
 const DOT_COLOR: Record<DayStatus, string> = {
   available: colorTokens.success,
@@ -264,11 +183,7 @@ export const CalendarPicker = React.memo(
         const date = new Date(year, month, index + 1);
 
         if (mode === 'owner') {
-          const { end } = getMadridDayBounds(date);
-          if (end <= Date.now()) {
-            return 'past' as DayStatus;
-          }
-          return hasOwnerWindow(date, availabilityWindows) ? ('available' as DayStatus) : ('unavailable' as DayStatus);
+          return getOwnerDayStatus(date, availabilityWindows);
         }
 
         return getDayStatus(date, availabilityWindows, bookings);
