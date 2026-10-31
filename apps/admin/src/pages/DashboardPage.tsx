@@ -46,8 +46,8 @@ export function DashboardPage() {
                   hint="Con DNI y carnet subidos"
                   link={href('/users?filter=pending_verification')}
                 />
-                <Kpi label="Vehículos activos" value={dashboard.vehicles.active} hint={`${dashboard.vehicles.total} publicados`} link={href('/vehicles')} />
-                <Kpi label="Reservas" value={dashboard.bookings.total} hint={`${dashboard.revenue.paidBookings} cobradas`} link={href('/bookings')} />
+                <Kpi label="Vehículos activos" value={dashboard.vehicles.active} hint={`de ${dashboard.vehicles.total} en total`} link={href('/vehicles')} />
+                <Kpi label="Reservas" value={dashboard.bookings.total} hint={dashboard.revenue.paidBookings === 1 ? '1 cobrada' : `${dashboard.revenue.paidBookings} cobradas`} link={href('/bookings')} />
                 <Kpi label="Volumen cobrado" value={formatMoney(dashboard.revenue.gross)} hint={`${formatMoney(dashboard.revenue.grossLast30Days)} en 30 días`} />
                 <Kpi
                   label="Comisión estimada"
@@ -55,7 +55,7 @@ export function DashboardPage() {
                   hint={`${dashboard.revenue.platformFeePercent} % del volumen`}
                 />
                 <Kpi label="Incidencias abiertas" value={dashboard.moderation.openIncidents} link={href('/incidents')} />
-                <Kpi label="Usuarios bloqueados" value={dashboard.users.blocked} hint={`${dashboard.moderation.hiddenReviews} reseñas ocultas`} />
+                <Kpi label="Usuarios bloqueados" value={dashboard.users.blocked} hint={dashboard.moderation.hiddenReviews === 1 ? '1 reseña oculta' : `${dashboard.moderation.hiddenReviews} reseñas ocultas`} />
               </div>
 
               <div className="grid-2">
