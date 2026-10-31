@@ -8,6 +8,7 @@ import {
   BookingItem,
   DayStatus,
   getDayStatus,
+  getFilterDayStatus,
   getOwnerDayStatus
 } from './calendarAvailability';
 import { IconButton } from '../../shared/ui';
@@ -29,7 +30,8 @@ interface CalendarPickerProps {
     endDate: Date | null;
     endHour: number;
   };
-  mode?: 'explore' | 'owner';
+  /** explore: disponibilidad del vehículo; owner: ventanas publicadas; filter: solo fechas (Explorar). */
+  mode?: 'explore' | 'owner' | 'filter';
 }
 
 type PickerMode = 'start' | 'end' | null;
@@ -186,6 +188,10 @@ export const CalendarPicker = React.memo(
           return getOwnerDayStatus(date, availabilityWindows);
         }
 
+        if (mode === 'filter') {
+          return getFilterDayStatus(date);
+        }
+
         return getDayStatus(date, availabilityWindows, bookings);
       });
     }, [availabilityWindows, bookings, daysInMonth, mode, month, year]);
@@ -339,27 +345,30 @@ export const CalendarPicker = React.memo(
                       >
                         {index + 1}
                       </Text>
-                      <View style={[styles.dayDot, { backgroundColor: isEdge ? colorTokens.accent1 : DOT_COLOR[status] }]} />
+                      <View
+                        style={[
+                          styles.dayDot,
+                          { backgroundColor: isEdge ? colorTokens.accent1 : mode === 'filter' ? 'transparent' : DOT_COLOR[status] }
+                        ]}
+                      />
                     </Pressable>
                   </View>
                 );
               })}
             </View>
 
-            <View style={styles.legend}>
-              {mode === 'explore' ? (
-                <>
-                  <LegendItem color={colorTokens.success} label="Disponible" />
-                  <LegendItem color={colorTokens.accent2} label="Parcial" />
-                  <LegendItem color={colorTokens.borderStrong} label="Sin disponibilidad" />
-                </>
-              ) : (
-                <>
-                  <LegendItem color={colorTokens.success} label="Ya tiene disponibilidad" />
-                  <LegendItem color={colorTokens.borderStrong} label="Sin ventana" />
-                </>
-              )}
-            </View>
+            {mode === 'explore' ? (
+              <View style={styles.legend}>
+                <LegendItem color={colorTokens.success} label="Disponible" />
+                <LegendItem color={colorTokens.accent2} label="Parcial" />
+                <LegendItem color={colorTokens.borderStrong} label="Sin disponibilidad" />
+              </View>
+            ) : mode === 'owner' ? (
+              <View style={styles.legend}>
+                <LegendItem color={colorTokens.success} label="Ya tiene disponibilidad" />
+                <LegendItem color={colorTokens.borderStrong} label="Sin ventana" />
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -369,7 +378,7 @@ export const CalendarPicker = React.memo(
             <Text style={styles.summaryText}>
               {formatFieldDate(dateRange.startDate)} · {formatHour(dateRange.startHour)} → {formatFieldDate(dateRange.endDate)} ·{' '}
               {formatHour(dateRange.endHour)}
-              {mode === 'explore' ? `  (${pluralize(summary, 'día', 'días')})` : ''}
+              {mode !== 'owner' ? `  (${pluralize(summary, 'día', 'días')})` : ''}
             </Text>
           </View>
         ) : null}

@@ -96,6 +96,11 @@ export function hasOwnerWindow(date: Date, availabilityWindows: AvailabilityWind
   );
 }
 
+/** Estado del día en el filtro de Explorar: solo se distinguen los días pasados. */
+export function getFilterDayStatus(date: Date): DayStatus {
+  return getMadridDayBounds(date).end <= Date.now() ? 'past' : 'available';
+}
+
 /** Estado del día en modo propietario: solo refleja si hay ventana publicada. */
 export function getOwnerDayStatus(date: Date, availabilityWindows: AvailabilityWindowItem[]): DayStatus {
   const { end } = getMadridDayBounds(date);
