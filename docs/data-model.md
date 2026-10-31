@@ -131,6 +131,52 @@ CREATE TABLE reviews (
 );
 ```
 
+## Back office / Backoffice
+
+Added by `infra/db/migrations/202610310900_admin_backoffice.sql` (idempotent):
+
+```sql
+ALTER TABLE users
+    ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN blocked_at TIMESTAMP WITH TIME ZONE,
+    ADD COLUMN blocked_reason VARCHAR(500);
+
+ALTER TABLE reviews
+    ADD COLUMN hidden_at TIMESTAMP WITH TIME ZONE,
+    ADD COLUMN hidden_reason VARCHAR(500);
+
+-- Filled by trigger trg_booking_status_history (AFTER INSERT OR UPDATE OF status ON bookings)
+CREATE TABLE booking_status_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+    from_status booking_status_enum,
+    to_status booking_status_enum NOT NULL,
+    changed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE incidents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    status VARCHAR(20) DEFAULT 'open' NOT NULL
+        CHECK (status IN ('open', 'in_progress', 'resolved', 'closed')),
+    booking_id UUID REFERENCES bookings(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    vehicle_id UUID REFERENCES vehicles(id) ON DELETE SET NULL,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE incident_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    incident_id UUID NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+    author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    body TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+```
+
 ## Design notes / Notas de diseño
 
 - **Price snapshot**: `bookings` freezes `price_per_day_at_booking`, `platform_fee` and `total_price` at creation time. / Los importes se congelan al crear la reserva.

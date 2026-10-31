@@ -41,6 +41,13 @@ LynkDrive conecta a ambas partes. El propietario publica su coche con fotos, pre
 - Checklists de check-in y check-out (kilometraje, combustible, notas y fotos en bucket privado).
 - Valoraciones cruzadas (1 a 5 estrellas + comentario) al completar el viaje.
 
+**Backoffice de administración (web)**
+- Panel de métricas: usuarios, vehículos, reservas por estado e ingresos (volumen cobrado, comisión estimada y últimos seis meses).
+- Usuarios: búsqueda, revisión de documentos con URLs firmadas de caducidad corta, verificar o retirar verificación y bloquear o desbloquear (una cuenta bloqueada recibe `403` en toda la API y queda baneada en Supabase Auth).
+- Vehículos: activar y desactivar anuncios. Reseñas: ocultar y volver a mostrar con motivo de moderación (las ocultas no cuentan en la valoración).
+- Reservas: historial completo de estados (registrado por un trigger en la BD) y fotos de los checklists mediante URLs firmadas.
+- Incidencias: crear, listar, cambiar de estado y añadir notas internas.
+
 ## Capturas
 
 Las capturas y el GIF de demo están en `docs/screenshots/`; la lista de ficheros está en [screenshots/README.md](screenshots/README.md) y se muestran en el [README principal](../README.md#screenshots).
@@ -115,7 +122,7 @@ No se puede cancelar una reserva una vez pasada su fecha de inicio; solo el cond
 
 ## Modelo de datos
 
-Ocho tablas: `users`, `vehicles`, `vehicle_images`, `vehicle_availability_windows`, `bookings`, `booking_checklists`, `checklist_images` y `reviews`. Diagrama ER en el [README principal](../README.md#data-model) y SQL completo en [data-model.md](data-model.md).
+Ocho tablas de negocio: `users`, `vehicles`, `vehicle_images`, `vehicle_availability_windows`, `bookings`, `booking_checklists`, `checklist_images` y `reviews`, más las del backoffice: `booking_status_history`, `incidents` e `incident_notes`. Diagrama ER en el [README principal](../README.md#data-model) y SQL completo en [data-model.md](data-model.md).
 
 ## Puesta en marcha
 
@@ -149,11 +156,55 @@ npm run dev:mobile
 
 Las variables de entorno de la API y de la app están documentadas en el [README principal](../README.md#environment-variables).
 
+## Backoffice de administración
+
+`apps/admin` es una SPA sencilla con Vite + React + TypeScript para operar la plataforma. Inicia sesión con las mismas cuentas de Supabase Auth que la app y solo consume la API bajo `/api/admin`, protegida por `AdminGuard`: JWT de Supabase válido **y** `users.is_admin = true` en la base de datos (el rol nunca se toma de los claims del token).
+
+**1. Aplicar la migración.** `infra/db/migrations/202610310900_admin_backoffice.sql` (idempotente) añade `users.is_admin`, `users.blocked_at`, las columnas de moderación de reseñas, la tabla `booking_status_history` con su trigger y las tablas `incidents` e `incident_notes`:
+
+```bash
+npm run db:migrate:remote
+```
+
+**2. Nombrar un admin.** La cuenta debe existir (registro previo en la app). El script usa `DATABASE_URL` del entorno o de `apps/api/.env`:
+
+```bash
+npm run admin:set -- admin@ejemplo.com            # conceder
+npm run admin:set -- admin@ejemplo.com --revoke   # retirar
+```
+
+SQL equivalente:
+
+```sql
+UPDATE public.users SET is_admin = TRUE
+WHERE id = (SELECT id FROM auth.users WHERE email = 'admin@ejemplo.com');
+```
+
+**3. Configurar y arrancar.**
+
+```bash
+cp apps/admin/.env.example apps/admin/.env   # rellenar las variables de abajo
+npm run dev:admin                             # http://localhost:5174
+npm run build -w @lynkdrive/admin             # build estática en apps/admin/dist (Vercel, Netlify...)
+```
+
+| Variable | Ejemplo | Uso |
+|---|---|---|
+| `VITE_API_URL` | `http://localhost:3000/api` | URL base de la API NestJS |
+| `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` | Supabase Auth |
+| `VITE_SUPABASE_ANON_KEY` | anon key | Cliente de Supabase (clave pública, la misma que la app) |
+
+- Si la API define `CORS_ORIGINS`, hay que añadir el origen del panel (por ejemplo `http://localhost:5174`).
+- Para ver DNI, carnets y fotos de checklists la API necesita `SUPABASE_SERVICE_ROLE_KEY`; los enlaces caducan según `SUPABASE_SIGNED_URL_TTL_SECONDS` (máximo 1 hora).
+- El bloqueo se aplica en 30 segundos como mucho (el guard JWT cachea brevemente el estado) y, con service role configurada, el usuario también queda baneado en Supabase Auth y no puede renovar la sesión.
+- La sesión del panel se guarda en `sessionStorage`: se cierra al cerrar la pestaña.
+- Endpoints: ver la tabla del [README principal](../README.md#admin-back-office).
+
 ## Pruebas
 
-- Tests unitarios (Jest, API): máquina de estados y precios de reservas, solapes y margen de 2 h, rechazo automático de solapadas, checklists, reseñas, subidas (con validación del contenido real de la imagen), guard JWT, webhooks de Stripe y exportación/borrado de cuenta. `npm run test`.
-- Tests e2e de la API contra Postgres + PostGIS local (el esquema se recrea en cada ejecución; no apuntar nunca a Supabase): `npm run test:e2e` con `TEST_DATABASE_URL`.
-- CI en GitHub Actions: lint, typecheck, build, tests unitarios y e2e en cada push y PR a `dev` y `main`.
+- Tests unitarios (Jest, API): máquina de estados y precios de reservas, solapes y margen de 2 h, rechazo automático de solapadas, checklists, reseñas, subidas (con validación del contenido real de la imagen), guards JWT y de admin, servicio del backoffice, webhooks de Stripe y exportación/borrado de cuenta. `npm run test`.
+- Tests e2e de la API (flujo de reservas y backoffice) contra Postgres + PostGIS local (el esquema se recrea en cada ejecución; no apuntar nunca a Supabase): `npm run test:e2e` con `TEST_DATABASE_URL`.
+- CI en GitHub Actions: lint, typecheck, build, tests unitarios y e2e en cada push y PR a `integracion`, `dev` y `main`, más el build del panel admin.
 
 Scripts de smoke (bash + curl + node) contra la API en marcha:
 
@@ -170,7 +221,7 @@ BASE_URL=http://localhost:3000/api ./scripts/smoke_bookings.sh
 
 - Panel "Mis ingresos".
 - Usar `@lynkdrive/shared` desde la API y la app.
-- Chat, emails transaccionales, notificaciones push y backoffice.
+- Chat, emails transaccionales y notificaciones push.
 - Verificación de identidad fuerte (eIDAS / DNIe / Cl@ve).
 
 ## Licencia
