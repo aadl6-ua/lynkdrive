@@ -6,7 +6,7 @@
  *
  * Crea tres usuarios nuevos en cada ejecución (propietaria en móvil, conductor en escritorio y
  * un segundo conductor en móvil) y una cuenta admin, y recorre: registro con aceptación legal,
- * documentos, verificación en el admin, alta de coche con fotos y disponibilidad, Explorar con
+ * documentos, verificación en el admin, alta de coche con fotos y disponibilidad, Explorar con fechas,
  * dirección, filtros y mapa, dos solicitudes solapadas, aceptación (la otra pasa a rechazada),
  * pago prototipo, checklists con fotos, inicio, devolución, completar, reseñas cruzadas,
  * Mis ingresos, moderación en el admin (incidencia, reseña, vehículo, bloqueo), exportar datos
@@ -219,7 +219,7 @@ async function adminConfirm(actor, reason) {
 async function pickRange(actor, from, to) {
   await text(actor, 'Elegir fecha').first().click();
   await actor.page.waitForTimeout(400);
-  await actor.page.getByLabel('Mes siguiente').click();
+  await actor.page.getByLabel('Mes siguiente').first().click();
   await actor.page.getByLabel(`${from} de ${NEXT_MONTH}`, { exact: true }).click();
   await actor.page.waitForTimeout(300);
   await actor.page.getByLabel(`${to} de ${NEXT_MONTH}`, { exact: true }).click();
@@ -326,7 +326,7 @@ async function main() {
     await shot(owner, 'disponibilidad');
     await expectText(owner, 'Próximas fechas');
   });
-  step('Explorar: dirección, filtros, lista y mapa', async () => {
+  step('Explorar: dirección, fechas, filtros, lista y mapa', async () => {
     const { page } = driver;
     await tab(driver, 'Explorar');
     await page.getByPlaceholder('¿Dónde quieres recoger el coche?').fill('Plaza Luceros');
@@ -334,6 +334,8 @@ async function main() {
     await page.getByText('Plaza de los Luceros, Alicante, España').first().click();
     await page.waitForTimeout(2000);
     await page.getByLabel(/^Filtros/).first().click();
+    await page.waitForTimeout(600);
+    await pickRange(driver, 5, 8);
     await page.getByPlaceholder('Sin límite').fill('45');
     await click(driver, 'Ver resultados', { wait: 1500 });
     await shot(driver, 'filtros');
@@ -347,7 +349,10 @@ async function main() {
       await tab(actor, 'Explorar');
       await actor.page.getByText(vehicle.model).first().click();
       await actor.page.waitForTimeout(2000);
-      await pickRange(actor, from, to);
+      // Con fechas en el filtro de Explorar la ficha ya las trae puestas.
+      if (await text(actor, 'Elegir fecha').count()) {
+        await pickRange(actor, from, to);
+      }
       await actor.page.getByText('Solicitar reserva', { exact: true }).last().click();
       await actor.page.waitForTimeout(2500);
       await shot(actor, 'solicitud');

@@ -3,7 +3,7 @@
 `recorrido.mjs` recorre con Playwright la app web (Expo) y el panel admin sobre un entorno
 local: tres usuarios nuevos (propietaria en móvil 390x844, conductor en escritorio 1440x900 y
 segundo conductor en móvil) y una cuenta admin. Cubre registro con aceptación legal,
-documentos, verificación en el admin, alta de coche con fotos y disponibilidad, Explorar con
+documentos, verificación en el admin, alta de coche con fotos y disponibilidad, Explorar con fechas,
 dirección, filtros y mapa, dos solicitudes solapadas (al aceptar una, la otra pasa a
 rechazada), pago en modo prototipo, checklists de entrega y devolución con fotos, inicio y
 fin del viaje, reseñas cruzadas, Mis ingresos, moderación en el admin (incidencia con nota,
