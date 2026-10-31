@@ -102,7 +102,7 @@ export async function prepareUploadImage(
   const fallbackMimeType = 'image/jpeg';
 
   if (bestSize !== null && bestSize > config.maxBytes) {
-    throw new Error('No se pudo comprimir la imagen por debajo del limite permitido');
+    throw new Error('La imagen es demasiado grande incluso tras comprimirla. Prueba con otra foto.');
   }
 
   return {
