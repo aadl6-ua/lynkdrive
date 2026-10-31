@@ -366,4 +366,52 @@ describe('API e2e (Postgres + PostGIS)', () => {
       expect(res.body.status).toBe('cancelled');
     });
   });
+
+  describe('tokens push', () => {
+    const token = 'ExponentPushToken[e2e-device-1]';
+    const pushRows = () =>
+      withDb(async (client) => (await client.query('SELECT user_id, platform FROM push_tokens WHERE token = $1', [token])).rows);
+
+    it('exige JWT y un token Expo valido', async () => {
+      await api().post('/api/push-tokens').send({ token, platform: 'ios' }).expect(401);
+      await api()
+        .post('/api/push-tokens')
+        .set('Authorization', `Bearer ${driverToken}`)
+        .send({ token: 'not-a-token', platform: 'ios' })
+        .expect(400);
+      await api()
+        .post('/api/push-tokens')
+        .set('Authorization', `Bearer ${driverToken}`)
+        .send({ token, platform: 'web' })
+        .expect(400);
+    });
+
+    it('registra el token y lo reasigna al ultimo usuario del dispositivo', async () => {
+      await api().post('/api/push-tokens').set('Authorization', `Bearer ${driverToken}`).send({ token, platform: 'ios' }).expect(204);
+      await api().post('/api/push-tokens').set('Authorization', `Bearer ${driverToken}`).send({ token, platform: 'ios' }).expect(204);
+      expect(await pushRows()).toEqual([{ user_id: DRIVER_ID, platform: 'ios' }]);
+
+      await api().post('/api/push-tokens').set('Authorization', `Bearer ${ownerToken}`).send({ token, platform: 'android' }).expect(204);
+      expect(await pushRows()).toEqual([{ user_id: OWNER_ID, platform: 'android' }]);
+    });
+
+    it('aparece en la exportacion RGPD', async () => {
+      const res = await api().get('/api/users/me/export').set('Authorization', `Bearer ${ownerToken}`).expect(200);
+      expect(res.body.pushTokens).toEqual([expect.objectContaining({ token, platform: 'android' })]);
+    });
+
+    it('solo el propietario del token puede darlo de baja', async () => {
+      await api()
+        .delete(`/api/push-tokens/${encodeURIComponent(token)}`)
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(204);
+      expect(await pushRows()).toHaveLength(1);
+
+      await api()
+        .delete(`/api/push-tokens/${encodeURIComponent(token)}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(204);
+      expect(await pushRows()).toHaveLength(0);
+    });
+  });
 });

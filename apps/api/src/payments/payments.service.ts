@@ -13,6 +13,7 @@ import Stripe from 'stripe';
 import { DataSource } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
 import { BookingNotificationsService } from '../notifications/booking-notifications.service';
+import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { ConnectLinkResponseDto, ConnectStatusResponseDto } from './dto/connect-response.dto';
 import { PaymentConfigResponseDto } from './dto/payment-config-response.dto';
@@ -48,7 +49,8 @@ export class PaymentsService {
   constructor(
     private readonly dataSource: DataSource,
     @Inject(STRIPE_CLIENT) private readonly stripe: Stripe | null,
-    @Optional() private readonly notifications?: BookingNotificationsService
+    @Optional() private readonly notifications?: BookingNotificationsService,
+    @Optional() private readonly push?: PushNotificationsService
   ) {}
 
   isStripeMode(): boolean {
@@ -478,6 +480,7 @@ export class PaymentsService {
 
     if (applied) {
       this.notifications?.notify('paid_confirmed', bookingId);
+      this.push?.notify('paid_confirmed', bookingId);
     }
 
     return applied;

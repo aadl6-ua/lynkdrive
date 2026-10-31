@@ -8,7 +8,7 @@ import { SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk/700Bold';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TabBar } from './src/app/components/TabBar';
@@ -18,6 +18,7 @@ import { AuthScreen } from './src/features/auth/AuthScreen';
 import { getWebRecoveryTokens, PasswordResetScreen } from './src/features/auth/PasswordResetScreen';
 import { ExploreScreen } from './src/features/explore/ExploreScreen';
 import { getWebLegalDoc, LegalPage } from './src/features/legal/LegalPage';
+import { usePushNotifications } from './src/features/notifications/usePushNotifications';
 import { ProfileScreen } from './src/features/profile/ProfileScreen';
 import { TripsScreen } from './src/features/trips/TripsScreen';
 import { MyVehiclesScreen } from './src/features/vehicles/MyVehiclesScreen';
@@ -54,6 +55,9 @@ function AppShell() {
   useEffect(() => {
     void hydrateSession();
   }, [hydrateSession]);
+
+  const openTripsTab = useCallback(() => setActiveTab('trips'), []);
+  usePushNotifications(authUserId, openTripsTab);
 
   useEffect(() => {
     if (!authUserId) {

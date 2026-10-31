@@ -71,6 +71,14 @@
     - Filtro opcional `from`/`to` (ISO o `YYYY-MM-DD`; `to` sin hora incluye el día completo en UTC) sobre `start_datetime`: afecta a `rangeTotals`, `byVehicle` y `bookings`. Fechas inválidas o `from > to` → 400.
     - Respuesta: `{ currency: 'EUR', timeZone, mode, feePercent, range, summary, rangeTotals, byVehicle[], bookings[] }`; cada reserva incluye fechas, vehículo, conductor resumido (`displayName` = nombre + inicial del apellido), bruto, comisión, neto, `status` y `payoutStatus`.
     - Mobile: tarjeta "Mis ingresos" en Mis Vehículos que abre pantalla secundaria full-view `apps/mobile/src/features/earnings/EarningsScreen.tsx` (volver + back de Android), con tarjetas de resumen, selector de rango (Todo / 90 días / Este año), desglose por vehículo e historial; skeleton, vacío con CTA "Publicar vehículo", error con reintentar y pull-to-refresh. En `prototype` muestra aviso de que no se mueve dinero real.
+- **Notificaciones push de reservas (2026-10-31, COULD HAVE):**
+    - Tabla `push_tokens` (`user_id`, `token` único, `platform` `ios|android`, `created_at`, `updated_at`; migración `202610311000_push_tokens.sql`). Un token pertenece al último usuario que lo registra (upsert por token).
+    - Endpoints JWT: `POST /api/push-tokens` `{ token: ExponentPushToken[...], platform }` → 204; `DELETE /api/push-tokens/:token` → 204 (solo borra tokens propios).
+    - Envío con la Expo Push API por HTTP (`fetch`, sin SDK; lotes de 100, timeout 5 s; `EXPO_ACCESS_TOKEN` opcional como Bearer). Módulo global `push-notifications`; `PushNotificationsService.notify(event, bookingId, actorId?)` se lanza en segundo plano y nunca hace fallar la operación (log sin tokens, nombres ni ids). Se borran los tokens con `DeviceNotRegistered`. `PUSH_NOTIFICATIONS_ENABLED=false` desactiva el envío (no consulta la BD).
+    - Eventos (mismos nombres y puntos de enganche que los emails de reservas): `requested` → propietario; `accepted` y `rejected` (también los rechazos automáticos al aceptar otra) → conductor; `paid_confirmed` → propietario; `in_progress` y `cancelled` → la otra parte; `completed` → ambos, invitando a dejar reseña. `data` = `{ type: 'booking', bookingId, event }`.
+    - RGPD: los tokens se incluyen en `GET /users/me/export` (`pushTokens`) y se borran en `DELETE /users/me`.
+    - Mobile: `expo-notifications` + `expo-device` (versiones de Expo SDK 54), cargados de forma diferida en `apps/mobile/src/features/notifications/pushNotifications.native.ts`; en web (`pushNotifications.ts`) no se hace nada. El permiso solo se pide desde la tarjeta "Notificaciones" de Perfil; tras iniciar sesión se registra el token sin diálogos si el permiso ya estaba concedido; al cerrar sesión se da de baja (máx. 3 s de espera). Al tocar una notificación se abre Mis Viajes en el detalle de la reserva. Sin proyecto EAS (`EXPO_PUBLIC_EAS_PROJECT_ID` o `extra.eas.projectId`), en simulador o en Expo Go Android la tarjeta no se muestra y la app sigue igual. En dispositivos reales hace falta development build/EAS con credenciales de push (APNs/FCM).
+    - Los tests e2e fijan `PUSH_NOTIFICATIONS_ENABLED=false` y la app de tests usa la misma `ValidationPipe` global que `main.ts`.
 
 ---
 
@@ -240,6 +248,9 @@ Plataforma **peer-to-peer (P2P) de alquiler de vehículos entre particulares**, 
             - Reembolsos automáticos al cancelar desde `paid_confirmed` (ver Decisiones Cerradas).
     - Earnings (JWT requerido; solo datos del propietario autenticado):
         - `GET /api/earnings/mine?from=...&to=...` (resumen por periodos, desglose por vehículo e historial por reserva; ver Decisiones Cerradas)
+    - Push tokens (JWT requerido; ver Decisiones Cerradas):
+        - `POST /api/push-tokens`
+        - `DELETE /api/push-tokens/:token`
 - Frontend mobile:
     - Cliente Supabase (`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`).
     - Gestión de sesión: `hydrateSession`, `signIn`, `signUp`, `signOut`.
@@ -597,7 +608,7 @@ paid_confirmed → cancelled  (antes del inicio del viaje)
 - Verificación de identidad (eIDAS / DNIe / Cl@ve).
 
 ### COULD HAVE
-- Notificaciones Push (Expo).
+- Notificaciones Push (Expo). **Implementado (2026-10-31).**
 - Backoffice administrativo.
 - Penalizaciones automáticas (sin gasolina al devolver).
 - Gamificación por uso de eléctricos.
@@ -885,6 +896,11 @@ SUPABASE_STORAGE_URL=<url_del_storage>
 - `STRIPE_CONNECT_COUNTRY` (por defecto `ES`)
 - `API_PUBLIC_URL` (por defecto `http://localhost:3000/api`; base de return/refresh del onboarding)
 - `STRIPE_CONNECT_RETURN_URL` / `STRIPE_CONNECT_REFRESH_URL` (opcionales, sobrescriben las anteriores)
+
+### Variables de entorno para notificaciones push
+- `PUSH_NOTIFICATIONS_ENABLED` (backend, por defecto activas; `false` desactiva el envío)
+- `EXPO_ACCESS_TOKEN` (backend, opcional; solo con "Enhanced Security for Push" en Expo)
+- `EXPO_PUBLIC_EAS_PROJECT_ID` (mobile, opcional; si no, `extra.eas.projectId`)
 
 ---
 

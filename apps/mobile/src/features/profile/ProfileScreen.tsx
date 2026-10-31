@@ -40,6 +40,7 @@ import {
   toast
 } from '../../shared/ui';
 import { useBackHandler } from '../../shared/useBackHandler';
+import { PushNotificationsCard } from '../notifications/PushNotificationsCard';
 import { OwnerPayoutsCard } from '../payments/OwnerPayoutsCard';
 import { hasMinimumProfileData } from '../../shared/verification';
 import { LegalSheet } from '../../shared/components/LegalSheet';
@@ -910,6 +911,8 @@ export function ProfileScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
       </Card>
 
       <OwnerPayoutsCard />
+
+      <PushNotificationsCard />
 
       <Card padding={spacingTokens.sm}>
         {(

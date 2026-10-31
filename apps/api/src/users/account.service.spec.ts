@@ -72,6 +72,7 @@ describe('AccountService', () => {
 
     expect(queries.some((q) => q.includes('UPDATE users SET') && q.includes('deleted_at = NOW()'))).toBe(true);
     expect(queries.some((q) => q.includes('owner_contact_method = NULL'))).toBe(true);
+    expect(queries.some((q) => q.includes('DELETE FROM push_tokens WHERE user_id'))).toBe(true);
     expect(removeMock).toHaveBeenCalledTimes(4);
     expect(removeMock.mock.calls.flat(2)).not.toContain('vehicle_image/user-2/ajeno.jpg');
     expect(deleteUserMock).toHaveBeenCalledWith('user-1', true);

@@ -11,6 +11,7 @@ import { EntityManager, IsNull, Repository } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
 import { BookingEmailEvent, BookingNotificationsService } from '../notifications/booking-notifications.service';
 import { PaymentsService } from '../payments/payments.service';
+import { BookingPushEvent, PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { UserEntity } from '../users/entities/user.entity';
 import { VehicleAvailabilityWindowEntity } from '../vehicle-availability-windows/entities/vehicle-availability-window.entity';
 import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
@@ -50,6 +51,8 @@ type VehicleBookingSlotDto = Pick<
 
 // Estados que generan email al cambiar por PUT /status (accepted y paid_confirmed se notifican aparte).
 const EMAIL_EVENTS: BookingEmailEvent[] = ['rejected', 'paid_confirmed', 'completed', 'cancelled'];
+// Estados que generan push al cambiar por PUT /status (accepted se notifica aparte).
+const PUSH_EVENTS: BookingPushEvent[] = ['rejected', 'paid_confirmed', 'in_progress', 'completed', 'cancelled'];
 
 @Injectable()
 export class BookingsService {
@@ -63,7 +66,8 @@ export class BookingsService {
     @InjectRepository(VehicleAvailabilityWindowEntity)
     private readonly availabilityRepository: Repository<VehicleAvailabilityWindowEntity>,
     private readonly paymentsService: PaymentsService,
-    @Optional() private readonly notifications?: BookingNotificationsService
+    @Optional() private readonly notifications?: BookingNotificationsService,
+    @Optional() private readonly push?: PushNotificationsService
   ) {}
 
   async findMineAsDriver(userId: string): Promise<BookingResponseDto[]> {
@@ -254,6 +258,7 @@ export class BookingsService {
     }
 
     this.notifications?.notify('requested', createdId);
+    this.push?.notify('requested', createdId);
 
     return this.findByIdForUser(createdId, driverId);
   }
@@ -326,6 +331,8 @@ export class BookingsService {
       const autoRejectedIds = await this.acceptAtomically(row, nextOwnerContactMethod ?? null);
       this.notifications?.notify('accepted', id);
       autoRejectedIds.forEach((rejectedId) => this.notifications?.notify('rejected', rejectedId));
+      this.push?.notify('accepted', id);
+      autoRejectedIds.forEach((rejectedId) => this.push?.notify('rejected', rejectedId));
       return this.findByIdForUser(id, user.sub);
     }
 
@@ -343,6 +350,10 @@ export class BookingsService {
 
     if (EMAIL_EVENTS.includes(updateStatusDto.status as BookingEmailEvent)) {
       this.notifications?.notify(updateStatusDto.status as BookingEmailEvent, id, user.sub);
+    }
+
+    if (PUSH_EVENTS.includes(updateStatusDto.status as BookingPushEvent)) {
+      this.push?.notify(updateStatusDto.status as BookingPushEvent, id, user.sub);
     }
 
     return this.findByIdForUser(id, user.sub);

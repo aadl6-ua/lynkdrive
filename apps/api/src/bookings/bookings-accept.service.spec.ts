@@ -54,8 +54,17 @@ function buildService(opts: { lockedStatus?: string; conflict?: boolean; initial
     }
   };
   const notifications = { notify: jest.fn() };
-  const service = new BookingsService(repo as never, {} as never, {} as never, {} as never, {} as never, notifications as never);
-  return { service, calls, repo, notifications, transactions: () => transactionRuns };
+  const push = { notify: jest.fn() };
+  const service = new BookingsService(
+    repo as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    notifications as never,
+    push as never
+  );
+  return { service, calls, repo, notifications, push, transactions: () => transactionRuns };
 }
 
 const ownerUser = { sub: OWNER, claims: {} };
@@ -85,11 +94,12 @@ describe('BookingsService - aceptar reserva', () => {
     expect(reject.params[4]).toBe(HANDOVER_BUFFER_HOURS);
   });
 
-  it('notifica la aceptacion y cada solicitud rechazada automaticamente', async () => {
-    const { service, notifications } = buildService({ rejectedIds: ['b2', 'b3'] });
+  it('notifica por email y push la aceptacion y cada solicitud rechazada automaticamente', async () => {
+    const { service, notifications, push } = buildService({ rejectedIds: ['b2', 'b3'] });
 
     await service.updateStatus('b1', ownerUser, accept);
 
+    expect(push.notify.mock.calls).toEqual(notifications.notify.mock.calls);
     expect(notifications.notify.mock.calls).toEqual([
       ['accepted', 'b1'],
       ['rejected', 'b2'],

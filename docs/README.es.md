@@ -41,6 +41,7 @@ LynkDrive conecta a ambas partes. El propietario publica su coche con fotos, pre
 - Al aceptar una solicitud se rechazan automáticamente las `pending` solapadas del mismo coche, en una transacción con bloqueo de filas; los solapes incluyen 2 h de margen para la entrega.
 - Checklists de check-in y check-out (kilometraje, combustible, notas y fotos en bucket privado).
 - Valoraciones cruzadas (1 a 5 estrellas + comentario) al completar el viaje.
+- Notificaciones push (Expo) a la otra parte en cada cambio de la reserva (nueva solicitud, aceptada, rechazada, pagada, cancelada, iniciada, completada) y cuando se puede dejar reseña; al tocarla se abre la reserva en Mis Viajes.
 
 **Backoffice de administración (web)**
 - Panel de métricas: usuarios, vehículos, reservas por estado e ingresos (volumen cobrado, comisión estimada y últimos seis meses).
@@ -119,6 +120,7 @@ No se puede cancelar una reserva una vez pasada su fecha de inicio; solo el cond
 - **Ficheros privados con URLs firmadas.** DNI, carnet y fotos de checklist van a buckets privados; la API sube con la service role key y devuelve URLs firmadas temporales (por defecto 3600 s).
 - **Compresión en cliente.** Antes de subir, la app convierte a JPEG, redimensiona (1024 px avatar, 1920 px resto) y baja la calidad hasta 500 KB (avatar) o 2 MB (resto); si no lo consigue, cancela la subida.
 - **Monorepo con contratos compartidos.** npm workspaces con API, app y `packages/shared` (`@lynkdrive/shared`), que define el contrato de la API: enums de reservas, checklists, vehículos y subidas, y la forma de peticiones y respuestas de vehículos, reservas, checklists, reseñas, pagos y usuarios. Las respuestas son genéricas en el tipo de fecha: los DTOs de la API las implementan con `Date` y la app las consume con strings ISO. Ambas apps usan solo `import type`, así que no cambia nada en runtime; el paquete se compila a `dist/` con su script `prepare` al hacer `npm install`/`npm ci`.
+- **Notificaciones push no bloqueantes.** El dispositivo registra su token Expo con `POST /api/push-tokens` y lo da de baja al cerrar sesión (`DELETE /api/push-tokens/:token`). La API envía por la Expo Push API (HTTP, sin SDK) en segundo plano: si falla solo registra un aviso sin datos personales, y borra los tokens que Expo marca como `DeviceNotRegistered`. Los tokens se incluyen en la exportación RGPD y se borran con la cuenta.
 - **Otras.** UTC en almacenamiento y lógica (Europe/Madrid en la UI), borrado lógico, `ON DELETE RESTRICT` en reservas y `TYPEORM_SYNCHRONIZE=false` fuera de local.
 
 ## Modelo de datos
@@ -200,6 +202,12 @@ npm run build -w @lynkdrive/admin             # build estática en apps/admin/di
 - El bloqueo se aplica en 30 segundos como mucho (el guard JWT cachea brevemente el estado) y, con service role configurada, el usuario también queda baneado en Supabase Auth y no puede renovar la sesión.
 - La sesión del panel se guarda en `sessionStorage`: se cierra al cerrar la pestaña.
 - Endpoints: ver la tabla del [README principal](../README.md#admin-back-office).
+
+### Notificaciones push
+
+- API: `PUSH_NOTIFICATIONS_ENABLED` (por defecto activas; `false` las desactiva) y `EXPO_ACCESS_TOKEN` (opcional, solo si el proyecto de Expo tiene activada la seguridad reforzada de push).
+- App: `EXPO_PUBLIC_EAS_PROJECT_ID` (opcional; si no, se lee `extra.eas.projectId` de la configuración).
+- Son opcionales: en web, simuladores, Expo Go de Android (sin push remotas desde SDK 53) o sin proyecto EAS la app funciona igual y la tarjeta de Perfil no aparece. En un iOS/Android físico hace falta una development build o una build de EAS (`eas build`) con credenciales de push (clave APNs en iOS, cuenta de servicio FCM V1 en Android; `eas credentials`). El permiso solo se pide al pulsar "Activar notificaciones" en Perfil.
 
 ## Pruebas
 

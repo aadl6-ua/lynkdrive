@@ -199,7 +199,7 @@ describe('useAuthStore', () => {
     mockAuth.resetPasswordForEmail.mockResolvedValue({ error: null });
 
     await expect(useAuthStore.getState().requestPasswordReset()).resolves.toBe(true);
-    expect(mockAuth.resetPasswordForEmail).toHaveBeenCalledWith('ana@example.com');
+    expect(mockAuth.resetPasswordForEmail).toHaveBeenCalledWith('ana@example.com', expect.objectContaining({}));
     expect(useAuthStore.getState().message).toMatch(/recibirás un enlace/);
   });
 

@@ -3,6 +3,7 @@ import { httpClient, setAccessToken } from '../api/http';
 import { supabaseClient } from '../api/supabase';
 import { getPasswordResetRedirectUrl } from '../features/auth/PasswordResetScreen';
 import { LEGAL_VERSION } from '../shared/legal';
+import { unregisterPushNotifications } from '../features/notifications/pushNotifications';
 import { useUserProfileStore } from './useUserProfileStore';
 import { useVehiclesStore } from './useVehiclesStore';
 
@@ -248,6 +249,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, error: null, message: null });
 
     try {
+      // Baja del token push con la sesión aún activa; sin red no retrasa el cierre más de 3 s.
+      await Promise.race([unregisterPushNotifications(), new Promise((resolve) => setTimeout(resolve, 3000))]);
       await supabaseClient.auth.signOut();
       setAccessToken(null);
       useUserProfileStore.getState().reset();

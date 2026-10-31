@@ -46,8 +46,17 @@ export class AccountService {
       throw new NotFoundException('User not found');
     }
 
-    const [vehicles, vehicleImages, availabilityWindows, bookingsAsDriver, bookingsAsOwner, reviewsWritten, reviewsReceived, checklists] =
-      await Promise.all([
+    const [
+      vehicles,
+      vehicleImages,
+      availabilityWindows,
+      bookingsAsDriver,
+      bookingsAsOwner,
+      reviewsWritten,
+      reviewsReceived,
+      checklists,
+      pushTokens
+    ] = await Promise.all([
         this.dataSource.query(
           `SELECT id, brand, model, year, license_plate, description, price_per_day,
                   ST_Y(location) AS location_lat, ST_X(location) AS location_lng, location_address,
@@ -97,6 +106,10 @@ export class AccountService {
            WHERE c.submitted_by = $1
            GROUP BY c.id ORDER BY c.created_at`,
           [user.sub]
+        ),
+        this.dataSource.query(
+          `SELECT token, platform, created_at, updated_at FROM push_tokens WHERE user_id = $1 ORDER BY created_at`,
+          [user.sub]
         )
       ]);
 
@@ -129,7 +142,8 @@ export class AccountService {
       checklistsSubmitted: checklists,
       // Incidencias de la administración que afectan al usuario o a sus reservas y vehículos,
       // con el texto de las notas pero sin identificar al administrador que las escribió.
-      incidents: await this.findIncidents(user.sub)
+      incidents: await this.findIncidents(user.sub),
+      pushTokens
     };
   }
 
@@ -206,6 +220,7 @@ export class AccountService {
           [user.sub]
         );
         await manager.query(`UPDATE booking_checklists SET notes = NULL WHERE submitted_by = $1`, [user.sub]);
+        await manager.query(`DELETE FROM push_tokens WHERE user_id = $1`, [user.sub]);
         await manager.query(
           `UPDATE users SET
              first_name = 'Usuario',

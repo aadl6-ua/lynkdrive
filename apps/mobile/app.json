@@ -34,7 +34,8 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "CAMERA"
+        "CAMERA",
+        "POST_NOTIFICATIONS"
       ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
@@ -78,6 +79,13 @@
         "@stripe/stripe-react-native",
         {
           "enableGooglePay": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#0D1B2A",
+          "defaultChannel": "bookings"
         }
       ]
     ]

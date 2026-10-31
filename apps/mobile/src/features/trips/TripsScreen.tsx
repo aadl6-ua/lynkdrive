@@ -56,6 +56,7 @@ import { PaymentAction } from '../payments/PaymentAction';
 import { useBackHandler } from '../../shared/useBackHandler';
 import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
+import { usePushNotificationsStore } from '../../store/usePushNotificationsStore';
 import { useUserProfileStore } from '../../store/useUserProfileStore';
 
 type BookingItem = {
@@ -482,6 +483,33 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     setOwnerContactMethodInput('');
     setEditingChecklistType(null);
   };
+
+  // Al tocar una notificación push se abre el detalle de esa reserva (recargando la lista primero).
+  const pendingPushBookingId = usePushNotificationsStore((state) => state.pendingBookingId);
+  const consumePendingPushBooking = usePushNotificationsStore((state) => state.consumePendingBooking);
+  const [pushOpenedBookingId, setPushOpenedBookingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const bookingId = pendingPushBookingId ? consumePendingPushBooking() : null;
+
+    if (!bookingId) {
+      return;
+    }
+
+    void loadBookings().then(() => {
+      openBookingDetail(bookingId);
+      setPushOpenedBookingId(bookingId);
+    });
+  }, [pendingPushBookingId, consumePendingPushBooking, loadBookings]);
+
+  useEffect(() => {
+    const booking = pushOpenedBookingId ? allBookings.find((item) => item.id === pushOpenedBookingId) : null;
+
+    if (booking) {
+      setRoleView(booking.ownerId === authUserId ? 'owner' : 'driver');
+      setPushOpenedBookingId(null);
+    }
+  }, [pushOpenedBookingId, allBookings, authUserId]);
 
   const backToList = () => {
     setScreenMode('list');

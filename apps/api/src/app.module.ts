@@ -21,6 +21,7 @@ import { UploadsModule } from './uploads/uploads.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { EarningsModule } from './earnings/earnings.module';
+import { PushNotificationsModule } from './push-notifications/push-notifications.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { EarningsModule } from './earnings/earnings.module';
       }
     }),
     NotificationsModule,
+    PushNotificationsModule,
     UsersModule,
     AuthModule,
     BookingsModule,
