@@ -6,7 +6,7 @@ import {
   NotFoundException
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { EntityManager, IsNull, Repository } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
 import { UserEntity } from '../users/entities/user.entity';
 import { VehicleAvailabilityWindowEntity } from '../vehicle-availability-windows/entities/vehicle-availability-window.entity';
@@ -15,6 +15,11 @@ import { BookingResponseDto } from './dto/booking-response.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingStatus, UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { BookingEntity } from './entities/booking.entity';
+
+// Colchon operativo (entrega/recogida) que cada reserva bloquea tras su fin real.
+export const HANDOVER_BUFFER_HOURS = 2;
+
+const BLOCKING_STATUSES_SQL = `'accepted', 'paid_confirmed', 'in_progress', 'completed'`;
 
 type BookingRow = {
   id: string;
@@ -274,6 +279,11 @@ export class BookingsService {
       ? updateStatusDto.ownerContactMethod
       : row.owner_contact_method;
 
+    if (role === 'owner' && updateStatusDto.status === 'accepted') {
+      await this.acceptAtomically(row, nextOwnerContactMethod ?? null);
+      return this.findByIdForUser(id, user.sub);
+    }
+
     await this.bookingsRepository.query(
       `
         UPDATE bookings
@@ -287,6 +297,60 @@ export class BookingsService {
     );
 
     return this.findByIdForUser(id, user.sub);
+  }
+
+  // Acepta una solicitud y rechaza las pending solapadas del mismo vehiculo en una unica transaccion.
+  // Se bloquea la fila del vehiculo para serializar aceptaciones concurrentes sobre el mismo coche.
+  private async acceptAtomically(row: BookingRow, ownerContactMethod: string | null): Promise<void> {
+    await this.bookingsRepository.manager.transaction(async (manager: EntityManager) => {
+      await manager.query(`SELECT id FROM vehicles WHERE id = $1 FOR UPDATE`, [row.vehicle_id]);
+
+      const locked = await manager.query(
+        `SELECT status, start_datetime, end_datetime FROM bookings WHERE id = $1 FOR UPDATE`,
+        [row.id]
+      );
+      const current = locked[0] as Pick<BookingRow, 'status' | 'start_datetime' | 'end_datetime'> | undefined;
+
+      if (!current || current.status !== 'pending') {
+        throw new ConflictException('Booking is no longer pending');
+      }
+
+      await this.ensureNoConflicts(
+        row.vehicle_id,
+        new Date(current.start_datetime),
+        new Date(current.end_datetime),
+        row.id,
+        manager
+      );
+
+      await manager.query(
+        `
+          UPDATE bookings
+          SET status = 'accepted', owner_contact_method = $2, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `,
+        [row.id, ownerContactMethod]
+      );
+
+      await manager.query(
+        `
+          UPDATE bookings
+          SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
+          WHERE vehicle_id = $1
+            AND id <> $2
+            AND status = 'pending'
+            AND start_datetime < $4::timestamptz + make_interval(hours => $5)
+            AND end_datetime + make_interval(hours => $5) > $3::timestamptz
+        `,
+        [
+          row.vehicle_id,
+          row.id,
+          new Date(current.start_datetime).toISOString(),
+          new Date(current.end_datetime).toISOString(),
+          HANDOVER_BUFFER_HOURS
+        ]
+      );
+    });
   }
 
   private async findBookingRowById(id: string): Promise<BookingRow | null> {
@@ -359,22 +423,39 @@ export class BookingsService {
     }
   }
 
-  private async ensureNoConflicts(vehicleId: string, startDatetime: Date, endDatetime: Date): Promise<void> {
-    const rows = await this.bookingsRepository.query(
+  // Dos reservas chocan si [inicio, fin + colchon] de una se solapa con [inicio, fin + colchon] de la otra.
+  private async ensureNoConflicts(
+    vehicleId: string,
+    startDatetime: Date,
+    endDatetime: Date,
+    excludeBookingId?: string,
+    manager?: EntityManager
+  ): Promise<void> {
+    const runner = manager ?? this.bookingsRepository;
+    const rows = await runner.query(
       `
         SELECT id
         FROM bookings
         WHERE vehicle_id = $1
-          AND status IN ('accepted', 'paid_confirmed', 'in_progress', 'completed')
-          AND start_datetime < $3
-          AND end_datetime > $2
+          AND status IN (${BLOCKING_STATUSES_SQL})
+          AND ($4::uuid IS NULL OR id <> $4::uuid)
+          AND start_datetime < $3::timestamptz + make_interval(hours => $5)
+          AND end_datetime + make_interval(hours => $5) > $2::timestamptz
         LIMIT 1
       `,
-      [vehicleId, startDatetime.toISOString(), endDatetime.toISOString()]
+      [
+        vehicleId,
+        startDatetime.toISOString(),
+        endDatetime.toISOString(),
+        excludeBookingId ?? null,
+        HANDOVER_BUFFER_HOURS
+      ]
     );
 
     if (rows[0]?.id) {
-      throw new ConflictException('There is already a booking that overlaps with the requested range');
+      throw new ConflictException(
+        `There is already a booking that overlaps with the requested range (including the ${HANDOVER_BUFFER_HOURS}h hand-over buffer)`
+      );
     }
   }
 
