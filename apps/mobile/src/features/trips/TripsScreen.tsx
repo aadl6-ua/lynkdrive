@@ -53,6 +53,8 @@ import {
   toast
 } from '../../shared/ui';
 import { PaymentAction } from '../payments/PaymentAction';
+import { BookingChatScreen } from './BookingChatScreen';
+import { fetchUnreadMessages } from './messagesApi';
 import { useBackHandler } from '../../shared/useBackHandler';
 import { canUseTransactionalFlows, hasMinimumProfileData } from '../../shared/verification';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -106,7 +108,7 @@ type ReviewItem = {
 };
 
 type TripsRoleView = 'driver' | 'owner';
-type TripsScreenMode = 'list' | 'detail' | 'checklistEditor' | 'reviewComposer';
+type TripsScreenMode = 'list' | 'detail' | 'checklistEditor' | 'reviewComposer' | 'chat';
 
 type ChecklistDraft = {
   mileage: string;
@@ -252,6 +254,8 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
   const [driverBookings, setDriverBookings] = useState<BookingItem[]>([]);
   const [ownerBookings, setOwnerBookings] = useState<BookingItem[]>([]);
   const [roleView, setRoleView] = useState<TripsRoleView>('driver');
+  // Mensajes del chat sin leer por reserva (solo aparecen las que tienen alguno).
+  const [unreadByBooking, setUnreadByBooking] = useState<Record<string, number>>({});
   /** La vista inicial se elige una sola vez; después manda la elección del usuario. */
   const roleViewChosenRef = useRef(false);
   const [userById, setUserById] = useState<Record<string, UserMiniProfile>>({});
@@ -283,6 +287,14 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     null
   );
 
+  const loadUnread = useCallback(async () => {
+    try {
+      setUnreadByBooking(await fetchUnreadMessages());
+    } catch {
+      // El contador es informativo: si falla no se bloquea Mis Viajes.
+    }
+  }, []);
+
   const loadBookings = useCallback(async () => {
     if (!authUserId) {
       setDriverBookings([]);
@@ -303,6 +315,7 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
       setDriverBookings(driverResponse.data);
       setOwnerBookings(ownerResponse.data);
       setLoaded(true);
+      void loadUnread();
 
       if (!roleViewChosenRef.current) {
         roleViewChosenRef.current = true;
@@ -319,7 +332,7 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     } finally {
       setLoading(false);
     }
-  }, [authUserId]);
+  }, [authUserId, loadUnread]);
 
   useEffect(() => {
     void loadBookings();
@@ -485,22 +498,27 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
   };
 
   // Al tocar una notificación push se abre el detalle de esa reserva (recargando la lista primero).
-  const pendingPushBookingId = usePushNotificationsStore((state) => state.pendingBookingId);
+  const pendingPushBooking = usePushNotificationsStore((state) => state.pendingBooking);
   const consumePendingPushBooking = usePushNotificationsStore((state) => state.consumePendingBooking);
   const [pushOpenedBookingId, setPushOpenedBookingId] = useState<string | null>(null);
 
   useEffect(() => {
-    const bookingId = pendingPushBookingId ? consumePendingPushBooking() : null;
+    const pending = pendingPushBooking ? consumePendingPushBooking() : null;
 
-    if (!bookingId) {
+    if (!pending) {
       return;
     }
 
     void loadBookings().then(() => {
-      openBookingDetail(bookingId);
-      setPushOpenedBookingId(bookingId);
+      openBookingDetail(pending.bookingId);
+      setPushOpenedBookingId(pending.bookingId);
+
+      // Notificación de mensaje: directamente a la conversación.
+      if (pending.openMessages) {
+        setScreenMode('chat');
+      }
     });
-  }, [pendingPushBookingId, consumePendingPushBooking, loadBookings]);
+  }, [pendingPushBooking, consumePendingPushBooking, loadBookings]);
 
   useEffect(() => {
     const booking = pushOpenedBookingId ? allBookings.find((item) => item.id === pushOpenedBookingId) : null;
@@ -549,8 +567,15 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     setCreatedChecklistId(null);
   };
 
+  const closeChat = () => {
+    setScreenMode('detail');
+    void loadUnread();
+  };
+
   useBackHandler(screenMode !== 'list', () => {
-    if (screenMode === 'detail') {
+    if (screenMode === 'chat') {
+      closeChat();
+    } else if (screenMode === 'detail') {
       backToList();
     } else {
       void backToDetail();
@@ -1148,6 +1173,27 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
   }
 
   /* ------------------------------------------------------------------------ */
+  /* Mensajes                                                                 */
+  /* ------------------------------------------------------------------------ */
+
+  if (screenMode === 'chat' && selectedBooking) {
+    const counterpart = selectedBookingCounterpartId ? userById[selectedBookingCounterpartId] : undefined;
+
+    return (
+      <BookingChatScreen
+        bookingId={selectedBooking.id}
+        authUserId={authUserId}
+        title={`${getVehicleLabel(vehicleById[selectedBooking.vehicleId])} · #${getShortId(selectedBooking.id)}`}
+        subtitle={`Con ${getDisplayName(counterpart?.firstName, counterpart?.lastName)} (${selectedBookingIsOwnerView ? 'conductor' : 'propietario'})`}
+        topPadding={topPadding}
+        bottomPadding={bottomPadding}
+        onBack={closeChat}
+        onRead={() => setUnreadByBooking(({ [selectedBooking.id]: _read, ...rest }) => rest)}
+      />
+    );
+  }
+
+  /* ------------------------------------------------------------------------ */
   /* Detalle                                                                  */
   /* ------------------------------------------------------------------------ */
 
@@ -1160,6 +1206,7 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     const isDriver = canCreateChecklistByRole(selectedBooking, authUserId);
     const myReview = reviews.find((review) => review.reviewerId === authUserId) ?? null;
     const days = getBillableDays(selectedBooking.startDatetime, selectedBooking.endDatetime);
+    const unreadCount = unreadByBooking[selectedBooking.id] ?? 0;
     const busy = statusUpdating !== null;
     const isClosed = status === 'rejected' || status === 'cancelled';
 
@@ -1310,6 +1357,32 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
           ) : null}
 
           {actionError ? <InlineMessage tone="error" message={actionError} /> : null}
+        </Card>
+
+        <Card
+          onPress={() => setScreenMode('chat')}
+          accessibilityLabel={`Mensajes${unreadCount > 0 ? `, ${pluralize(unreadCount, 'mensaje sin leer', 'mensajes sin leer')}` : ''}`}
+          accessibilityHint="Abre la conversación de esta reserva"
+        >
+          <CardHeader
+            title="Mensajes"
+            subtitle={
+              unreadCount > 0
+                ? pluralize(unreadCount, 'mensaje sin leer', 'mensajes sin leer')
+                : `Habla con ${isOwner ? 'el conductor' : 'el propietario'} sin compartir tu teléfono.`
+            }
+            icon="chatbubbles-outline"
+            right={
+              <View style={styles.messagesRight}>
+                {unreadCount > 0 ? (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                  </View>
+                ) : null}
+                <Ionicons name="chevron-forward" size={18} color={colorTokens.textMuted} />
+              </View>
+            }
+          />
         </Card>
 
         <Card>
@@ -1492,6 +1565,14 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
           </View>
           <Text style={styles.bookingPrice}>{formatCurrencyEUR(booking.totalPrice)}</Text>
         </View>
+        {unreadByBooking[booking.id] ? (
+          <View style={styles.actionHint}>
+            <Ionicons name="chatbubbles" size={16} color={colorTokens.accent2} />
+            <Text style={styles.actionHintText}>
+              {pluralize(unreadByBooking[booking.id], 'mensaje sin leer', 'mensajes sin leer')}
+            </Text>
+          </View>
+        ) : null}
         {needsAction ? (
           <View style={styles.actionHint}>
             <Ionicons name="alert-circle" size={16} color={colorTokens.accent2} />
@@ -1737,6 +1818,26 @@ const styles = StyleSheet.create({
   bookingPrice: {
     color: colorTokens.primary,
     ...typographyTokens.sectionLabel
+  },
+  messagesRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.xs
+  },
+  unreadBadge: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: radiusTokens.pill,
+    backgroundColor: colorTokens.accent2,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  unreadBadgeText: {
+    ...typographyTokens.captionStrong,
+    fontSize: 12,
+    lineHeight: 16,
+    color: colorTokens.white
   },
   actionHint: {
     flexDirection: 'row',

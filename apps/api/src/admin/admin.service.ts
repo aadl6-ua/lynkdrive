@@ -24,6 +24,8 @@ type Row = Record<string, unknown>;
 
 // Estados en los que el cobro al conductor ya se ha producido.
 const PAID_STATUSES = ['paid_confirmed', 'in_progress', 'completed'];
+// Mensajes de chat que se muestran en el detalle de una reserva del backoffice.
+export const ADMIN_BOOKING_MESSAGES_LIMIT = 500;
 // Duración del baneo en Supabase Auth al bloquear (equivale a indefinido).
 const SUPABASE_BAN_DURATION = '876000h';
 
@@ -389,7 +391,7 @@ export class AdminService {
       throw new NotFoundException(`Booking ${id} not found`);
     }
 
-    const [history, checklists, images, reviews, incidents] = await Promise.all([
+    const [history, checklists, images, reviews, incidents, messages] = await Promise.all([
       this.dataSource.query(
         `SELECT from_status, to_status, changed_at FROM booking_status_history
          WHERE booking_id = $1 ORDER BY changed_at ASC, id ASC`,
@@ -409,7 +411,19 @@ export class AdminService {
         [id]
       ),
       this.dataSource.query(`SELECT id FROM reviews WHERE booking_id = $1`, [id]),
-      this.dataSource.query(`SELECT id, title, status, created_at FROM incidents WHERE booking_id = $1 ORDER BY created_at DESC`, [id])
+      this.dataSource.query(`SELECT id, title, status, created_at FROM incidents WHERE booking_id = $1 ORDER BY created_at DESC`, [id]),
+      // Chat de la reserva en solo lectura (para resolver incidencias): los últimos mensajes, en orden cronológico.
+      this.dataSource.query(
+        `SELECT * FROM (
+           SELECT m.id, m.sender_id, m.body, m.created_at, m.read_at,
+                  u.first_name AS sender_first_name, u.last_name AS sender_last_name
+           FROM booking_messages m INNER JOIN users u ON u.id = m.sender_id
+           WHERE m.booking_id = $1
+           ORDER BY m.created_at DESC, m.id DESC
+           LIMIT ${ADMIN_BOOKING_MESSAGES_LIMIT}
+         ) recent ORDER BY created_at ASC, id ASC`,
+        [id]
+      )
     ]);
 
     const signedImages = await Promise.all(
@@ -449,6 +463,13 @@ export class AdminService {
         title: row.title,
         status: row.status,
         createdAt: row.created_at
+      })),
+      messages: (messages as Row[]).map((row) => ({
+        id: String(row.id),
+        body: row.body,
+        createdAt: row.created_at,
+        readAt: row.read_at ?? null,
+        sender: { id: row.sender_id, firstName: row.sender_first_name, lastName: row.sender_last_name }
       }))
     };
   }

@@ -169,8 +169,19 @@ describe('Backoffice admin e2e', () => {
     expect(list.body.items[0]).toMatchObject({ id: REVIEW_ID, hiddenReason: 'Lenguaje ofensivo' });
   });
 
-  it('muestra la reserva con su historial de estados', async () => {
+  it('muestra la reserva con su historial de estados y el chat en solo lectura', async () => {
+    await withDb((client) =>
+      client.query(`INSERT INTO booking_messages (booking_id, sender_id, body) VALUES ($1, $2, 'Llego en 10 minutos')`, [
+        BOOKING_ID,
+        DRIVER_ID
+      ])
+    );
+
     const res = await asAdmin(api().get(`/api/admin/bookings/${BOOKING_ID}`)).expect(200);
+
+    expect(res.body.messages).toEqual([
+      expect.objectContaining({ body: 'Llego en 10 minutos', sender: expect.objectContaining({ id: DRIVER_ID }) })
+    ]);
 
     expect(res.body.history.map((entry: { toStatus: string }) => entry.toStatus)).toEqual([
       'pending',

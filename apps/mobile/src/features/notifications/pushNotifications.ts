@@ -12,6 +12,6 @@ export async function registerForPushNotifications(_options: { askPermission: bo
 
 export async function unregisterPushNotifications(): Promise<void> {}
 
-export function subscribeToNotificationTaps(_onBooking: (bookingId: string) => void): () => void {
+export function subscribeToNotificationTaps(_onBooking: (bookingId: string, openMessages: boolean) => void): () => void {
   return () => undefined;
 }

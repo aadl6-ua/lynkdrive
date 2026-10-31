@@ -36,8 +36,13 @@ export type ExpoPushMessage = {
   title: string;
   body: string;
   sound: 'default';
-  data: { type: 'booking'; bookingId: string; event: BookingPushEvent };
+  data:
+    | { type: 'booking'; bookingId: string; event: BookingPushEvent }
+    | { type: 'booking_message'; bookingId: string };
 };
+
+// Vista previa del mensaje de chat en la notificación.
+const MESSAGE_PREVIEW_LENGTH = 120;
 
 type ExpoPushTicket = { status: 'ok' | 'error'; details?: { error?: string } };
 
@@ -103,6 +108,42 @@ export class PushNotificationsService {
     });
 
     return this.deliver(messages);
+  }
+
+  /** Aviso de mensaje de chat nuevo al otro participante, en segundo plano. */
+  notifyMessage(bookingId: string, senderId: string, recipientId: string, text: string): void {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    void this.sendMessage(bookingId, senderId, recipientId, text).catch(() => {
+      this.logger.warn('No se pudo enviar la notificación push de un mensaje de reserva');
+    });
+  }
+
+  async sendMessage(bookingId: string, senderId: string, recipientId: string, text: string): Promise<number> {
+    const booking = await this.loadBooking(bookingId);
+
+    if (!booking) {
+      return 0;
+    }
+
+    const senderName = senderId === booking.owner_id ? booking.owner_first_name : booking.driver_first_name;
+    const preview = text.length > MESSAGE_PREVIEW_LENGTH ? `${text.slice(0, MESSAGE_PREVIEW_LENGTH - 3)}...` : text;
+    const tokenRows: Array<{ token: string }> = await this.dataSource.query(
+      `SELECT token FROM push_tokens WHERE user_id = $1`,
+      [recipientId]
+    );
+
+    return this.deliver(
+      tokenRows.map((row) => ({
+        to: row.token,
+        sound: 'default' as const,
+        title: `Mensaje de ${senderName} (${booking.brand} ${booking.model})`,
+        body: preview,
+        data: { type: 'booking_message' as const, bookingId: booking.id }
+      }))
+    );
   }
 
   recipientsFor(event: BookingPushEvent, booking: Pick<BookingPushRow, 'owner_id' | 'driver_id'>, actorId?: string): Recipient[] {

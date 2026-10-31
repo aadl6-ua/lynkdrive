@@ -112,6 +112,33 @@ export function BookingDetailPage({ id }: { id: string }) {
                 )}
               </Card>
 
+              <Card title="Mensajes entre las partes">
+                {booking.messages.length === 0 ? (
+                  <EmptyState title="Sin mensajes" description="El conductor y el propietario no han usado el chat de esta reserva." />
+                ) : (
+                  <div className="stack">
+                    <p className="muted small">Solo lectura. Consúltalos únicamente para gestionar incidencias de esta reserva.</p>
+                    <ol className="chat-log">
+                      {booking.messages.map((message) => {
+                        const fromOwner = message.sender.id === booking.owner.id;
+                        return (
+                          <li key={message.id} className={fromOwner ? 'chat-log__item chat-log__item--owner' : 'chat-log__item'}>
+                            <div className="chat-log__meta">
+                              <strong>{fullName(message.sender)}</strong>
+                              <span className="muted small">
+                                {fromOwner ? 'Propietario' : 'Conductor'} · {formatDateTime(message.createdAt)}
+                                {message.readAt ? ' · leído' : ''}
+                              </span>
+                            </div>
+                            <p className="chat-log__body">{message.body}</p>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
+                )}
+              </Card>
+
               <Card title="Incidencias">
                 {booking.incidents.length === 0 ? (
                   <EmptyState title="Sin incidencias" />

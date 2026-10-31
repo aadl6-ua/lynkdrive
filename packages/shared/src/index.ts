@@ -11,3 +11,4 @@ export * from './users';
 export * from './payments';
 export * from './uploads';
 export * from './geocoding';
+export * from './messages';

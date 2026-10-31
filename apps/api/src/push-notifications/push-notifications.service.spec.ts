@@ -22,6 +22,9 @@ function buildService(tokens: Tokens = [], booking: typeof bookingRow | null = b
     query: jest.fn(async (sql: string, params: unknown[] = []) => {
       queries.push({ sql, params });
       if (sql.includes('FROM bookings b')) return booking ? [booking] : [];
+      if (sql.includes('SELECT token FROM push_tokens WHERE user_id = $1')) {
+        return tokens.filter((row) => row.user_id === params[0]);
+      }
       if (sql.includes('SELECT user_id, token FROM push_tokens')) {
         const ids = params[0] as string[];
         return tokens.filter((row) => ids.includes(row.user_id));
@@ -187,5 +190,39 @@ describe('PushNotificationsService', () => {
 
     expect(await service.send('requested', 'b1')).toBe(0);
     expect(queries.some((q) => q.sql.includes('DELETE'))).toBe(false);
+  });
+
+  it('mensaje de chat: avisa solo al destinatario con vista previa recortada', async () => {
+    const fetchMock = mockFetch([{ status: 'ok' }]);
+    const { service } = buildService([
+      { user_id: OWNER, token: 'ExponentPushToken[owner]' },
+      { user_id: DRIVER, token: 'ExponentPushToken[driver]' }
+    ]);
+
+    const sent = await service.sendMessage('b1', DRIVER, OWNER, 'x'.repeat(300));
+
+    expect(sent).toBe(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body).toEqual([
+      expect.objectContaining({
+        to: 'ExponentPushToken[owner]',
+        title: 'Mensaje de Diego (Seat Ibiza)',
+        data: { type: 'booking_message', bookingId: 'b1' }
+      })
+    ]);
+    expect(body[0].body).toHaveLength(120);
+  });
+
+  it('notifyMessage no lanza si Expo falla y no registra el texto', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('network down')) as unknown as typeof fetch;
+    const { service } = buildService([{ user_id: OWNER, token: 'ExponentPushToken[owner]' }]);
+    const warn = jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
+
+    expect(() => service.notifyMessage('b1', DRIVER, OWNER, 'hola secreto')).not.toThrow();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).not.toMatch(/secreto|Diego|b1/);
   });
 });

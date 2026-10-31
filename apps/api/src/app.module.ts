@@ -9,6 +9,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { BookingsModule } from './bookings/bookings.module';
+import { BookingMessagesModule } from './booking-messages/booking-messages.module';
 import { BookingChecklistsModule } from './booking-checklists/booking-checklists.module';
 import { ChecklistImagesModule } from './checklist-images/checklist-images.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -60,6 +61,7 @@ import { PushNotificationsModule } from './push-notifications/push-notifications
     AuthModule,
     BookingsModule,
     BookingChecklistsModule,
+    BookingMessagesModule,
     ChecklistImagesModule,
     PaymentsModule,
     ReviewsModule,

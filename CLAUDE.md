@@ -79,6 +79,19 @@
     - RGPD: los tokens se incluyen en `GET /users/me/export` (`pushTokens`) y se borran en `DELETE /users/me`.
     - Mobile: `expo-notifications` + `expo-device` (versiones de Expo SDK 54), cargados de forma diferida en `apps/mobile/src/features/notifications/pushNotifications.native.ts`; en web (`pushNotifications.ts`) no se hace nada. El permiso solo se pide desde la tarjeta "Notificaciones" de Perfil; tras iniciar sesión se registra el token sin diálogos si el permiso ya estaba concedido; al cerrar sesión se da de baja (máx. 3 s de espera). Al tocar una notificación se abre Mis Viajes en el detalle de la reserva. Sin proyecto EAS (`EXPO_PUBLIC_EAS_PROJECT_ID` o `extra.eas.projectId`), en simulador o en Expo Go Android la tarjeta no se muestra y la app sigue igual. En dispositivos reales hace falta development build/EAS con credenciales de push (APNs/FCM).
     - Los tests e2e fijan `PUSH_NOTIFICATIONS_ENABLED=false` y la app de tests usa la misma `ValidationPipe` global que `main.ts`.
+- **Chat interno por reserva (2026-10-31, SHOULD HAVE):**
+    - Sin websockets: API REST + polling. Tabla `booking_messages` (`booking_id`, `sender_id`, `body` 1-2000 caracteres, `created_at`, `read_at`; migración `202610311100_booking_messages.sql`). SQL vía `DataSource` en `apps/api/src/booking-messages`; contratos en `packages/shared/src/messages.ts`.
+    - Endpoints JWT bajo `/api/booking-messages` (mismo estilo que `booking-checklists`, para no chocar con `/bookings/:id`); solo los dos participantes (404 si no existe la reserva, 403 a terceros):
+        - `GET ?bookingId=&after=&before=&limit=` → `{ messages, hasMore, canSend, sendBlockedReason }`, mensajes en orden ascendente. Cursores = id de mensaje (keyset sobre `(created_at, id)`), no se pueden combinar; sin cursor devuelve los últimos `limit` (1-100, por defecto 50). Cursor de otra reserva → 400.
+        - `POST { bookingId, body }` → 201 con el mensaje (se recorta; vacío o > 2000 → 400). `@Throttle` de 20/min.
+        - `POST /read { bookingId }` → `{ updated }`: marca como leídos los recibidos (no los propios).
+        - `GET /unread` → `{ total, bookings: [{ bookingId, unread }] }` (solo reservas con no leídos).
+    - Plazo para escribir: `pending`, `accepted`, `paid_confirmed`, `in_progress` y hasta **7 días** después de pasar a `completed` (fecha de `booking_status_history`; sin historial se considera cerrado). `rejected`/`cancelled` o con la otra parte dada de baja: solo lectura (403 al enviar, con motivo legible también en `sendBlockedReason`).
+    - Aviso: `PushNotificationsService.notifyMessage()` en segundo plano al otro participante (título con nombre y vehículo, vista previa de 120 caracteres; `data` = `{ type: 'booking_message', bookingId }`; logs sin texto ni ids). No hay email por mensaje para no saturar (los emails siguen solo para cambios de estado).
+    - RGPD: `GET /users/me/export` incluye `messagesSent` (solo los escritos por el usuario); `DELETE /users/me` borra sus mensajes (la otra parte conserva los suyos). Política de privacidad actualizada en `legal.ts`.
+    - Backoffice: `GET /api/admin/bookings/:id` incluye `messages` (últimos 500, solo lectura, con autor) y `apps/admin` los muestra en el detalle de reserva para gestionar incidencias.
+    - Mobile: en el detalle de reserva de Mis Viajes, tarjeta "Mensajes" con contador de no leídos (también aviso en la tarjeta de la lista) que abre la pantalla secundaria full-view `apps/mobile/src/features/trips/BookingChatScreen.tsx` (volver + back de Android gestionado por `TripsScreen`). Polling cada 4 s con `after` solo con la pantalla abierta y la app en primer plano; marca como leídos al abrir y al llegar mensajes. Envío optimista con estado (enviando, enviado, leído, fallido con Reintentar/Descartar), separadores de día y horas en Europe/Madrid, botón "Ver mensajes anteriores" con `before`. Teclado: en iOS el compositor sube con la altura del teclado; en Android se detecta si la ventana se redimensiona (`adjustResize`) y si no se usa la altura del teclado; en web Intro envía y Mayús+Intro hace salto de línea. Helpers puros y testeados en `chatMessages.ts`; cliente HTTP en `messagesApi.ts`.
+    - Tocar una notificación `booking_message` abre directamente la conversación (`usePushNotificationsStore.pendingBooking = { bookingId, openMessages }`).
 
 ---
 
@@ -251,6 +264,11 @@ Plataforma **peer-to-peer (P2P) de alquiler de vehículos entre particulares**, 
     - Push tokens (JWT requerido; ver Decisiones Cerradas):
         - `POST /api/push-tokens`
         - `DELETE /api/push-tokens/:token`
+    - Chat de reservas (JWT requerido + solo participantes; ver Decisiones Cerradas):
+        - `GET /api/booking-messages?bookingId=...&after=...|before=...&limit=...`
+        - `POST /api/booking-messages`
+        - `POST /api/booking-messages/read`
+        - `GET /api/booking-messages/unread`
 - Frontend mobile:
     - Cliente Supabase (`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`).
     - Gestión de sesión: `hydrateSession`, `signIn`, `signUp`, `signOut`.
@@ -600,7 +618,7 @@ paid_confirmed → cancelled  (antes del inicio del viaje)
 - Aceptación de T&C y Política de Privacidad.
 
 ### SHOULD HAVE
-- Chat interno en la plataforma.
+- Chat interno en la plataforma. **Implementado (2026-10-31).**
 - Panel "Mis ingresos" para propietarios.
 - Emails transaccionales automáticos.
 - Gestión de cancelaciones con reglas de reembolso.

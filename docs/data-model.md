@@ -181,6 +181,25 @@ CREATE TABLE incident_notes (
 );
 ```
 
+## Booking chat / Chat de reservas
+
+Added by `infra/db/migrations/202610311100_booking_messages.sql` (idempotent):
+
+```sql
+CREATE TABLE booking_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body TEXT NOT NULL CHECK (char_length(body) BETWEEN 1 AND 2000),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    -- When the other participant read it / Cuándo lo leyó la otra parte
+    read_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX idx_booking_messages_booking_created ON booking_messages (booking_id, created_at, id);
+CREATE INDEX idx_booking_messages_unread ON booking_messages (booking_id, sender_id) WHERE read_at IS NULL;
+```
+
 ## Design notes / Notas de diseño
 
 - **Price snapshot**: `bookings` freezes `price_per_day_at_booking`, `platform_fee` and `total_price` at creation time. / Los importes se congelan al crear la reserva.

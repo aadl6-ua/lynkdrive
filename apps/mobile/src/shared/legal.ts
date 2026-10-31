@@ -82,7 +82,7 @@ export const LEGAL_CONTENT: Record<LegalDoc, LegalDocument> = {
       {
         heading: 'Qué datos tratamos',
         paragraphs: [
-          'Datos de cuenta (email, nombre, apellidos y teléfono), foto de perfil, DNI y permiso de conducir, anuncios y fotos de vehículos, reservas, checklists con sus fotos, valoraciones y el método de contacto que compartes al aceptar una reserva. Tu ubicación solo se usa en el dispositivo para mostrar vehículos cercanos y no se guarda.'
+          'Datos de cuenta (email, nombre, apellidos y teléfono), foto de perfil, DNI y permiso de conducir, anuncios y fotos de vehículos, reservas, checklists con sus fotos, valoraciones, los mensajes del chat de cada reserva y el método de contacto que compartes al aceptar una reserva. Tu ubicación solo se usa en el dispositivo para mostrar vehículos cercanos y no se guarda.'
         ]
       },
       {
@@ -96,13 +96,14 @@ export const LEGAL_CONTENT: Record<LegalDoc, LegalDocument> = {
         heading: 'Quién más los ve',
         paragraphs: [
           'Los demás usuarios solo ven tu nombre, foto, valoraciones y tus anuncios. Tu método de contacto solo se comparte con el conductor cuando aceptas su reserva. La matrícula de tu vehículo no es pública.',
+          'Los mensajes del chat de una reserva solo los ven el conductor y el propietario. El equipo de LynkDrive puede consultarlos únicamente para resolver una incidencia o reclamación de esa reserva.',
           'Usamos proveedores que tratan datos por cuenta nuestra: Supabase (base de datos, autenticación y almacenamiento), Stripe (pagos), Render y Vercel (alojamiento) y OpenStreetMap/Nominatim (búsqueda de direcciones). Los documentos y las fotos de los checklists se guardan en almacenamiento privado con enlaces temporales.'
         ]
       },
       {
         heading: 'Cuánto tiempo',
         paragraphs: [
-          'Mientras tengas la cuenta. Si la eliminas, borramos tu perfil, documentos, fotos y anuncios; las reservas finalizadas se conservan sin tus datos personales durante los plazos que exige la ley.'
+          'Mientras tengas la cuenta. Si la eliminas, borramos tu perfil, documentos, fotos, anuncios y los mensajes que has escrito; las reservas finalizadas se conservan sin tus datos personales durante los plazos que exige la ley.'
         ]
       },
       {

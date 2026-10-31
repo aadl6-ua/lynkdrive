@@ -143,13 +143,20 @@ export async function unregisterPushNotifications(): Promise<void> {
   }
 }
 
-function bookingIdFrom(response: { notification: { request: { content: { data?: unknown } } } } | null): string | null {
+type BookingTap = { bookingId: string; openMessages: boolean };
+
+function bookingTapFrom(response: { notification: { request: { content: { data?: unknown } } } } | null): BookingTap | null {
   const data = response?.notification.request.content.data as { type?: string; bookingId?: unknown } | undefined;
-  return data?.type === 'booking' && typeof data.bookingId === 'string' ? data.bookingId : null;
+
+  if (typeof data?.bookingId !== 'string' || (data.type !== 'booking' && data.type !== 'booking_message')) {
+    return null;
+  }
+
+  return { bookingId: data.bookingId, openMessages: data.type === 'booking_message' };
 }
 
 /** Avisa con el id de la reserva cuando el usuario toca una notificación (también si abrió la app con ella). */
-export function subscribeToNotificationTaps(onBooking: (bookingId: string) => void): () => void {
+export function subscribeToNotificationTaps(onBooking: (bookingId: string, openMessages: boolean) => void): () => void {
   let active = true;
   let remove: (() => void) | null = null;
 
@@ -159,10 +166,10 @@ export function subscribeToNotificationTaps(onBooking: (bookingId: string) => vo
     }
 
     const subscription = notifications.addNotificationResponseReceivedListener((response) => {
-      const bookingId = bookingIdFrom(response);
+      const tap = bookingTapFrom(response);
 
-      if (bookingId) {
-        onBooking(bookingId);
+      if (tap) {
+        onBooking(tap.bookingId, tap.openMessages);
       }
     });
 
@@ -174,10 +181,10 @@ export function subscribeToNotificationTaps(onBooking: (bookingId: string) => vo
     remove = () => subscription.remove();
 
     try {
-      const initial = bookingIdFrom(await notifications.getLastNotificationResponseAsync());
+      const initial = bookingTapFrom(await notifications.getLastNotificationResponseAsync());
 
       if (initial && active) {
-        onBooking(initial);
+        onBooking(initial.bookingId, initial.openMessages);
         await notifications.clearLastNotificationResponseAsync();
       }
     } catch {

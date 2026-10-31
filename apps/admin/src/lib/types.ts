@@ -128,6 +128,8 @@ export type AdminBookingDetail = AdminBooking & {
   }>;
   reviewIds: string[];
   incidents: Array<{ id: string; title: string; status: IncidentStatus; createdAt: string }>;
+  /** Chat de la reserva (solo lectura, últimos 500 mensajes en orden cronológico). */
+  messages: Array<{ id: string; body: string; createdAt: string; readAt: string | null; sender: PersonRef }>;
 };
 
 export type AdminIncident = {

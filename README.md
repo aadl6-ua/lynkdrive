@@ -75,12 +75,13 @@ LynkDrive connects both sides. Owners publish their car with photos, price and a
 - Check-in and check-out checklists (mileage, fuel level, notes, photo evidence stored in a private bucket).
 - Cross reviews (1 to 5 stars + comment) once the trip is completed, one per participant per booking.
 - Push notifications (Expo) to the other participant on every booking change (new request, accepted, rejected, paid, cancelled, started, completed) and when a review can be left; tapping one opens the booking in My Trips.
+- In-app chat per booking between driver and owner (no phone numbers needed): unread counters in My Trips, read receipts, retry of failed sends, a push notification for every new message (tapping it opens the conversation) and polling only while the conversation is open.
 
 **Admin back office (web)**
 - Dashboard with users, vehicles, bookings by status and revenue (gross volume, estimated platform fee, last six months).
 - Users: search, document review through short-lived signed URLs, verify / unverify, block / unblock (blocked accounts get `403` on the whole API and are banned in Supabase Auth).
 - Vehicles: activate / deactivate listings (a listing deactivated by an admin cannot be reactivated by its owner). Reviews: hide / show with a moderation reason (hidden reviews do not count in ratings).
-- Bookings: full status history (recorded by a database trigger) and check-in/check-out evidence photos via signed URLs.
+- Bookings: full status history (recorded by a database trigger), check-in/check-out evidence photos via signed URLs and a read-only view of the booking chat (to handle incidents).
 - Incidents: create, list, change status and keep internal notes.
 
 ## Screenshots
@@ -208,6 +209,15 @@ Rules enforced by the API:
 
 **Non-blocking push notifications.** Devices register their Expo push token with `POST /api/push-tokens` (and remove it on sign-out with `DELETE /api/push-tokens/:token`). The API sends through the Expo Push API over plain HTTP (no SDK), fire-and-forget after the state change: a failure only logs a warning without personal data, and tokens Expo reports as `DeviceNotRegistered` are deleted. Tokens are included in the GDPR export and deleted with the account.
 
+**Booking chat without websockets.** Messages live in `booking_messages` and are served by plain REST endpoints under `/api/booking-messages`; the app polls every 4 seconds with an `after` cursor only while the conversation screen is open and the app is in the foreground, which keeps the free Render instance simple (no sticky connections) and is enough for hand-over coordination. Only the two participants can read or write. Writing is allowed in `pending`, `accepted`, `paid_confirmed` and `in_progress`, and for 7 days after the booking is `completed` (taken from `booking_status_history`); rejected or cancelled bookings, or bookings whose other party deleted their account, are read-only. Sending is rate limited (20 messages per minute), each message triggers a fire-and-forget push to the other participant (title and a 120-character preview, never logged), messages written by a user are included in their GDPR export and deleted with their account.
+
+| Method | Path (JWT) | Description |
+|---|---|---|
+| GET | `/booking-messages?bookingId=&after=&before=&limit=` | Page of messages in chronological order (`limit` 1-100, default 50). Without cursor: latest messages; `after=<messageId>`: only newer ones (polling); `before=<messageId>`: older ones. Returns `{ messages, hasMore, canSend, sendBlockedReason }` |
+| POST | `/booking-messages` | `{ bookingId, body }` (trimmed, 1-2000 characters). `403` outside the send window |
+| POST | `/booking-messages/read` | `{ bookingId }`: marks the messages received in that booking as read, returns `{ updated }` |
+| GET | `/booking-messages/unread` | `{ total, bookings: [{ bookingId, unread }] }` for every booking of the user |
+
 **Other choices.** UTC everywhere in storage and logic (shown in Europe/Madrid in the UI); soft-delete (`deleted_at`) for users and vehicles; `ON DELETE RESTRICT` from bookings to users and vehicles to protect transaction history; `TYPEORM_SYNCHRONIZE=false` outside local development, with versioned SQL migrations instead.
 
 ## Data model
@@ -224,6 +234,8 @@ erDiagram
     BOOKINGS ||--o{ BOOKING_CHECKLISTS : "check_in / check_out"
     BOOKING_CHECKLISTS ||--o{ CHECKLIST_IMAGES : "evidence"
     USERS ||--o{ PUSH_TOKENS : "receives push on"
+    BOOKINGS ||--o{ BOOKING_MESSAGES : "chat"
+    USERS ||--o{ BOOKING_MESSAGES : sends
     BOOKINGS ||--o{ REVIEWS : has
     USERS ||--o{ BOOKING_CHECKLISTS : submits
     USERS ||--o{ REVIEWS : "writes / receives"
@@ -344,6 +356,14 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
+    BOOKING_MESSAGES {
+        uuid id PK
+        uuid booking_id FK
+        uuid sender_id FK
+        text body "1 to 2000 chars"
+        timestamptz created_at
+        timestamptz read_at "null until the other party reads it"
+    }
 ```
 
 Constraints worth noting: `UNIQUE(booking_id, type)` on checklists, `UNIQUE(booking_id, reviewer_id)` on reviews, `CHECK (end_datetime > start_datetime)` on bookings. `booking_status_history` is filled by the `trg_booking_status_history` trigger on every insert and status change, so it also captures transitions made by Stripe webhooks and automatic rejections.
@@ -461,7 +481,7 @@ If the API sets `CORS_ORIGINS`, add the admin origin (for example `http://localh
 | PUT | `/users/:id/verification`, `/users/:id/block` | `{ isVerified }`, `{ blocked, reason? }` |
 | GET / PUT | `/vehicles`, `/vehicles/:id/status` | List (`search`, `status`), `{ status: active \| inactive }` |
 | GET / PUT | `/reviews`, `/reviews/:id/visibility` | List (`visibility`, `maxRating`), `{ hidden, reason? }` |
-| GET | `/bookings`, `/bookings/:id` | List (`status`), detail with status history and signed checklist photos |
+| GET | `/bookings`, `/bookings/:id` | List (`status`), detail with status history, signed checklist photos and the booking chat (read-only, last 500 messages) |
 | GET / POST | `/incidents`, `/incidents/:id` | List (`status`), create `{ title, description, bookingId?, userId?, vehicleId? }`, detail with notes |
 | PUT / POST | `/incidents/:id/status`, `/incidents/:id/notes` | `{ status }`, `{ body }` |
 
@@ -550,6 +570,7 @@ lynkdrive/
 │   │       ├── bookings/         # booking state machine, overlap check, price snapshot
 │   │       ├── payments/         # Stripe PaymentIntents / prototype mode
 │   │       ├── earnings/         # owner "My earnings" panel (read-only aggregates)
+│   │       ├── booking-messages/ # booking chat (/api/booking-messages)
 │   │       ├── booking-checklists/
 │   │       ├── checklist-images/
 │   │       ├── reviews/
@@ -578,16 +599,16 @@ lynkdrive/
 
 ## Testing
 
-**API unit tests** (Jest + `@nestjs/testing`, `apps/api/src/**/*.spec.ts`) cover the booking state machine and pricing, overlap and hand-over buffer rules, automatic rejection of overlapping requests, checklists, reviews, uploads (including real image content checks), the JWT and admin guards, the admin service, Stripe webhooks, the GDPR export/delete flow and that the validation enums match `@lynkdrive/shared`.
+**API unit tests** (Jest + `@nestjs/testing`, `apps/api/src/**/*.spec.ts`) cover the booking state machine and pricing, overlap and hand-over buffer rules, automatic rejection of overlapping requests, checklists, reviews, uploads (including real image content checks), the JWT and admin guards, the admin service, Stripe webhooks, the booking chat (access, send window, cursors, unread counters, push), the GDPR export/delete flow and that the validation enums match `@lynkdrive/shared`.
 
-**App unit tests** (Jest with the `jest-expo` preset, `apps/mobile/src/**/__tests__/*.test.ts`) cover the pure logic of the app: Europe/Madrid date and EUR formatting (including DST changes), billable days, booking status helpers, API error messages, verification gates, client-side image compression (`prepareUploadImage` with `expo-image-manipulator` and `fetch` mocked), storage URL resolution, the calendar availability rules (2 h hand-over buffer, `pending` does not block) and the Zustand stores with the Axios client and Supabase mocked. They run with the device time zone set to `America/New_York` to prove the Madrid presentation does not depend on the device.
+**App unit tests** (Jest with the `jest-expo` preset, `apps/mobile/src/**/__tests__/*.test.ts`) cover the pure logic of the app: Europe/Madrid date and EUR formatting (including DST changes), billable days, booking status helpers, API error messages, verification gates, client-side image compression (`prepareUploadImage` with `expo-image-manipulator` and `fetch` mocked), storage URL resolution, the calendar availability rules (2 h hand-over buffer, `pending` does not block), the chat helpers (merging polled pages, day separators in Europe/Madrid, grouping) and the Zustand stores with the Axios client and Supabase mocked. They run with the device time zone set to `America/New_York` to prove the Madrid presentation does not depend on the device.
 
 ```bash
 npm run test                      # API + app
 npm run test -w @lynkdrive/mobile # app only
 ```
 
-**E2E tests** run the booking flow and the admin back office against a real Postgres + PostGIS (the schema is recreated on every run). Never point them at the Supabase database:
+**E2E tests** run the booking flow, the booking chat, earnings and the admin back office against a real Postgres + PostGIS (the schema is recreated on every run). Never point them at the Supabase database:
 
 ```bash
 docker run -d --name lynkdrive-test-pg -e POSTGRES_PASSWORD=postgres \
@@ -622,7 +643,6 @@ The payments smoke test works in both modes: real Stripe (with `STRIPE_SECRET_KE
 
 ## Roadmap
 
-- In-app chat.
 - Strong identity verification (eIDAS / DNIe / Cl@ve) instead of manual document review.
 
 ## License
