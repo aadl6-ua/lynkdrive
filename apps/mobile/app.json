@@ -34,7 +34,8 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "CAMERA"
+        "CAMERA",
+        "POST_NOTIFICATIONS"
       ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
@@ -72,6 +73,13 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "LynkDrive usa tu ubicación para mostrarte vehículos cercanos y situarte en el mapa."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#0D1B2A",
+          "defaultChannel": "bookings"
         }
       ]
     ]
