@@ -1630,7 +1630,7 @@ function Timeline({ status }: { status: BookingStatus }) {
       <View style={styles.closedBanner}>
         <Ionicons name={status === 'rejected' ? 'close-circle' : 'ban-outline'} size={20} color={colorTokens.alertText} />
         <Text style={styles.closedText}>
-          {status === 'rejected' ? 'El propietario rechazó la solicitud.' : 'La reserva fue cancelada.'}
+          {status === 'rejected' ? 'Solicitud no aceptada: el propietario la rechazó o confirmó otra reserva en esas fechas.' : 'La reserva fue cancelada.'}
         </Text>
       </View>
     );
