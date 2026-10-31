@@ -8,12 +8,12 @@ import { SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk/700Bold';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TabBar } from './src/app/components/TabBar';
 import { colorTokens, layoutTokens, spacingTokens, typographyTokens } from './src/app/theme/tokens';
-import { AppTabKey } from './src/app/types';
+import { APP_TABS, AppTabKey } from './src/app/types';
 import { onAccountBlocked } from './src/api/http';
 import { AccountBlockedScreen } from './src/features/auth/AccountBlockedScreen';
 import { AuthScreen } from './src/features/auth/AuthScreen';
@@ -24,7 +24,7 @@ import { usePushNotifications } from './src/features/notifications/usePushNotifi
 import { ProfileScreen } from './src/features/profile/ProfileScreen';
 import { TripsScreen } from './src/features/trips/TripsScreen';
 import { MyVehiclesScreen } from './src/features/vehicles/MyVehiclesScreen';
-import { ConfirmHost, ToastHost } from './src/shared/ui';
+import { ConfirmHost, ScreenTransition, ToastHost } from './src/shared/ui';
 import { useAuthStore } from './src/store/useAuthStore';
 import { useUserProfileStore } from './src/store/useUserProfileStore';
 
@@ -41,6 +41,15 @@ const webRecoveryTokens = getWebRecoveryTokens();
 
 function AppShell() {
   const [activeTab, setActiveTab] = useState<AppTabKey>('explore');
+  // La pantalla nueva entra desde el lado de su pestaña respecto a la anterior.
+  const [tabDirection, setTabDirection] = useState<1 | -1>(1);
+  const activeTabRef = useRef(activeTab);
+  const changeTab = useCallback((next: AppTabKey) => {
+    const tabIndex = (key: AppTabKey) => APP_TABS.findIndex((tab) => tab.key === key);
+    setTabDirection(tabIndex(next) >= tabIndex(activeTabRef.current) ? 1 : -1);
+    activeTabRef.current = next;
+    setActiveTab(next);
+  }, []);
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   // Navegación superior solo en pantallas anchas (web escritorio/tablet); en web
@@ -67,11 +76,12 @@ function AppShell() {
     setAccountBlocked(false);
   }, [authUserId]);
 
-  const openTripsTab = useCallback(() => setActiveTab('trips'), []);
+  const openTripsTab = useCallback(() => changeTab('trips'), [changeTab]);
   usePushNotifications(authUserId, openTripsTab);
 
   useEffect(() => {
     if (!authUserId) {
+      activeTabRef.current = 'explore';
       setActiveTab('explore');
       return;
     }
@@ -121,16 +131,18 @@ function AppShell() {
     );
   }
 
-  const screenProps = { topPadding, bottomPadding, onNavigateToTab: setActiveTab };
+  const screenProps = { topPadding, bottomPadding, onNavigateToTab: changeTab };
 
   return (
     <View style={styles.container}>
-      {activeTab === 'explore' ? <ExploreScreen {...screenProps} /> : null}
-      {activeTab === 'trips' ? <TripsScreen {...screenProps} /> : null}
-      {activeTab === 'myVehicles' ? <MyVehiclesScreen {...screenProps} /> : null}
-      {activeTab === 'profile' ? <ProfileScreen {...screenProps} /> : null}
+      <ScreenTransition transitionKey={activeTab} direction={tabDirection}>
+        {activeTab === 'explore' ? <ExploreScreen {...screenProps} /> : null}
+        {activeTab === 'trips' ? <TripsScreen {...screenProps} /> : null}
+        {activeTab === 'myVehicles' ? <MyVehiclesScreen {...screenProps} /> : null}
+        {activeTab === 'profile' ? <ProfileScreen {...screenProps} /> : null}
+      </ScreenTransition>
 
-      <TabBar activeTab={activeTab} onChangeTab={setActiveTab} bottom={!isDesktopLike} />
+      <TabBar activeTab={activeTab} onChangeTab={changeTab} bottom={!isDesktopLike} />
 
       <ToastHost bottomOffset={isDesktopLike ? 0 : layoutTokens.bottomTabHeight} />
       <ConfirmHost />

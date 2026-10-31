@@ -1,8 +1,39 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colorTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../theme/tokens';
+import { colorTokens, motionTokens, radiusTokens, shadowTokens, spacingTokens, typographyTokens } from '../theme/tokens';
+import { EASE_OUT, USE_NATIVE_DRIVER, useReducedMotion } from '../../shared/ui/Motion';
 import { APP_TABS, AppTabKey } from '../types';
+
+/** Fondo de la pestaña activa: aparece con fundido y un leve zoom en vez de saltar. */
+function ActiveBackdrop({ active, radius }: { active: boolean; radius: number }) {
+  const reducedMotion = useReducedMotion();
+  const progress = useRef(new Animated.Value(active ? 1 : 0)).current;
+
+  useEffect(() => {
+    const animation = Animated.timing(progress, {
+      toValue: active ? 1 : 0,
+      duration: reducedMotion ? 0 : motionTokens.durationShortMs,
+      easing: EASE_OUT,
+      useNativeDriver: USE_NATIVE_DRIVER
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [active, progress, reducedMotion]);
+
+  const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFill,
+        { borderRadius: radius, backgroundColor: colorTokens.primary, opacity: progress, transform: [{ scale }] }
+      ]}
+    />
+  );
+}
 
 type TabBarProps = {
   activeTab: AppTabKey;
@@ -46,7 +77,8 @@ export function TabBar({ activeTab, onChangeTab, bottom = false }: TabBarProps) 
                 accessibilityLabel={tab.label}
                 accessibilityState={{ selected: isActive }}
               >
-                <View style={[styles.mobileIconPill, isActive ? styles.mobileIconPillActive : null]}>
+                <View style={styles.mobileIconPill}>
+                  <ActiveBackdrop active={isActive} radius={15} />
                   <Ionicons
                     name={getTabIconName(tab.key, isActive)}
                     size={21}
@@ -85,10 +117,10 @@ export function TabBar({ activeTab, onChangeTab, bottom = false }: TabBarProps) 
                 accessibilityState={{ selected: isActive }}
                 style={({ pressed }) => [
                   styles.desktopTab,
-                  isActive ? styles.desktopTabActive : null,
                   pressed && !isActive ? styles.desktopTabPressed : null
                 ]}
               >
+                <ActiveBackdrop active={isActive} radius={18} />
                 <Ionicons
                   name={getTabIconName(tab.key, isActive)}
                   size={18}
@@ -167,9 +199,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     minHeight: 44
   },
-  desktopTabActive: {
-    backgroundColor: colorTokens.primary
-  },
   desktopTabPressed: {
     backgroundColor: colorTokens.surfaceMuted
   },
@@ -214,9 +243,6 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center'
-  },
-  mobileIconPillActive: {
-    backgroundColor: colorTokens.primary
   },
   mobileLabel: {
     color: colorTokens.textMuted,

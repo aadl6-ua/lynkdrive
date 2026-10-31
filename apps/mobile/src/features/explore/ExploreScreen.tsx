@@ -43,6 +43,7 @@ import {
   Button,
   Card,
   CardHeader,
+  Collapsible,
   EmptyState,
   ErrorState,
   ImageCarousel,
@@ -240,6 +241,9 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
   const [filtersError, setFiltersError] = useState<string | null>(null);
   const [showSearchRow, setShowSearchRow] = useState(true);
   const lastScrollYRef = useRef(0);
+  // Desplazamiento acumulado en la dirección actual y bloqueo tras cada cambio (ver handleScroll).
+  const scrollTravelRef = useRef(0);
+  const scrollLockUntilRef = useRef(0);
 
   const [bookingStartDate, setBookingStartDate] = useState<Date | null>(null);
   const [bookingStartHour, setBookingStartHour] = useState(10);
@@ -475,16 +479,35 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const currentY = Math.max(0, event.nativeEvent.contentOffset.y);
     const delta = currentY - lastScrollYRef.current;
+    lastScrollYRef.current = currentY;
 
-    if (currentY < 80) {
-      setShowSearchRow(true);
-    } else if (delta > 10) {
-      setShowSearchRow(false);
-    } else if (delta < -10) {
-      setShowSearchRow(true);
+    // Al plegar o desplegar el buscador cambia la altura del contenido y el navegador corrige
+    // el scroll; sin este bloqueo esa corrección se leía como scroll inverso y la barra oscilaba.
+    if (Date.now() < scrollLockUntilRef.current) {
+      scrollTravelRef.current = 0;
+      return;
     }
 
-    lastScrollYRef.current = currentY;
+    const toggle = (show: boolean) => {
+      scrollTravelRef.current = 0;
+      scrollLockUntilRef.current = Date.now() + 320;
+      setShowSearchRow(show);
+    };
+
+    if (currentY < 80) {
+      if (!showSearchRow) toggle(true);
+      return;
+    }
+
+    // Histéresis: solo cambia tras 48 px seguidos en la misma dirección.
+    const sameDirection = Math.sign(delta) === Math.sign(scrollTravelRef.current);
+    scrollTravelRef.current = sameDirection ? scrollTravelRef.current + delta : delta;
+
+    if (showSearchRow && scrollTravelRef.current > 48) {
+      toggle(false);
+    } else if (!showSearchRow && scrollTravelRef.current < -48) {
+      toggle(true);
+    }
   };
 
   const applyFilters = async (next: FilterDraft) => {
@@ -753,27 +776,29 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
   );
 
   const controlsBar = (compact: boolean) => (
-    <View style={styles.controls}>
-      {!compact ? (
-        <AddressSearch
-          value={draft.address}
-          selected={!!draft.location}
-          placeholder="¿Dónde quieres recoger el coche?"
-          onChange={(value) => {
-            setDraft((current) => ({ ...current, address: value, location: null }));
-            setFiltersError(null);
-          }}
-          onSelect={(label, lat, lng) => {
-            const next = { ...draft, address: label, location: { lat, lng }, radius: draft.radius || '25' };
-            void applyFilters(next);
-          }}
-          onClear={() => {
-            const next = { ...draft, address: '', location: null, radius: '' };
-            void applyFilters(next);
-          }}
-        />
-      ) : null}
-      {!compact && filtersError && !filtersOpen ? <InlineMessage tone="error" message={filtersError} /> : null}
+    <View>
+      <Collapsible open={!compact} spacingBelow={spacingTokens.sm}>
+        <View style={styles.controls}>
+          <AddressSearch
+            value={draft.address}
+            selected={!!draft.location}
+            placeholder="¿Dónde quieres recoger el coche?"
+            onChange={(value) => {
+              setDraft((current) => ({ ...current, address: value, location: null }));
+              setFiltersError(null);
+            }}
+            onSelect={(label, lat, lng) => {
+              const next = { ...draft, address: label, location: { lat, lng }, radius: draft.radius || '25' };
+              void applyFilters(next);
+            }}
+            onClear={() => {
+              const next = { ...draft, address: '', location: null, radius: '' };
+              void applyFilters(next);
+            }}
+          />
+          {filtersError && !filtersOpen ? <InlineMessage tone="error" message={filtersError} /> : null}
+        </View>
+      </Collapsible>
       <View style={styles.controlsRow}>
         <Pressable
           onPress={() => {

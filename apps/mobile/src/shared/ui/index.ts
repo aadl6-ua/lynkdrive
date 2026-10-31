@@ -17,3 +17,4 @@ export { PhotoGrid } from './PhotoGrid';
 export type { PhotoItem, PhotoItemStatus } from './PhotoGrid';
 export { VerificationGate } from './VerificationGate';
 export { StarRating } from './StarRating';
+export { Collapsible, ScreenTransition, useReducedMotion, USE_NATIVE_DRIVER, EASE_OUT } from './Motion';
