@@ -257,6 +257,21 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
     [vehicles, authUserId]
   );
   const imageByVehicleId = useVehiclePrimaryImages(exploreVehicles.map((vehicle) => vehicle.id));
+  // Marcadores estables entre renders para que el mapa no los recree en cada scroll o filtro.
+  const mapMarkers = useMemo(
+    () =>
+      exploreVehicles.map(
+        (vehicle): VehicleMarker => ({
+          id: vehicle.id,
+          location: { latitude: vehicle.locationLat, longitude: vehicle.locationLng },
+          brand: vehicle.brand,
+          model: vehicle.model,
+          pricePerDay: vehicle.pricePerDay,
+          imageUrl: resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null)
+        })
+      ),
+    [exploreVehicles, imageByVehicleId]
+  );
 
   const {
     items: vehicleImages,
@@ -971,16 +986,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
       <View style={styles.mapRoot}>
         <View style={StyleSheet.absoluteFill}>
           <ExploreVehiclesMap
-            vehicles={exploreVehicles.map(
-              (vehicle): VehicleMarker => ({
-                id: vehicle.id,
-                location: { latitude: vehicle.locationLat, longitude: vehicle.locationLng },
-                brand: vehicle.brand,
-                model: vehicle.model,
-                pricePerDay: vehicle.pricePerDay,
-                imageUrl: resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null)
-              })
-            )}
+            vehicles={mapMarkers}
             userLocation={userPoint}
             onVehiclePress={handleOpenVehicleDetails}
             height={Math.max(420, height)}
