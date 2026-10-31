@@ -160,3 +160,104 @@ export function translateTransmission(transmission: string | null | undefined): 
 
   return transmission ? map[transmission.toLowerCase()] ?? null : null;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Conversión hora de pared Europe/Madrid <-> instante UTC                     */
+/* -------------------------------------------------------------------------- */
+
+const madridPartsFormatter = new Intl.DateTimeFormat('en-GB', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+  timeZone: TIME_ZONE
+});
+
+export type MadridParts = { year: number; month: number; day: number; hour: number; minute: number };
+
+/** Componentes de fecha/hora tal y como se ven en Madrid (month 0-11). */
+export function getMadridParts(value: string | Date): MadridParts | null {
+  const date = toDate(value);
+
+  if (!date) {
+    return null;
+  }
+
+  const parts = madridPartsFormatter.formatToParts(date);
+  const read = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+
+  return {
+    year: read('year'),
+    month: read('month') - 1,
+    day: read('day'),
+    hour: read('hour') % 24,
+    minute: read('minute')
+  };
+}
+
+/**
+ * Instante UTC que corresponde a una hora de pared en Madrid. Tiene en cuenta
+ * el horario de verano sin depender de la zona horaria del dispositivo.
+ */
+export function madridWallTimeToDate(year: number, month: number, day: number, hour = 0, minute = 0): Date {
+  const guess = Date.UTC(year, month, day, hour, minute);
+  const parts = getMadridParts(new Date(guess));
+
+  if (!parts) {
+    return new Date(guess);
+  }
+
+  const asUtc = Date.UTC(parts.year, parts.month, parts.day, parts.hour, parts.minute);
+  const offset = asUtc - guess;
+  const candidate = new Date(guess - offset);
+  // Segundo ajuste por si el cambio de hora cae entre guess y candidate.
+  const check = getMadridParts(candidate);
+
+  if (check && check.hour !== hour) {
+    const checkUtc = Date.UTC(check.year, check.month, check.day, check.hour, check.minute);
+    return new Date(candidate.getTime() - (checkUtc - guess));
+  }
+
+  return candidate;
+}
+
+/** Fecha de calendario (y/m/d locales del objeto) + hora de Madrid -> ISO UTC. */
+export function calendarDayHourToIso(date: Date, hour: number): string {
+  return madridWallTimeToDate(date.getFullYear(), date.getMonth(), date.getDate(), hour).toISOString();
+}
+
+/** ISO UTC -> fecha de calendario (medianoche local del dispositivo) + hora en Madrid. */
+export function isoToCalendarDayHour(value: string): { date: Date; hour: number } | null {
+  const parts = getMadridParts(value);
+  return parts ? { date: new Date(parts.year, parts.month, parts.day), hour: parts.hour } : null;
+}
+
+export function formatTimeMadrid(value: string | Date): string {
+  const parts = getMadridParts(value);
+  return parts ? `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}` : '—';
+}
+
+export function formatRelativeFromNow(value: string | Date): string {
+  const date = toDate(value);
+
+  if (!date) {
+    return '—';
+  }
+
+  const diffMs = date.getTime() - Date.now();
+  const diffHours = Math.round(diffMs / 3_600_000);
+
+  if (Math.abs(diffHours) < 24) {
+    if (diffHours === 0) {
+      return 'ahora';
+    }
+
+    return diffHours > 0 ? `en ${pluralize(diffHours, 'hora', 'horas')}` : `hace ${pluralize(-diffHours, 'hora', 'horas')}`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  return diffDays > 0 ? `en ${pluralize(diffDays, 'día', 'días')}` : `hace ${pluralize(-diffDays, 'día', 'días')}`;
+}
