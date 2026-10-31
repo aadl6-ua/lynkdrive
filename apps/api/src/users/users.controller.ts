@@ -27,12 +27,6 @@ export class UsersController {
   ) {}
 
   @UseGuards(SupabaseJwtAuthGuard)
-  @Get()
-  async findAll() {
-    return this.usersService.findAllPublic();
-  }
-
-  @UseGuards(SupabaseJwtAuthGuard)
   @Get('me')
   async findMe(@CurrentUser() user: AuthUser) {
     return this.usersService.findById(user.sub);

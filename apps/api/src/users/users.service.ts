@@ -32,21 +32,6 @@ export class UsersService {
     private readonly reviewsRepository: Repository<ReviewEntity>
   ) {}
 
-  async findAll(): Promise<UserResponseDto[]> {
-    const users = await this.usersRepository.find({
-      where: { deletedAt: IsNull() },
-      order: { createdAt: 'DESC' }
-    });
-
-    return users.map((user) => this.toResponseDto(user));
-  }
-
-  async findAllPublic(): Promise<PublicUserResponseDto[]> {
-    const users = await this.findAll();
-
-    return users.map((user) => this.toPublicDto(user));
-  }
-
   async findPublicById(id: string): Promise<PublicUserResponseDto> {
     return this.toPublicDto(await this.findById(id));
   }

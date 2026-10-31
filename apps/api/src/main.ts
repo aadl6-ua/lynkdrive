@@ -47,6 +47,11 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+  if (corsOrigins.length === 0 && process.env.NODE_ENV === 'production') {
+    // La web pública debe limitarse a su dominio (p. ej. CORS_ORIGINS=https://app.lynkdrive.es).
+    logger.warn('CORS_ORIGINS no configurado: la API acepta peticiones de cualquier origen');
+  }
+
   app.enableCors(corsOrigins.length > 0 ? { origin: corsOrigins } : undefined);
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;

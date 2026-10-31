@@ -1,6 +1,7 @@
 import {
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -9,6 +10,9 @@ import {
   MaxLength,
   Min
 } from 'class-validator';
+
+/** Tope razonable por día; además evita desbordar NUMERIC(10,2). */
+export const MAX_PRICE_PER_DAY = 10000;
 
 export type FuelType = 'gasoline' | 'diesel' | 'electric' | 'hybrid';
 export type Transmission = 'manual' | 'automatic';
@@ -25,10 +29,12 @@ export class CreateVehicleDto {
   ownerId!: string;
 
   @IsString()
+  @IsNotEmpty()
   @MaxLength(100)
   brand!: string;
 
   @IsString()
+  @IsNotEmpty()
   @MaxLength(100)
   model!: string;
 
@@ -38,15 +44,18 @@ export class CreateVehicleDto {
   year!: number;
 
   @IsString()
+  @IsNotEmpty()
   @MaxLength(20)
   licensePlate!: string;
 
   @IsString()
+  @IsNotEmpty()
   @MaxLength(5000)
   description!: string;
 
   @IsNumber({ allowNaN: false, allowInfinity: false })
-  @Min(0)
+  @Min(1)
+  @Max(MAX_PRICE_PER_DAY)
   pricePerDay!: number;
 
   @IsNumber({ allowNaN: false, allowInfinity: false })
@@ -60,6 +69,7 @@ export class CreateVehicleDto {
   locationLng!: number;
 
   @IsString()
+  @IsNotEmpty()
   @MaxLength(255)
   locationAddress!: string;
 

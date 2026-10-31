@@ -167,8 +167,10 @@ function validateVehicleForm(form: VehicleForm): VehicleFormErrors {
   }
   if (!form.pricePerDay.trim()) {
     errors.pricePerDay = 'Indica el precio.';
-  } else if (Number.isNaN(price) || price <= 0) {
-    errors.pricePerDay = 'Debe ser mayor que 0.';
+  } else if (Number.isNaN(price) || price < 1) {
+    errors.pricePerDay = 'Debe ser de al menos 1 €.';
+  } else if (price > 10000) {
+    errors.pricePerDay = 'Máximo 10.000 € por día.';
   }
   if (!form.licensePlate.trim()) errors.licensePlate = 'Indica la matrícula.';
   if (!form.description.trim()) {
