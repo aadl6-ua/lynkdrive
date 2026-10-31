@@ -139,7 +139,7 @@ describe('BookingsService', () => {
     });
 
     usersRepository.findOne.mockResolvedValue({ id: DRIVER_ID, isVerified: true });
-    vehiclesRepository.findOne.mockResolvedValue({ id: VEHICLE_ID, ownerId: OWNER_ID, pricePerDay: '45.50' });
+    vehiclesRepository.findOne.mockResolvedValue({ id: VEHICLE_ID, ownerId: OWNER_ID, pricePerDay: '45.50', status: 'active' });
     availabilityQueryBuilder.getOne.mockResolvedValue({ id: 'window' });
 
     const moduleRef = await Test.createTestingModule({

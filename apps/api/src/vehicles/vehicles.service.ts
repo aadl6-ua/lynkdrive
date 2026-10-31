@@ -5,7 +5,7 @@ import { UserEntity } from '../users/entities/user.entity';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { GetVehiclesFiltersDto } from './dto/get-vehicles-filters.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
-import { VehicleResponseDto } from './dto/vehicle-response.dto';
+import { PublicVehicleResponseDto, VehicleResponseDto } from './dto/vehicle-response.dto';
 import { VehicleEntity } from './entities/vehicle.entity';
 
 type VehicleRow = {
@@ -36,8 +36,9 @@ export class VehiclesService {
     private readonly usersRepository: Repository<UserEntity>
   ) {}
 
-  async findAll(filters: GetVehiclesFiltersDto = {}): Promise<VehicleResponseDto[]> {
-    const whereParts: string[] = ['deleted_at IS NULL'];
+  // Listado público de Explorar: solo anuncios activos y sin datos privados (matrícula).
+  async findAll(filters: GetVehiclesFiltersDto = {}): Promise<PublicVehicleResponseDto[]> {
+    const whereParts: string[] = ['deleted_at IS NULL', `status = 'active'`];
     const params: Array<string | number> = [];
 
     if (typeof filters.maxPrice === 'number' && !Number.isNaN(filters.maxPrice)) {
@@ -60,9 +61,20 @@ export class VehiclesService {
       whereParts.push(`seats >= $${params.length}`);
     }
 
-    if (filters.status) {
-      params.push(filters.status);
-      whereParts.push(`status = $${params.length}`);
+    const hasPoint =
+      typeof filters.lat === 'number' &&
+      typeof filters.lng === 'number' &&
+      !Number.isNaN(filters.lat) &&
+      !Number.isNaN(filters.lng);
+    let orderBy = 'created_at DESC';
+
+    if (hasPoint) {
+      params.push(filters.lng as number);
+      const lngIndex = params.length;
+      params.push(filters.lat as number);
+      const latIndex = params.length;
+      // Con punto de referencia se ordena por cercanía (el índice GiST cubre el filtro de radio).
+      orderBy = `location::geography <-> ST_SetSRID(ST_MakePoint($${lngIndex}, $${latIndex}), 4326)::geography, created_at DESC`;
     }
 
     const hasGeoFilter =
@@ -106,12 +118,12 @@ export class VehiclesService {
         created_at
       FROM vehicles
       WHERE ${whereParts.join(' AND ')}
-      ORDER BY created_at DESC
+      ORDER BY ${orderBy}
     `;
 
     const rows = await this.vehiclesRepository.query(query, params);
 
-    return rows.map((row: VehicleRow) => this.toResponseDto(row));
+    return rows.map((row: VehicleRow) => this.toPublicDto(this.toResponseDto(row)));
   }
 
   async findMine(ownerId: string): Promise<VehicleResponseDto[]> {
@@ -386,6 +398,16 @@ export class VehiclesService {
     if (existingVehicle) {
       throw new ConflictException(`License plate ${licensePlate} already exists`);
     }
+  }
+
+  async findPublicById(id: string): Promise<PublicVehicleResponseDto> {
+    return this.toPublicDto(await this.findById(id));
+  }
+
+  private toPublicDto(vehicle: VehicleResponseDto): PublicVehicleResponseDto {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { licensePlate, ...publicFields } = vehicle;
+    return publicFields;
   }
 
   private toResponseDto(row: VehicleRow): VehicleResponseDto {

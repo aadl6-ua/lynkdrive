@@ -98,6 +98,45 @@ describe('API e2e (Postgres + PostGIS)', () => {
       const far = await api().get('/api/vehicles').query({ lat: 40.4168, lng: -3.7038, radiusKm: 5 }).expect(200);
       expect(far.body.map((v: { id: string }) => v.id)).not.toContain(vehicleId);
     });
+
+    it('el listado y la ficha publica no exponen la matricula; el owner si la ve', async () => {
+      const list = await api().get('/api/vehicles').expect(200);
+      expect(list.body.find((v: { id: string }) => v.id === vehicleId)).not.toHaveProperty('licensePlate');
+
+      const detail = await api().get(`/api/vehicles/${vehicleId}`).expect(200);
+      expect(detail.body).not.toHaveProperty('licensePlate');
+
+      const mine = await api().get('/api/vehicles/mine/list').set('Authorization', `Bearer ${ownerToken}`).expect(200);
+      expect(mine.body[0].licensePlate).toBe('1234ABC');
+    });
+
+    it('rechaza filtros invalidos con 400', async () => {
+      await api().get('/api/vehicles').query({ fuelType: 'nuclear' }).expect(400);
+      await api().get('/api/vehicles').query({ lat: 38, lng: -0.4, radiusKm: 100000 }).expect(400);
+    });
+
+    it('un vehiculo oculto no aparece en Explorar ni admite reservas', async () => {
+      await api()
+        .put(`/api/vehicles/${vehicleId}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ status: 'inactive' })
+        .expect(200);
+
+      const list = await api().get('/api/vehicles').expect(200);
+      expect(list.body.map((v: { id: string }) => v.id)).not.toContain(vehicleId);
+
+      await api()
+        .post('/api/bookings')
+        .set('Authorization', `Bearer ${driverToken}`)
+        .send({ vehicleId, startDatetime: futureDate(5, 10), endDatetime: futureDate(6, 10) })
+        .expect(400);
+
+      await api()
+        .put(`/api/vehicles/${vehicleId}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ status: 'active' })
+        .expect(200);
+    });
   });
 
   describe('flujo completo de reserva', () => {

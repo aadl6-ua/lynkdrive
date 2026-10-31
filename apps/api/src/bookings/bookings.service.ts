@@ -199,11 +199,15 @@ export class BookingsService {
 
     const vehicle = await this.vehiclesRepository.findOne({
       where: { id: createBookingDto.vehicleId, deletedAt: IsNull() },
-      select: { id: true, ownerId: true, pricePerDay: true }
+      select: { id: true, ownerId: true, pricePerDay: true, status: true }
     });
 
     if (!vehicle) {
       throw new NotFoundException(`Vehicle ${createBookingDto.vehicleId} not found`);
+    }
+
+    if (vehicle.status !== 'active') {
+      throw new BadRequestException('Este vehículo no admite reservas ahora mismo');
     }
 
     if (vehicle.ownerId === driverId) {
