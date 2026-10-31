@@ -55,7 +55,8 @@ export class AccountService {
       reviewsWritten,
       reviewsReceived,
       checklists,
-      pushTokens
+      pushTokens,
+      messagesSent
     ] = await Promise.all([
         this.dataSource.query(
           `SELECT id, brand, model, year, license_plate, description, price_per_day,
@@ -110,6 +111,11 @@ export class AccountService {
         this.dataSource.query(
           `SELECT token, platform, created_at, updated_at FROM push_tokens WHERE user_id = $1 ORDER BY created_at`,
           [user.sub]
+        ),
+        // Solo los mensajes que escribió el usuario: los recibidos son datos de la otra parte.
+        this.dataSource.query(
+          `SELECT id, booking_id, body, created_at, read_at FROM booking_messages WHERE sender_id = $1 ORDER BY created_at`,
+          [user.sub]
         )
       ]);
 
@@ -143,7 +149,8 @@ export class AccountService {
       // Incidencias de la administración que afectan al usuario o a sus reservas y vehículos,
       // con el texto de las notas pero sin identificar al administrador que las escribió.
       incidents: await this.findIncidents(user.sub),
-      pushTokens
+      pushTokens,
+      messagesSent
     };
   }
 
@@ -221,6 +228,8 @@ export class AccountService {
         );
         await manager.query(`UPDATE booking_checklists SET notes = NULL WHERE submitted_by = $1`, [user.sub]);
         await manager.query(`DELETE FROM push_tokens WHERE user_id = $1`, [user.sub]);
+        // Los mensajes del chat son texto libre del usuario: se borran (la otra parte conserva los suyos).
+        await manager.query(`DELETE FROM booking_messages WHERE sender_id = $1`, [user.sub]);
         await manager.query(
           `UPDATE users SET
              first_name = 'Usuario',
