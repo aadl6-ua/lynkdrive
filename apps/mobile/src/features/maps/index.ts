@@ -1,4 +1,3 @@
-export { VehicleLocationMap } from './components';
+export { ExploreVehiclesMap, VehicleLocationMap } from './LazyMaps';
 export type { MapCoordinates, VehicleLocationMapProps } from './components';
-export { ExploreVehiclesMap } from './components';
 export type { VehicleMarker, ExploreVehiclesMapProps } from './components';

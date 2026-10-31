@@ -222,12 +222,12 @@ export function ConfirmDialog({
         {reasonLabel ? (
           <label className="field">
             <span>{reasonLabel}</span>
-            <textarea className="input" rows={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} />
+            <textarea autoFocus className="input" rows={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} />
           </label>
         ) : null}
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
         <div className="modal__actions">
-          <button className="btn btn--ghost" onClick={onClose} disabled={busy}>
+          <button autoFocus={!reasonLabel} className="btn btn--ghost" onClick={onClose} disabled={busy}>
             Cancelar
           </button>
           <button className={`btn ${danger ? 'btn--danger' : 'btn--primary'}`} onClick={submit} disabled={busy}>

@@ -26,7 +26,15 @@ export function Sheet({ visible, onClose, title, subtitle, children, centered = 
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.backdrop, asDialog ? styles.backdropCentered : null]}
       >
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Cerrar" accessibilityRole="button" />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityLabel="Cerrar"
+          accessibilityRole="button"
+          // Con cabecera ya hay botón "Cerrar": el fondo no se repite en el lector de pantalla.
+          accessible={!title}
+          importantForAccessibility={title ? 'no-hide-descendants' : 'auto'}
+        />
         <View
           style={[
             styles.sheet,
@@ -80,8 +88,9 @@ export function OptionList<T extends string>({ options, selected, onSelect }: Op
           <Pressable
             key={option.value || `option-${index}`}
             onPress={() => onSelect(option.value)}
-            accessibilityRole="button"
-            accessibilityState={{ selected: isSelected }}
+            // Con valor seleccionado se comporta como grupo de opciones; si no, como lista de acciones.
+            accessibilityRole={selected !== undefined ? 'radio' : 'button'}
+            accessibilityState={selected !== undefined ? { checked: isSelected } : undefined}
             style={({ pressed }) => [
               styles.option,
               index === options.length - 1 ? styles.optionLast : null,

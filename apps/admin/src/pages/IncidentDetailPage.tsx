@@ -57,7 +57,7 @@ export function IncidentDetailPage({ id }: { id: string }) {
               }
             />
             <div className="stack">
-              {actionError ? <p className="form-error">{actionError}</p> : null}
+              {actionError ? <p className="form-error" role="alert">{actionError}</p> : null}
               <div className="grid-2">
                 <Card title="Detalle">
                   <p className="pre-line">{incident.description}</p>

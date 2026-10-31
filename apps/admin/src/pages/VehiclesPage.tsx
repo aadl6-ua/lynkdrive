@@ -49,12 +49,12 @@ export function VehiclesPage() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Vehículo</th>
-                      <th>Matrícula</th>
-                      <th>Propietario</th>
-                      <th>Precio/día</th>
-                      <th>Reservas</th>
-                      <th>Estado</th>
+                      <th scope="col">Vehículo</th>
+                      <th scope="col">Matrícula</th>
+                      <th scope="col">Propietario</th>
+                      <th scope="col">Precio/día</th>
+                      <th scope="col">Reservas</th>
+                      <th scope="col">Estado</th>
                       <th />
                     </tr>
                   </thead>

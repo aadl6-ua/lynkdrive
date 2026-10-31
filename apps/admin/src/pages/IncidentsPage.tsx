@@ -60,7 +60,7 @@ function NewIncidentForm({ bookingId, onCancel }: { bookingId: string; onCancel:
             <input className="input mono" pattern={UUID_PATTERN} value={form.vehicleId} onChange={set('vehicleId')} />
           </label>
         </div>
-        {error ? <p className="form-error">{error}</p> : null}
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
         <div className="form__actions">
           <button type="button" className="btn btn--ghost" onClick={onCancel}>
             Cancelar
@@ -113,11 +113,11 @@ export function IncidentsPage() {
                   <table className="table">
                     <thead>
                       <tr>
-                        <th>Título</th>
-                        <th>Reserva</th>
-                        <th>Notas</th>
-                        <th>Actualizada</th>
-                        <th>Estado</th>
+                        <th scope="col">Título</th>
+                        <th scope="col">Reserva</th>
+                        <th scope="col">Notas</th>
+                        <th scope="col">Actualizada</th>
+                        <th scope="col">Estado</th>
                       </tr>
                     </thead>
                     <tbody>

@@ -102,6 +102,7 @@
     - `VehicleResponse.disabledByAdmin` (solo en `mine/list`): Mis Vehículos muestra "Retirado" y no deja reactivarlo.
     - Mis Viajes: "Gastado"/"Ingresos" solo cuentan reservas pagadas (`paid_confirmed`, `in_progress`, `completed`), como Mis ingresos; si la otra parte borró su cuenta se muestra "Usuario eliminado".
     - Recorrido reproducible en `scripts/e2e-web/` (`recorrido.mjs` con Playwright y `nominatim-mock.js`); instrucciones en su `README.md`.
+- **Accesibilidad y rendimiento (2026-10-31):** `colorTokens.textSubtle` = `#6B7079` (contraste AA >= 4,5:1 sobre blanco y `bgLight`); los errores de campo (`FieldError`) se anuncian (live region en Android, `announceForAccessibility` en iOS); imágenes con `alt` en web (vacío si decorativas); selectores con rol `radio`/`checked`. Los mapas se cargan con `React.lazy` desde `features/maps/LazyMaps.tsx` con un único `import()` de `./components` (dos imports separados hacen que Metro saque Leaflet a un chunk común cargado al inicio). Admin: foco visible con `:focus-visible`, `th scope="col"`, `aria-current` en navegación, errores con `role="alert"` y foco inicial en diálogos.
 
 ---
 

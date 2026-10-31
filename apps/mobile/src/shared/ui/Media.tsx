@@ -72,6 +72,8 @@ export function AppImage({
         onError={() => setFailed(true)}
         accessibilityLabel={accessibilityLabel}
         accessible={!!accessibilityLabel}
+        // En web: texto alternativo; vacío si la imagen es decorativa.
+        alt={accessibilityLabel ?? ''}
       />
     </View>
   );
@@ -123,6 +125,7 @@ export function Avatar({ uri, name, size = 40, style, tone = 'light' }: AvatarPr
       cachePolicy="memory-disk"
       onError={() => setFailed(true)}
       accessibilityLabel={`Avatar de ${name}`}
+      alt={`Avatar de ${name}`}
     />
   );
 }

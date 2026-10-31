@@ -103,7 +103,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
             onPress={() => setRevealed((current) => !current)}
             accessibilityRole="button"
             accessibilityLabel={revealed ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-            hitSlop={10}
+            hitSlop={12}
           >
             <Ionicons name={revealed ? 'eye-off-outline' : 'eye-outline'} size={20} color={colorTokens.textMuted} />
           </Pressable>

@@ -16,7 +16,7 @@ export const colorTokens = {
   surfaceMuted: '#F1F3F6',
   textMain: '#121212',
   textMuted: '#5C5C5C',
-  textSubtle: '#8A8F98',
+  textSubtle: '#6B7079',
   border: '#E2E4E8',
   borderStrong: '#C9CED6',
   success: '#2ECC71',

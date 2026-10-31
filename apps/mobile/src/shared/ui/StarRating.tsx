@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colorTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import { colorTokens, HIT_SIZE, spacingTokens, typographyTokens } from '../../app/theme/tokens';
 
 type StarRatingProps = {
   value: number;
@@ -18,15 +18,15 @@ export function StarRating({ value, size = 16, onChange, showValue = false }: St
   if (onChange) {
     return (
       <View style={styles.inputWrap}>
-        <View style={styles.row} accessibilityRole="adjustable" accessibilityLabel={`Valoración: ${rounded} de 5`}>
+        <View style={styles.row} accessibilityRole="radiogroup" accessibilityLabel={`Valoración: ${rounded} de 5`}>
           {[1, 2, 3, 4, 5].map((star) => (
             <Pressable
               key={star}
               onPress={() => onChange(star)}
-              accessibilityRole="button"
+              accessibilityRole="radio"
               accessibilityLabel={`${star} ${star === 1 ? 'estrella' : 'estrellas'}`}
-              accessibilityState={{ selected: star === rounded }}
-              hitSlop={4}
+              accessibilityState={{ checked: star === rounded }}
+              hitSlop={Math.max(4, Math.ceil((HIT_SIZE - size - spacingTokens.xs * 2) / 2))}
               style={({ pressed }) => [styles.inputStar, pressed ? styles.pressed : null]}
             >
               <Ionicons
@@ -37,13 +37,18 @@ export function StarRating({ value, size = 16, onChange, showValue = false }: St
             </Pressable>
           ))}
         </View>
-        <Text style={styles.inputLabel}>{RATING_LABELS[rounded] ?? ''}</Text>
+        <Text style={styles.inputLabel} accessibilityLiveRegion="polite">{RATING_LABELS[rounded] ?? ''}</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.row} accessible accessibilityLabel={`${value.toFixed(1)} de 5 estrellas`}>
+    <View
+      style={styles.row}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={`${value.toFixed(1)} de 5 estrellas`}
+    >
       {[1, 2, 3, 4, 5].map((star) => {
         const name = value >= star ? 'star' : value >= star - 0.5 ? 'star-half' : 'star-outline';
         return (
