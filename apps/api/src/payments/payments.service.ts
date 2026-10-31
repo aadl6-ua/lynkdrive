@@ -6,11 +6,13 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException
 } from '@nestjs/common';
 import Stripe from 'stripe';
 import { DataSource } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
+import { BookingNotificationsService } from '../notifications/booking-notifications.service';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { ConnectLinkResponseDto, ConnectStatusResponseDto } from './dto/connect-response.dto';
 import { PaymentConfigResponseDto } from './dto/payment-config-response.dto';
@@ -45,7 +47,8 @@ export class PaymentsService {
 
   constructor(
     private readonly dataSource: DataSource,
-    @Inject(STRIPE_CLIENT) private readonly stripe: Stripe | null
+    @Inject(STRIPE_CLIENT) private readonly stripe: Stripe | null,
+    @Optional() private readonly notifications?: BookingNotificationsService
   ) {}
 
   isStripeMode(): boolean {
@@ -471,7 +474,13 @@ export class PaymentsService {
       [paymentIntentId, bookingId]
     );
 
-    return !!this.firstRow<{ id: string }>(rows);
+    const applied = !!this.firstRow<{ id: string }>(rows);
+
+    if (applied) {
+      this.notifications?.notify('paid_confirmed', bookingId);
+    }
+
+    return applied;
   }
 
   private async getReadyConnectedAccountId(ownerId: string): Promise<string | null> {

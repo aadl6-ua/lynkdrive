@@ -23,7 +23,7 @@ const bookingRow = {
   updated_at: new Date()
 };
 
-function buildService(opts: { lockedStatus?: string; conflict?: boolean; initialRow?: typeof bookingRow }) {
+function buildService(opts: { lockedStatus?: string; conflict?: boolean; initialRow?: typeof bookingRow; rejectedIds?: string[] }) {
   const calls: Call[] = [];
   let transactionRuns = 0;
   const run = async (sql: string, params: unknown[] = []) => {
@@ -33,6 +33,10 @@ function buildService(opts: { lockedStatus?: string; conflict?: boolean; initial
     }
     if (sql.includes('SELECT id') && sql.includes("status IN ('accepted'")) {
       return opts.conflict ? [{ id: 'other' }] : [];
+    }
+    if (sql.includes("status = 'rejected'")) {
+      // pg devuelve [filas, recuento] en UPDATE ... RETURNING.
+      return [(opts.rejectedIds ?? []).map((id) => ({ id })), (opts.rejectedIds ?? []).length];
     }
     if (sql.includes('b.id = $1')) {
       return [{ ...(opts.initialRow ?? bookingRow), status: calls.some((c) => c.sql.includes("status = 'accepted'")) ? 'accepted' : 'pending' }];
@@ -49,8 +53,9 @@ function buildService(opts: { lockedStatus?: string; conflict?: boolean; initial
       })
     }
   };
-  const service = new BookingsService(repo as never, {} as never, {} as never, {} as never, {} as never);
-  return { service, calls, repo, transactions: () => transactionRuns };
+  const notifications = { notify: jest.fn() };
+  const service = new BookingsService(repo as never, {} as never, {} as never, {} as never, {} as never, notifications as never);
+  return { service, calls, repo, notifications, transactions: () => transactionRuns };
 }
 
 const ownerUser = { sub: OWNER, claims: {} };
@@ -78,6 +83,18 @@ describe('BookingsService - aceptar reserva', () => {
     expect(reject.params[0]).toBe('v1');
     expect(reject.params[1]).toBe('b1');
     expect(reject.params[4]).toBe(HANDOVER_BUFFER_HOURS);
+  });
+
+  it('notifica la aceptacion y cada solicitud rechazada automaticamente', async () => {
+    const { service, notifications } = buildService({ rejectedIds: ['b2', 'b3'] });
+
+    await service.updateStatus('b1', ownerUser, accept);
+
+    expect(notifications.notify.mock.calls).toEqual([
+      ['accepted', 'b1'],
+      ['rejected', 'b2'],
+      ['rejected', 'b3']
+    ]);
   });
 
   it('no acepta si otra reserva confirmada choca (incluido el colchon) y no modifica nada', async () => {

@@ -3,11 +3,13 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
-  NotFoundException
+  NotFoundException,
+  Optional
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, IsNull, Repository } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
+import { BookingEmailEvent, BookingNotificationsService } from '../notifications/booking-notifications.service';
 import { PaymentsService } from '../payments/payments.service';
 import { UserEntity } from '../users/entities/user.entity';
 import { VehicleAvailabilityWindowEntity } from '../vehicle-availability-windows/entities/vehicle-availability-window.entity';
@@ -46,6 +48,9 @@ type VehicleBookingSlotDto = Pick<
   'id' | 'vehicleId' | 'startDatetime' | 'endDatetime' | 'status'
 >;
 
+// Estados que generan email al cambiar por PUT /status (accepted y paid_confirmed se notifican aparte).
+const EMAIL_EVENTS: BookingEmailEvent[] = ['rejected', 'paid_confirmed', 'completed', 'cancelled'];
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -57,7 +62,8 @@ export class BookingsService {
     private readonly usersRepository: Repository<UserEntity>,
     @InjectRepository(VehicleAvailabilityWindowEntity)
     private readonly availabilityRepository: Repository<VehicleAvailabilityWindowEntity>,
-    private readonly paymentsService: PaymentsService
+    private readonly paymentsService: PaymentsService,
+    @Optional() private readonly notifications?: BookingNotificationsService
   ) {}
 
   async findMineAsDriver(userId: string): Promise<BookingResponseDto[]> {
@@ -247,6 +253,8 @@ export class BookingsService {
       throw new ConflictException('Booking could not be created');
     }
 
+    this.notifications?.notify('requested', createdId);
+
     return this.findByIdForUser(createdId, driverId);
   }
 
@@ -315,7 +323,9 @@ export class BookingsService {
       : row.owner_contact_method;
 
     if (role === 'owner' && updateStatusDto.status === 'accepted') {
-      await this.acceptAtomically(row, nextOwnerContactMethod ?? null);
+      const autoRejectedIds = await this.acceptAtomically(row, nextOwnerContactMethod ?? null);
+      this.notifications?.notify('accepted', id);
+      autoRejectedIds.forEach((rejectedId) => this.notifications?.notify('rejected', rejectedId));
       return this.findByIdForUser(id, user.sub);
     }
 
@@ -331,13 +341,18 @@ export class BookingsService {
       [updateStatusDto.status, nextOwnerContactMethod ?? null, id]
     );
 
+    if (EMAIL_EVENTS.includes(updateStatusDto.status as BookingEmailEvent)) {
+      this.notifications?.notify(updateStatusDto.status as BookingEmailEvent, id, user.sub);
+    }
+
     return this.findByIdForUser(id, user.sub);
   }
 
   // Acepta una solicitud y rechaza las pending solapadas del mismo vehiculo en una unica transaccion.
   // Se bloquea la fila del vehiculo para serializar aceptaciones concurrentes sobre el mismo coche.
-  private async acceptAtomically(row: BookingRow, ownerContactMethod: string | null): Promise<void> {
-    await this.bookingsRepository.manager.transaction(async (manager: EntityManager) => {
+  // Devuelve los ids de las solicitudes pending rechazadas automáticamente.
+  private async acceptAtomically(row: BookingRow, ownerContactMethod: string | null): Promise<string[]> {
+    return this.bookingsRepository.manager.transaction(async (manager: EntityManager) => {
       await manager.query(`SELECT id FROM vehicles WHERE id = $1 FOR UPDATE`, [row.vehicle_id]);
 
       const locked = await manager.query(
@@ -367,7 +382,7 @@ export class BookingsService {
         [row.id, ownerContactMethod]
       );
 
-      await manager.query(
+      const rejected = await manager.query(
         `
           UPDATE bookings
           SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
@@ -376,6 +391,7 @@ export class BookingsService {
             AND status = 'pending'
             AND start_datetime < $4::timestamptz + make_interval(hours => $5)
             AND end_datetime + make_interval(hours => $5) > $3::timestamptz
+          RETURNING id
         `,
         [
           row.vehicle_id,
@@ -385,6 +401,10 @@ export class BookingsService {
           HANDOVER_BUFFER_HOURS
         ]
       );
+
+      // UPDATE ... RETURNING con query() devuelve [filas, recuento] en pg.
+      const rejectedRows = (Array.isArray(rejected?.[0]) ? rejected[0] : rejected) as Array<{ id: string }> | undefined;
+      return (rejectedRows ?? []).map((item) => item.id).filter(Boolean);
     });
   }
 
