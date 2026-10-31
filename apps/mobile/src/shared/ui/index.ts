@@ -15,3 +15,5 @@ export type { SegmentOption } from './Layout';
 export { AppImage, Avatar, ImageCarousel, ImageViewer } from './Media';
 export { PhotoGrid } from './PhotoGrid';
 export type { PhotoItem, PhotoItemStatus } from './PhotoGrid';
+export { VerificationGate } from './VerificationGate';
+export { StarRating } from './StarRating';

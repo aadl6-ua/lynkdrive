@@ -24,7 +24,10 @@ type ScreenProps = {
   refreshing?: boolean;
   onRefresh?: () => void;
   maxWidth?: number;
-  stickyHeaderIndices?: number[];
+  /** Bloque que se queda fijo arriba al hacer scroll (filtros, pestañas). */
+  stickyHeader?: ReactNode;
+  /** Contenido antes del bloque fijo (normalmente la cabecera de pantalla). */
+  header?: ReactNode;
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   contentStyle?: StyleProp<ViewStyle>;
   /** Contenido fijo superpuesto (FAB, barras de acción). */
@@ -34,6 +37,8 @@ type ScreenProps = {
 /**
  * Contenedor estándar de pantalla: scroll con pull-to-refresh, teclado que no
  * tapa los campos, padding según barras de navegación y ancho máximo en web.
+ * El espacio superior (status bar / barra de navegación de escritorio) queda
+ * fuera del scroll para que el bloque fijo no se meta debajo.
  */
 export const Screen = forwardRef<ScrollView, ScreenProps>(function Screen(
   {
@@ -43,29 +48,32 @@ export const Screen = forwardRef<ScrollView, ScreenProps>(function Screen(
     refreshing = false,
     onRefresh,
     maxWidth = layoutTokens.contentMaxWidth,
-    stickyHeaderIndices,
+    stickyHeader,
+    header,
     onScroll,
     contentStyle,
     overlay
   },
   ref
 ) {
+  const widthStyle = { maxWidth };
+  const stickyIndex = stickyHeader ? (header ? 1 : 0) : undefined;
+
   return (
     <KeyboardAvoidingView
-      style={styles.flex}
+      style={[styles.flex, { paddingTop: topPadding }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={0}
     >
       <ScrollView
         ref={ref}
         style={styles.flex}
         contentContainerStyle={[
           styles.content,
-          { paddingTop: topPadding + spacingTokens.sm, paddingBottom: bottomPadding + spacingTokens.xl }
+          { paddingTop: spacingTokens.md, paddingBottom: bottomPadding + spacingTokens.xl }
         ]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-        stickyHeaderIndices={stickyHeaderIndices}
+        stickyHeaderIndices={stickyIndex !== undefined ? [stickyIndex] : undefined}
         onScroll={onScroll}
         scrollEventThrottle={16}
         refreshControl={
@@ -75,12 +83,17 @@ export const Screen = forwardRef<ScrollView, ScreenProps>(function Screen(
               onRefresh={onRefresh}
               tintColor={colorTokens.primary}
               colors={[colorTokens.accent2]}
-              progressViewOffset={topPadding}
             />
           ) : undefined
         }
       >
-        <View style={[styles.inner, { maxWidth }, contentStyle]}>{children}</View>
+        {header ? <View style={[styles.inner, styles.headerBlock, widthStyle]}>{header}</View> : null}
+        {stickyHeader ? (
+          <View style={styles.stickyOuter}>
+            <View style={[styles.inner, widthStyle]}>{stickyHeader}</View>
+          </View>
+        ) : null}
+        <View style={[styles.inner, widthStyle, contentStyle]}>{children}</View>
       </ScrollView>
       {overlay ?? null}
     </KeyboardAvoidingView>
@@ -212,6 +225,18 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
     gap: spacingTokens.lg
+  },
+  headerBlock: {
+    marginBottom: spacingTokens.lg
+  },
+  stickyOuter: {
+    // Fondo opaco para que la lista no se vea por detrás al quedar fijo.
+    backgroundColor: colorTokens.bgLight,
+    marginHorizontal: -spacingTokens.lg,
+    paddingHorizontal: spacingTokens.lg,
+    paddingTop: spacingTokens.xs,
+    paddingBottom: spacingTokens.md,
+    zIndex: 10
   },
   header: {
     gap: spacingTokens.sm,

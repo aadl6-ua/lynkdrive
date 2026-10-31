@@ -1,6 +1,9 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { colorTokens, spacingTokens, typographyTokens, radiusTokens } from '../../app/theme/tokens';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { colorTokens, HIT_SIZE, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import { getBillableDays, madridWallTimeToDate, pluralize } from '../../shared/format';
+import { IconButton } from '../../shared/ui';
 
 type AvailabilityWindowItem = {
   id: string;
@@ -38,132 +41,170 @@ interface CalendarPickerProps {
 type DayStatus = 'past' | 'unavailable' | 'partial' | 'available';
 type PickerMode = 'start' | 'end' | null;
 
-function getDayStatus(
-  date: Date,
-  availabilityWindows: AvailabilityWindowItem[],
-  bookings: BookingItem[],
-  mode: 'explore' | 'owner'
-): DayStatus {
-  if (mode === 'owner') {
-    return 'available';
-  }
+const HOUR_MS = 60 * 60 * 1000;
+const OPERATIONAL_BUFFER_MS = 2 * HOUR_MS;
+const MIN_HOUR = 9;
+const MAX_HOUR = 20;
+const WEEK_DAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const MONTH_NAMES = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre'
+];
 
-  const now = new Date();
-  const startOfDay = new Date(date);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(date);
-  endOfDay.setHours(23, 59, 59, 999);
+/** Límites del día de calendario en hora de Madrid (independiente del dispositivo). */
+function getMadridDayBounds(date: Date): { start: number; end: number } {
+  const start = madridWallTimeToDate(date.getFullYear(), date.getMonth(), date.getDate(), 0).getTime();
+  const end = madridWallTimeToDate(date.getFullYear(), date.getMonth(), date.getDate() + 1, 0).getTime();
+  return { start, end };
+}
 
-  // Si la fecha es pasada, gris oscuro
-  if (endOfDay < now) {
+function getDayStatus(date: Date, availabilityWindows: AvailabilityWindowItem[], bookings: BookingItem[]): DayStatus {
+  const { start: dayStart, end: dayEnd } = getMadridDayBounds(date);
+
+  if (dayEnd <= Date.now()) {
     return 'past';
   }
 
-  // Buscar ventanas de disponibilidad que toquen este día
-  const relevantWindows = availabilityWindows.filter((window) => {
-    const winStart = new Date(window.startDatetime);
-    const winEnd = new Date(window.endDatetime);
-    return winStart <= endOfDay && winEnd >= startOfDay;
-  });
+  // Reservas confirmadas (pending/rechazadas/canceladas no bloquean) + 2h operativas.
+  const blocked = bookings
+    .filter((booking) => booking.status !== 'pending' && booking.status !== 'rejected' && booking.status !== 'cancelled')
+    .map((booking) => ({
+      start: new Date(booking.startDatetime).getTime(),
+      end: new Date(booking.endDatetime).getTime() + OPERATIONAL_BUFFER_MS
+    }));
 
-  if (relevantWindows.length === 0) {
-    return 'unavailable';
-  }
+  let longestFreeMs = 0;
+  let totalFreeMs = 0;
 
-  // Buscar reservas confirmadas que toquen este día (no pending)
-  const confirmedBookings = bookings.filter((booking) => {
-    if (booking.status === 'pending' || booking.status === 'rejected' || booking.status === 'cancelled') {
-      return false;
+  for (const window of availabilityWindows) {
+    const realStart = Math.max(new Date(window.startDatetime).getTime(), dayStart, Date.now());
+    const realEnd = Math.min(new Date(window.endDatetime).getTime(), dayEnd);
+
+    if (realEnd <= realStart) {
+      continue;
     }
-    const bookStart = new Date(booking.startDatetime);
-    const bookEnd = new Date(booking.endDatetime);
-    // Agregar 2h operativas de bloqueo
-    bookEnd.setHours(bookEnd.getHours() + 2);
-    return bookStart <= endOfDay && bookEnd >= startOfDay;
-  });
 
-  // Calcular horas libres: intersection de ventanas con día, menos horas ocupadas
-  let totalFreeHours = 0;
+    // Tramos libres dentro de la ventana tras restar bloqueos.
+    const overlaps = blocked
+      .filter((item) => item.start < realEnd && item.end > realStart)
+      .sort((a, b) => a.start - b.start);
 
-  for (const window of relevantWindows) {
-    const winStart = new Date(window.startDatetime);
-    const winEnd = new Date(window.endDatetime);
+    let cursor = realStart;
 
-    // Intersection con el día
-    const dayStart = new Date(date);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(date);
-    dayEnd.setHours(23, 59, 59, 999);
-
-    const realStart = Math.max(winStart.getTime(), dayStart.getTime());
-    const realEnd = Math.min(winEnd.getTime(), dayEnd.getTime());
-
-    if (realEnd > realStart) {
-      let windowHours = (realEnd - realStart) / (1000 * 60 * 60);
-
-      // Restar horas ocupadas por reservas
-      for (const booking of confirmedBookings) {
-        const bookStart = new Date(booking.startDatetime);
-        const bookEnd = new Date(booking.endDatetime);
-        bookEnd.setHours(bookEnd.getHours() + 2);
-
-        const occupyStart = Math.max(bookStart.getTime(), realStart);
-        const occupyEnd = Math.min(bookEnd.getTime(), realEnd);
-
-        if (occupyEnd > occupyStart) {
-          windowHours -= (occupyEnd - occupyStart) / (1000 * 60 * 60);
-        }
+    for (const item of overlaps) {
+      if (item.start > cursor) {
+        const free = item.start - cursor;
+        totalFreeMs += free;
+        longestFreeMs = Math.max(longestFreeMs, free);
       }
 
-      totalFreeHours += Math.max(0, windowHours);
+      cursor = Math.max(cursor, item.end);
+    }
+
+    if (realEnd > cursor) {
+      const free = realEnd - cursor;
+      totalFreeMs += free;
+      longestFreeMs = Math.max(longestFreeMs, free);
     }
   }
 
-  // Si >= 10h continuas, verde. Si < 10h, naranja
-  if (totalFreeHours >= 10) {
+  if (longestFreeMs >= 10 * HOUR_MS) {
     return 'available';
-  } else if (totalFreeHours > 0) {
-    return 'partial';
   }
 
-  return 'unavailable';
+  return totalFreeMs > 0 ? 'partial' : 'unavailable';
 }
 
-function getDayColor(status: DayStatus): string {
-  if (status === 'available') return colorTokens.success; // Verde
-  if (status === 'partial') return colorTokens.accent2; // Naranja
-  if (status === 'past') return '#CCCCCC'; // Gris claro (fecha pasada)
-  return '#E8E8E8'; // Gris (sin disponibilidad)
+function hasOwnerWindow(date: Date, availabilityWindows: AvailabilityWindowItem[]): boolean {
+  const { start, end } = getMadridDayBounds(date);
+
+  return availabilityWindows.some(
+    (window) => new Date(window.startDatetime).getTime() < end && new Date(window.endDatetime).getTime() > start
+  );
 }
 
-function getDayBackgroundColor(_status: DayStatus, isSelected: boolean): string {
-  if (isSelected) {
-    return colorTokens.primary;
-  }
-  return 'transparent';
-}
+const DOT_COLOR: Record<DayStatus, string> = {
+  available: colorTokens.success,
+  partial: colorTokens.accent2,
+  unavailable: colorTokens.borderStrong,
+  past: 'transparent'
+};
 
 function formatFieldDate(date: Date | null): string {
   if (!date) {
-    return '--/--/----';
+    return 'Elegir fecha';
   }
-  return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  return `${date.getDate()} ${MONTH_NAMES[date.getMonth()].slice(0, 3).toLowerCase()} ${date.getFullYear()}`;
 }
 
-function adjustHour(currentHour: number, delta: number): number {
-  const nextHour = currentHour + delta;
-  if (nextHour < 9) return 9;
-  if (nextHour > 20) return 20;
-  return nextHour;
+function formatHour(hour: number): string {
+  return `${String(hour).padStart(2, '0')}:00`;
 }
 
-function formatMonthYear(date: Date): string {
-  const month = date
-    .toLocaleDateString('es-ES', { month: 'long' })
-    .replace(/^./, (character) => character.toUpperCase());
-  const year = date.toLocaleDateString('es-ES', { year: 'numeric' });
+function clampHour(hour: number): number {
+  return Math.min(MAX_HOUR, Math.max(MIN_HOUR, hour));
+}
 
-  return `${month} ${year}`;
+function isSameDay(a: Date | null, b: Date): boolean {
+  return !!a && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+type RangeFieldProps = {
+  label: string;
+  date: Date | null;
+  hour: number;
+  active: boolean;
+  onPress: () => void;
+  onHourChange: (hour: number) => void;
+};
+
+function RangeField({ label, date, hour, active, onPress, onHourChange }: RangeFieldProps) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${date ? formatFieldDate(date) : 'sin fecha'}`}
+        accessibilityHint="Abre el calendario"
+        accessibilityState={{ expanded: active }}
+        style={({ pressed }) => [styles.fieldButton, active ? styles.fieldButtonActive : null, pressed ? styles.pressed : null]}
+      >
+        <Ionicons name="calendar-outline" size={18} color={active ? colorTokens.accent2 : colorTokens.textMuted} />
+        <Text style={[styles.fieldValue, !date ? styles.fieldPlaceholder : null]} numberOfLines={1}>
+          {formatFieldDate(date)}
+        </Text>
+      </Pressable>
+      <View style={styles.hourRow} accessibilityLabel={`Hora de ${label.toLowerCase()}: ${formatHour(hour)}`}>
+        <IconButton
+          icon="remove"
+          size={36}
+          accessibilityLabel={`Restar una hora a ${label.toLowerCase()}`}
+          onPress={() => onHourChange(clampHour(hour - 1))}
+          disabled={hour <= MIN_HOUR}
+        />
+        <Text style={styles.hourValue}>{formatHour(hour)}</Text>
+        <IconButton
+          icon="add"
+          size={36}
+          accessibilityLabel={`Sumar una hora a ${label.toLowerCase()}`}
+          onPress={() => onHourChange(clampHour(hour + 1))}
+          disabled={hour >= MAX_HOUR}
+        />
+      </View>
+    </View>
+  );
 }
 
 export const CalendarPicker = React.memo(
@@ -180,22 +221,17 @@ export const CalendarPicker = React.memo(
     const lastInitialRangeSignatureRef = useRef<string | null>(null);
 
     const months = useMemo(() => {
-      const result = [];
       const now = new Date();
-      for (let i = 0; i < 6; i++) {
-        const date = new Date(now.getFullYear(), now.getMonth() + i, 1);
-        result.push(date);
-      }
-      return result;
+      return Array.from({ length: 6 }, (_, index) => new Date(now.getFullYear(), now.getMonth() + index, 1));
     }, []);
-
-    useEffect(() => {
-      onDateRangeChangeRef.current(dateRange.startDate, dateRange.startHour, dateRange.endDate, dateRange.endHour);
-    }, [dateRange]);
 
     useEffect(() => {
       onDateRangeChangeRef.current = onDateRangeChange;
     }, [onDateRangeChange]);
+
+    useEffect(() => {
+      onDateRangeChangeRef.current(dateRange.startDate, dateRange.startHour, dateRange.endDate, dateRange.endHour);
+    }, [dateRange]);
 
     useEffect(() => {
       if (!initialDateRange) {
@@ -214,442 +250,406 @@ export const CalendarPicker = React.memo(
       }
 
       lastInitialRangeSignatureRef.current = nextSignature;
-
-      setDateRange({
-        startDate: initialDateRange.startDate,
-        startHour: initialDateRange.startHour,
-        endDate: initialDateRange.endDate,
-        endHour: initialDateRange.endHour
-      });
+      setDateRange({ ...initialDateRange });
     }, [initialDateRange]);
-
-    const handleDayPress = (day: Date) => {
-      const dayOnly = new Date(day);
-      dayOnly.setHours(0, 0, 0, 0);
-
-      setDateRange((prev) => {
-        if (pickerMode === 'start') {
-          const nextEndDate = prev.endDate && dayOnly > prev.endDate ? null : prev.endDate;
-          return {
-            ...prev,
-            startDate: dayOnly,
-            endDate: nextEndDate
-          };
-        }
-
-        if (pickerMode === 'end') {
-          if (prev.startDate && dayOnly < prev.startDate) {
-            return {
-              ...prev,
-              startDate: dayOnly,
-              endDate: prev.startDate
-            };
-          }
-
-          return {
-            ...prev,
-            endDate: dayOnly
-          };
-        }
-
-        if (!prev.startDate) {
-          return {
-            ...prev,
-            startDate: dayOnly
-          };
-        }
-
-        if (!prev.endDate) {
-          if (dayOnly < prev.startDate) {
-            return {
-              ...prev,
-              startDate: dayOnly,
-              endDate: prev.startDate
-            };
-          }
-          return {
-            ...prev,
-            endDate: dayOnly
-          };
-        }
-
-        return {
-          ...prev,
-          startDate: dayOnly,
-          endDate: null
-        };
-      });
-
-      if (pickerMode) {
-        setPickerMode(null);
-      }
-    };
 
     const activeMonth = months[activeMonthIndex];
     const year = activeMonth.getFullYear();
     const month = activeMonth.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const firstDay = new Date(year, month, 1).getDay();
-    const firstDayOfWeek = (firstDay + 6) % 7;
+    const firstDayOfWeek = (new Date(year, month, 1).getDay() + 6) % 7;
+
+    const dayStatuses = useMemo(() => {
+      return Array.from({ length: daysInMonth }, (_, index) => {
+        const date = new Date(year, month, index + 1);
+
+        if (mode === 'owner') {
+          const { end } = getMadridDayBounds(date);
+          if (end <= Date.now()) {
+            return 'past' as DayStatus;
+          }
+          return hasOwnerWindow(date, availabilityWindows) ? ('available' as DayStatus) : ('unavailable' as DayStatus);
+        }
+
+        return getDayStatus(date, availabilityWindows, bookings);
+      });
+    }, [availabilityWindows, bookings, daysInMonth, mode, month, year]);
+
+    const jumpToMonthOf = (date: Date | null) => {
+      if (!date) {
+        return;
+      }
+
+      const now = new Date();
+      const offset = (date.getFullYear() - now.getFullYear()) * 12 + (date.getMonth() - now.getMonth());
+
+      if (offset >= 0 && offset < months.length) {
+        setActiveMonthIndex(offset);
+      }
+    };
+
+    const togglePicker = (target: Exclude<PickerMode, null>) => {
+      setPickerMode((prev) => (prev === target ? null : target));
+      jumpToMonthOf(target === 'start' ? dateRange.startDate : dateRange.endDate ?? dateRange.startDate);
+    };
+
+    const handleDayPress = (day: Date) => {
+      setDateRange((prev) => {
+        if (pickerMode === 'start') {
+          const nextEndDate = prev.endDate && day > prev.endDate ? null : prev.endDate;
+          return { ...prev, startDate: day, endDate: nextEndDate };
+        }
+
+        if (prev.startDate && day < prev.startDate) {
+          return { ...prev, startDate: day, endDate: prev.startDate };
+        }
+
+        return { ...prev, endDate: day };
+      });
+
+      // Tras elegir inicio pasamos directamente a elegir fin.
+      setPickerMode((current) => (current === 'start' && !dateRange.endDate ? 'end' : null));
+    };
+
+    const summary =
+      dateRange.startDate && dateRange.endDate
+        ? (() => {
+            const start = madridWallTimeToDate(
+              dateRange.startDate.getFullYear(),
+              dateRange.startDate.getMonth(),
+              dateRange.startDate.getDate(),
+              dateRange.startHour
+            );
+            const end = madridWallTimeToDate(
+              dateRange.endDate.getFullYear(),
+              dateRange.endDate.getMonth(),
+              dateRange.endDate.getDate(),
+              dateRange.endHour
+            );
+            return end.getTime() > start.getTime() ? getBillableDays(start, end) : null;
+          })()
+        : null;
+
+    const rangeInvalid = !!dateRange.startDate && !!dateRange.endDate && summary === null;
 
     return (
-      <View style={localStyles.container}>
-        <Text style={localStyles.sectionLabel}>Selecciona fechas</Text>
-
-        <View style={localStyles.rangeInputsRow}>
-          <View style={localStyles.rangeInputColumn}>
-            <Text style={localStyles.rangeInputLabel}>Desde</Text>
-            <Pressable
-              style={[localStyles.rangeInputButton, pickerMode === 'start' ? localStyles.rangeInputButtonActive : null]}
-              onPress={() => {
-                setPickerMode((prev) => (prev === 'start' ? null : 'start'));
-                if (dateRange.startDate) {
-                  const now = new Date();
-                  const monthOffset =
-                    (dateRange.startDate.getFullYear() - now.getFullYear()) * 12 +
-                    (dateRange.startDate.getMonth() - now.getMonth());
-                  if (monthOffset >= 0 && monthOffset < 6) {
-                    setActiveMonthIndex(monthOffset);
-                  }
-                }
-              }}
-            >
-              <Text style={localStyles.rangeInputValue}>{formatFieldDate(dateRange.startDate)}</Text>
-              <Text style={localStyles.rangeInputHour}>{String(dateRange.startHour).padStart(2, '0')}:00</Text>
-            </Pressable>
-            <View style={localStyles.hourAdjustRow}>
-              <Pressable
-                style={localStyles.hourAdjustButton}
-                onPress={() =>
-                  setDateRange((prev: DateRange) => ({
-                    ...prev,
-                    startHour: adjustHour(prev.startHour, -1)
-                  }))
-                }
-              >
-                <Text style={localStyles.hourAdjustButtonText}>-</Text>
-              </Pressable>
-              <Pressable
-                style={localStyles.hourAdjustButton}
-                onPress={() =>
-                  setDateRange((prev: DateRange) => ({
-                    ...prev,
-                    startHour: adjustHour(prev.startHour, 1)
-                  }))
-                }
-              >
-                <Text style={localStyles.hourAdjustButtonText}>+</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <View style={localStyles.rangeInputColumn}>
-            <Text style={localStyles.rangeInputLabel}>Hasta</Text>
-            <Pressable
-              style={[localStyles.rangeInputButton, pickerMode === 'end' ? localStyles.rangeInputButtonActive : null]}
-              onPress={() => {
-                setPickerMode((prev) => (prev === 'end' ? null : 'end'));
-                if (dateRange.endDate) {
-                  const now = new Date();
-                  const monthOffset =
-                    (dateRange.endDate.getFullYear() - now.getFullYear()) * 12 +
-                    (dateRange.endDate.getMonth() - now.getMonth());
-                  if (monthOffset >= 0 && monthOffset < 6) {
-                    setActiveMonthIndex(monthOffset);
-                  }
-                }
-              }}
-            >
-              <Text style={localStyles.rangeInputValue}>{formatFieldDate(dateRange.endDate)}</Text>
-              <Text style={localStyles.rangeInputHour}>{String(dateRange.endHour).padStart(2, '0')}:00</Text>
-            </Pressable>
-            <View style={localStyles.hourAdjustRow}>
-              <Pressable
-                style={localStyles.hourAdjustButton}
-                onPress={() =>
-                  setDateRange((prev: DateRange) => ({
-                    ...prev,
-                    endHour: adjustHour(prev.endHour, -1)
-                  }))
-                }
-              >
-                <Text style={localStyles.hourAdjustButtonText}>-</Text>
-              </Pressable>
-              <Pressable
-                style={localStyles.hourAdjustButton}
-                onPress={() =>
-                  setDateRange((prev: DateRange) => ({
-                    ...prev,
-                    endHour: adjustHour(prev.endHour, 1)
-                  }))
-                }
-              >
-                <Text style={localStyles.hourAdjustButtonText}>+</Text>
-              </Pressable>
-            </View>
-          </View>
+      <View style={styles.container}>
+        <View style={styles.fieldsRow}>
+          <RangeField
+            label="Desde"
+            date={dateRange.startDate}
+            hour={dateRange.startHour}
+            active={pickerMode === 'start'}
+            onPress={() => togglePicker('start')}
+            onHourChange={(hour) => setDateRange((prev) => ({ ...prev, startHour: hour }))}
+          />
+          <RangeField
+            label="Hasta"
+            date={dateRange.endDate}
+            hour={dateRange.endHour}
+            active={pickerMode === 'end'}
+            onPress={() => togglePicker('end')}
+            onHourChange={(hour) => setDateRange((prev) => ({ ...prev, endHour: hour }))}
+          />
         </View>
 
         {pickerMode ? (
-          <View style={localStyles.monthCard}>
-          <View style={localStyles.monthHeaderRow}>
-            <Pressable
-              onPress={() => setActiveMonthIndex((prev) => Math.max(0, prev - 1))}
-              disabled={activeMonthIndex === 0}
-              style={[localStyles.monthNavButton, activeMonthIndex === 0 ? localStyles.monthNavButtonDisabled : null]}
-            >
-              <Text style={localStyles.monthNavButtonText}>{'<'}</Text>
-            </Pressable>
-
-            <Text style={localStyles.monthTitle}>{formatMonthYear(activeMonth)}</Text>
-
-            <Pressable
-              onPress={() => setActiveMonthIndex((prev) => Math.min(months.length - 1, prev + 1))}
-              disabled={activeMonthIndex === months.length - 1}
-              style={[
-                localStyles.monthNavButton,
-                activeMonthIndex === months.length - 1 ? localStyles.monthNavButtonDisabled : null
-              ]}
-            >
-              <Text style={localStyles.monthNavButtonText}>{'>'}</Text>
-            </Pressable>
-          </View>
-
-          <View style={localStyles.weekDaysRow}>
-            {['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((day) => (
-              <Text key={day} style={localStyles.weekDayLabel}>
-                {day}
+          <View style={styles.monthCard}>
+            <View style={styles.monthHeader}>
+              <IconButton
+                icon="chevron-back"
+                size={36}
+                accessibilityLabel="Mes anterior"
+                onPress={() => setActiveMonthIndex((prev) => Math.max(0, prev - 1))}
+                disabled={activeMonthIndex === 0}
+              />
+              <Text style={styles.monthTitle} accessibilityRole="header">
+                {MONTH_NAMES[month]} {year}
               </Text>
-            ))}
-          </View>
+              <IconButton
+                icon="chevron-forward"
+                size={36}
+                accessibilityLabel="Mes siguiente"
+                onPress={() => setActiveMonthIndex((prev) => Math.min(months.length - 1, prev + 1))}
+                disabled={activeMonthIndex === months.length - 1}
+              />
+            </View>
 
-          <View style={localStyles.daysGrid}>
-            {Array.from({ length: firstDayOfWeek }).map((_, i) => (
-              <View key={`empty-${i}`} style={localStyles.dayCell} />
-            ))}
+            <Text style={styles.pickerHint}>
+              {pickerMode === 'start' ? 'Elige el día de inicio' : 'Elige el día de fin'}
+            </Text>
 
-            {Array.from({ length: daysInMonth }).map((_, dayIdx: number) => {
-              const day = dayIdx + 1;
-              const date = new Date(year, month, day);
-              const status =
-                mode === 'owner'
-                  ? availabilityWindows.some((window) => {
-                      const winStart = new Date(window.startDatetime);
-                      const winEnd = new Date(window.endDatetime);
-                      const dayStart = new Date(date);
-                      dayStart.setHours(0, 0, 0, 0);
-                      const dayEnd = new Date(date);
-                      dayEnd.setHours(23, 59, 59, 999);
+            <View style={styles.weekRow}>
+              {WEEK_DAYS.map((day) => (
+                <Text key={day} style={styles.weekDay}>
+                  {day}
+                </Text>
+              ))}
+            </View>
 
-                      return winStart <= dayEnd && winEnd >= dayStart;
-                    })
-                    ? 'unavailable'
-                    : 'available'
-                  : getDayStatus(date, availabilityWindows, bookings, mode);
-              const dayColor = getDayColor(status);
-              const isStart = dateRange.startDate && date.toDateString() === dateRange.startDate.toDateString();
-              const isEnd = dateRange.endDate && date.toDateString() === dateRange.endDate.toDateString();
-              const isInRange =
-                dateRange.startDate &&
-                dateRange.endDate &&
-                date > dateRange.startDate &&
-                date < dateRange.endDate;
-              const isDisabled = mode === 'explore' && (status === 'past' || status === 'unavailable');
+            <View style={styles.daysGrid}>
+              {Array.from({ length: firstDayOfWeek }).map((_, index) => (
+                <View key={`empty-${index}`} style={styles.dayCell} />
+              ))}
 
-              return (
-                <Pressable
-                  key={day}
-                  onPress={() => handleDayPress(date)}
-                  disabled={isDisabled}
-                  style={[
-                    localStyles.dayCell,
-                    {
-                      backgroundColor: isStart || isEnd ? getDayBackgroundColor(status, true) : isInRange ? '#F0F0F0' : 'transparent',
-                      opacity: isDisabled ? 0.5 : 1
-                    }
-                  ]}
-                >
-                  <Text style={[localStyles.dayNumber, { color: isDisabled ? '#CCC' : colorTokens.textMain }]}>
-                    {day}
-                  </Text>
-                  <View
-                    style={[
-                      localStyles.dayDot,
-                      {
-                        backgroundColor: dayColor
-                      }
-                    ]}
-                  />
-                </Pressable>
-              );
-            })}
-          </View>
+              {dayStatuses.map((status, index) => {
+                const date = new Date(year, month, index + 1);
+                const isStart = isSameDay(dateRange.startDate, date);
+                const isEnd = isSameDay(dateRange.endDate, date);
+                const isEdge = isStart || isEnd;
+                const isInRange =
+                  !!dateRange.startDate && !!dateRange.endDate && date > dateRange.startDate && date < dateRange.endDate;
+                const isDisabled = status === 'past' || (mode === 'explore' && status === 'unavailable');
+
+                return (
+                  <View key={index} style={[styles.dayCell, isInRange ? styles.dayCellInRange : null]}>
+                    <Pressable
+                      onPress={() => handleDayPress(date)}
+                      disabled={isDisabled}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${index + 1} de ${MONTH_NAMES[month]}`}
+                      accessibilityState={{ disabled: isDisabled, selected: isEdge }}
+                      style={({ pressed }) => [
+                        styles.dayButton,
+                        isEdge ? styles.dayButtonSelected : null,
+                        pressed && !isEdge ? styles.dayButtonPressed : null
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.dayNumber,
+                          isDisabled ? styles.dayNumberDisabled : null,
+                          isEdge ? styles.dayNumberSelected : null
+                        ]}
+                      >
+                        {index + 1}
+                      </Text>
+                      <View style={[styles.dayDot, { backgroundColor: isEdge ? colorTokens.accent1 : DOT_COLOR[status] }]} />
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={styles.legend}>
+              {mode === 'explore' ? (
+                <>
+                  <LegendItem color={colorTokens.success} label="Disponible" />
+                  <LegendItem color={colorTokens.accent2} label="Parcial" />
+                  <LegendItem color={colorTokens.borderStrong} label="Sin disponibilidad" />
+                </>
+              ) : (
+                <>
+                  <LegendItem color={colorTokens.success} label="Ya tiene disponibilidad" />
+                  <LegendItem color={colorTokens.borderStrong} label="Sin ventana" />
+                </>
+              )}
+            </View>
           </View>
         ) : null}
 
-        {dateRange.startDate && dateRange.endDate && (
-          <View style={localStyles.selectedPanel}>
-            <Text style={localStyles.panelLabel}>
-              Desde: {dateRange.startDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })} {String(dateRange.startHour).padStart(2, '0')}:00
-            </Text>
-            <Text style={localStyles.panelLabel}>
-              Hasta: {dateRange.endDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })} {String(dateRange.endHour).padStart(2, '0')}:00
+        {summary !== null ? (
+          <View style={styles.summary}>
+            <Ionicons name="time-outline" size={18} color={colorTokens.primary} />
+            <Text style={styles.summaryText}>
+              {formatFieldDate(dateRange.startDate)} · {formatHour(dateRange.startHour)} → {formatFieldDate(dateRange.endDate)} ·{' '}
+              {formatHour(dateRange.endHour)}
+              {mode === 'explore' ? `  (${pluralize(summary, 'día', 'días')})` : ''}
             </Text>
           </View>
-        )}
+        ) : null}
+
+        {rangeInvalid ? (
+          <Text style={styles.invalid}>La hora de fin debe ser posterior a la de inicio.</Text>
+        ) : null}
+
+        <Text style={styles.timezoneNote}>Horario peninsular (Madrid).</Text>
       </View>
     );
   }
 );
 
+function LegendItem({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={styles.legendItem}>
+      <View style={[styles.legendDot, { backgroundColor: color }]} />
+      <Text style={styles.legendText}>{label}</Text>
+    </View>
+  );
+}
+
 CalendarPicker.displayName = 'CalendarPicker';
 
-const localStyles = StyleSheet.create({
+const styles = StyleSheet.create({
   container: {
     gap: spacingTokens.md
   },
-  sectionLabel: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  rangeInputsRow: {
+  fieldsRow: {
     flexDirection: 'row',
-    gap: spacingTokens.sm
+    gap: spacingTokens.md
   },
-  rangeInputColumn: {
+  field: {
     flex: 1,
-    gap: spacingTokens.xs
+    gap: 6
   },
-  rangeInputLabel: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption,
-    fontWeight: '700'
+  fieldLabel: {
+    color: colorTokens.secondary,
+    ...typographyTokens.captionStrong
   },
-  rangeInputButton: {
+  fieldButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.sm,
     borderWidth: 1,
     borderColor: colorTokens.border,
     borderRadius: radiusTokens.input,
     backgroundColor: colorTokens.white,
-    minHeight: 44,
-    paddingHorizontal: spacingTokens.sm,
-    paddingVertical: spacingTokens.xs,
-    justifyContent: 'center',
-    gap: 2
+    paddingHorizontal: spacingTokens.md
   },
-  rangeInputButtonActive: {
+  fieldButtonActive: {
     borderColor: colorTokens.primary,
+    borderWidth: 1.5
+  },
+  pressed: {
     backgroundColor: colorTokens.bgLight
   },
-  rangeInputValue: {
+  fieldValue: {
+    flex: 1,
     color: colorTokens.textMain,
-    ...typographyTokens.body,
-    fontWeight: '600'
+    ...typographyTokens.bodyStrong
   },
-  rangeInputHour: {
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
+  fieldPlaceholder: {
+    color: colorTokens.textSubtle,
+    ...typographyTokens.body
   },
-  hourAdjustRow: {
+  hourRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: spacingTokens.xs
   },
-  hourAdjustButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colorTokens.white
-  },
-  hourAdjustButtonText: {
+  hourValue: {
+    flex: 1,
+    textAlign: 'center',
     color: colorTokens.primary,
-    fontSize: 14,
-    fontWeight: '700'
+    ...typographyTokens.bodyStrong
   },
   monthCard: {
     borderWidth: 1,
     borderColor: colorTokens.border,
     borderRadius: radiusTokens.card,
     backgroundColor: colorTokens.white,
-    padding: spacingTokens.sm
+    padding: spacingTokens.md,
+    gap: spacingTokens.sm
   },
-  monthHeaderRow: {
+  monthHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacingTokens.sm
-  },
-  monthNavButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  monthNavButtonDisabled: {
-    opacity: 0.35
-  },
-  monthNavButtonText: {
-    color: colorTokens.primary,
-    fontSize: 14,
-    fontWeight: '700'
+    justifyContent: 'space-between'
   },
   monthTitle: {
     color: colorTokens.primary,
-    ...typographyTokens.sectionLabel,
-    textTransform: 'capitalize'
+    ...typographyTokens.h3
   },
-  weekDaysRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: spacingTokens.sm
+  pickerHint: {
+    textAlign: 'center',
+    color: colorTokens.accent2,
+    ...typographyTokens.captionStrong
   },
-  weekDayLabel: {
-    width: '14.28%',
+  weekRow: {
+    flexDirection: 'row'
+  },
+  weekDay: {
+    width: '14.2857%',
     textAlign: 'center',
     color: colorTokens.textMuted,
-    ...typographyTokens.caption,
-    fontWeight: '700'
+    ...typographyTokens.captionStrong
   },
   daysGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    rowGap: spacingTokens.xs,
-    columnGap: 0
+    rowGap: 2
   },
   dayCell: {
-    width: '14.28%',
-    height: 34,
-    borderRadius: radiusTokens.input,
+    width: '14.2857%',
+    height: HIT_SIZE,
     alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative'
+    justifyContent: 'center'
+  },
+  dayCellInRange: {
+    backgroundColor: colorTokens.infoSoft
+  },
+  dayButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  dayButtonSelected: {
+    backgroundColor: colorTokens.primary
+  },
+  dayButtonPressed: {
+    backgroundColor: colorTokens.surfaceMuted
+  },
+  dayNumber: {
+    color: colorTokens.textMain,
+    ...typographyTokens.captionStrong,
+    fontSize: 14
+  },
+  dayNumberDisabled: {
+    color: colorTokens.borderStrong
+  },
+  dayNumberSelected: {
+    color: colorTokens.white
   },
   dayDot: {
     width: 5,
     height: 5,
     borderRadius: 3,
-    marginTop: 2
+    marginTop: 1
   },
-  dayNumber: {
-    fontSize: 11,
-    fontWeight: '600'
+  legend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: spacingTokens.md,
+    paddingTop: spacingTokens.xs
   },
-  selectedPanel: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.bgLight,
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4
+  },
+  legendText: {
+    color: colorTokens.textMuted,
+    ...typographyTokens.caption
+  },
+  summary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.sm,
     padding: spacingTokens.md,
-    gap: spacingTokens.sm
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.infoSoft
   },
-  panelLabel: {
+  summaryText: {
+    flex: 1,
     color: colorTokens.primary,
-    ...typographyTokens.body,
-    fontWeight: '600'
+    ...typographyTokens.bodyStrong
+  },
+  invalid: {
+    color: colorTokens.alertText,
+    ...typographyTokens.caption
+  },
+  timezoneNote: {
+    color: colorTokens.textSubtle,
+    ...typographyTokens.caption
   }
 });

@@ -1,16 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  View
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { httpClient } from '../../api/http';
 import { resolveStoredImageUrl } from '../../api/storage';
 import { colorTokens, radiusTokens, spacingTokens, typographyTokens } from '../../app/theme/tokens';
+import { getApiErrorMessage } from '../errors';
+import { pluralize } from '../format';
+import { Avatar, ErrorState, Sheet, Skeleton, StarRating } from '../ui';
 
 type UserOverviewResponse = {
   userId: string;
@@ -28,224 +23,162 @@ type UserOverviewModalProps = {
   onClose: () => void;
 };
 
-function getInitials(displayName: string): string {
-  const parts = displayName.trim().split(/\s+/).filter(Boolean);
-
-  if (parts.length === 0) {
-    return 'U';
-  }
-
-  const first = parts[0]?.[0] ?? '';
-  const second = parts[1]?.[0] ?? '';
-  return `${first}${second}`.toUpperCase() || 'U';
-}
-
-export function UserOverviewModal({
-  visible,
-  userId,
-  displayName,
-  avatarUrl,
-  onClose
-}: UserOverviewModalProps) {
+/** Resumen público de otro usuario (propietario o conductor). */
+export function UserOverviewModal({ visible, userId, displayName, avatarUrl, onClose }: UserOverviewModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [overview, setOverview] = useState<UserOverviewResponse | null>(null);
 
   const resolvedAvatarUrl = useMemo(() => resolveStoredImageUrl(avatarUrl), [avatarUrl]);
 
-  useEffect(() => {
-    if (!visible || !userId) {
-      return;
-    }
+  const loadOverview = useCallback(
+    async (isCancelled: () => boolean = () => false) => {
+      if (!userId) {
+        return;
+      }
 
-    let isCancelled = false;
-
-    const loadOverview = async () => {
       setLoading(true);
       setError(null);
 
       try {
         const response = await httpClient.get<UserOverviewResponse>(`/users/${userId}/overview`);
 
-        if (!isCancelled) {
+        if (!isCancelled()) {
           setOverview(response.data);
         }
-      } catch {
-        if (!isCancelled) {
-          setError('No se pudo cargar el resumen del usuario.');
+      } catch (fetchError: unknown) {
+        if (!isCancelled()) {
+          setError(getApiErrorMessage(fetchError, 'No se pudo cargar el resumen del usuario.'));
         }
       } finally {
-        if (!isCancelled) {
+        if (!isCancelled()) {
           setLoading(false);
         }
       }
-    };
+    },
+    [userId]
+  );
 
-    void loadOverview();
+  useEffect(() => {
+    if (!visible || !userId) {
+      return;
+    }
+
+    let cancelled = false;
+    setOverview(null);
+    void loadOverview(() => cancelled);
 
     return () => {
-      isCancelled = true;
+      cancelled = true;
     };
-  }, [visible, userId]);
+  }, [visible, userId, loadOverview]);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={localStyles.backdrop}>
-        <View style={localStyles.card}>
-          <View style={localStyles.headerRow}>
-            <Text style={localStyles.title}>Perfil del usuario</Text>
-            <Pressable onPress={onClose} style={localStyles.closeButton}>
-              <Text style={localStyles.closeButtonText}>Cerrar</Text>
-            </Pressable>
-          </View>
-
-          <View style={localStyles.profileRow}>
-            {resolvedAvatarUrl ? (
-              <Image source={{ uri: resolvedAvatarUrl }} style={localStyles.avatar} resizeMode="cover" />
-            ) : (
-              <View style={localStyles.avatarFallback}>
-                <Text style={localStyles.avatarFallbackText}>{getInitials(displayName)}</Text>
-              </View>
-            )}
-            <View style={localStyles.profileInfo}>
-              <Text style={localStyles.name}>{displayName}</Text>
-              <Text style={localStyles.caption}>Resumen publico de actividad</Text>
-            </View>
-          </View>
-
-          {loading ? <ActivityIndicator size="small" /> : null}
-          {error ? <Text style={localStyles.errorText}>{error}</Text> : null}
-
-          {!loading && !error && overview ? (
-            <View style={localStyles.statsBlock}>
-              <View style={localStyles.statRow}>
-                <Text style={localStyles.statLabel}>Viajes completados como conductor</Text>
-                <Text style={localStyles.statValue}>{overview.completedTripsAsDriver}</Text>
-              </View>
-              <View style={localStyles.statRow}>
-                <Text style={localStyles.statLabel}>Reservas completadas como propietario</Text>
-                <Text style={localStyles.statValue}>{overview.completedTripsAsOwner}</Text>
-              </View>
-              <View style={localStyles.statRow}>
-                <Text style={localStyles.statLabel}>Valoracion media</Text>
-                <Text style={localStyles.statValue}>
-                  {overview.averageRating === null ? 'Sin valoraciones' : `${overview.averageRating.toFixed(1)} / 5`}
-                </Text>
-              </View>
-              <Text style={localStyles.caption}>Basado en {overview.ratingsCount} valoraciones.</Text>
-            </View>
-          ) : null}
+    <Sheet visible={visible} onClose={onClose} title="Perfil del usuario" centered>
+      <View style={styles.identity}>
+        <Avatar uri={resolvedAvatarUrl} name={displayName} size={64} />
+        <View style={styles.identityText}>
+          <Text style={styles.name}>{displayName}</Text>
+          <Text style={styles.caption}>Resumen público de actividad</Text>
         </View>
       </View>
-    </Modal>
+
+      {loading && !overview ? (
+        <View style={styles.stats}>
+          <Skeleton height={64} radius={radiusTokens.card} />
+          <Skeleton height={64} radius={radiusTokens.card} />
+        </View>
+      ) : null}
+
+      {error ? <ErrorState message={error} onRetry={() => void loadOverview()} retrying={loading} /> : null}
+
+      {!error && overview ? (
+        <View style={styles.stats}>
+          <View style={styles.ratingBox}>
+            {overview.averageRating === null ? (
+              <Text style={styles.caption}>Todavía no tiene valoraciones</Text>
+            ) : (
+              <>
+                <Text style={styles.ratingValue}>{overview.averageRating.toFixed(1)}</Text>
+                <View style={styles.ratingMeta}>
+                  <StarRating value={overview.averageRating} size={18} />
+                  <Text style={styles.caption}>{pluralize(overview.ratingsCount, 'valoración', 'valoraciones')}</Text>
+                </View>
+              </>
+            )}
+          </View>
+          <View style={styles.statRow}>
+            <View style={styles.statTile}>
+              <Text style={styles.statValue}>{overview.completedTripsAsDriver}</Text>
+              <Text style={styles.statLabel}>Viajes como conductor</Text>
+            </View>
+            <View style={styles.statTile}>
+              <Text style={styles.statValue}>{overview.completedTripsAsOwner}</Text>
+              <Text style={styles.statLabel}>Alquileres como propietario</Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
+    </Sheet>
   );
 }
 
-const localStyles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(11,15,20,0.35)',
+const styles = StyleSheet.create({
+  identity: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacingTokens.lg
-  },
-  card: {
-    width: '100%',
-    maxWidth: 460,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.card,
-    backgroundColor: colorTokens.white,
-    padding: spacingTokens.lg,
     gap: spacingTokens.md
   },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacingTokens.sm
-  },
-  title: {
-    color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  closeButton: {
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.pill,
-    paddingHorizontal: spacingTokens.md,
-    paddingVertical: spacingTokens.xs
-  },
-  closeButtonText: {
-    color: colorTokens.secondary,
-    ...typographyTokens.caption,
-    fontWeight: '700'
-  },
-  profileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacingTokens.sm
-  },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 1,
-    borderColor: colorTokens.border
-  },
-  avatarFallback: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    backgroundColor: colorTokens.bgLight,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  avatarFallbackText: {
-    color: colorTokens.primary,
-    ...typographyTokens.caption,
-    fontWeight: '700'
-  },
-  profileInfo: {
+  identityText: {
     flex: 1,
     gap: 2
   },
   name: {
     color: colorTokens.primary,
-    ...typographyTokens.sectionLabel
-  },
-  statsBlock: {
-    gap: spacingTokens.sm,
-    borderWidth: 1,
-    borderColor: colorTokens.border,
-    borderRadius: radiusTokens.input,
-    padding: spacingTokens.md,
-    backgroundColor: colorTokens.white
-  },
-  statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacingTokens.md
-  },
-  statLabel: {
-    flex: 1,
-    color: colorTokens.textMuted,
-    ...typographyTokens.caption
-  },
-  statValue: {
-    color: colorTokens.primary,
-    ...typographyTokens.body,
-    fontWeight: '700'
+    ...typographyTokens.h3
   },
   caption: {
     color: colorTokens.textMuted,
     ...typographyTokens.caption
   },
-  errorText: {
-    color: colorTokens.alert,
+  stats: {
+    gap: spacingTokens.sm
+  },
+  ratingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.md,
+    padding: spacingTokens.lg,
+    borderRadius: radiusTokens.card,
+    backgroundColor: colorTokens.bgLight,
+    borderWidth: 1,
+    borderColor: colorTokens.border
+  },
+  ratingValue: {
+    color: colorTokens.primary,
+    ...typographyTokens.title
+  },
+  ratingMeta: {
+    gap: 4
+  },
+  statRow: {
+    flexDirection: 'row',
+    gap: spacingTokens.sm
+  },
+  statTile: {
+    flex: 1,
+    padding: spacingTokens.md,
+    borderRadius: radiusTokens.card,
+    borderWidth: 1,
+    borderColor: colorTokens.border,
+    gap: 2
+  },
+  statValue: {
+    color: colorTokens.primary,
+    ...typographyTokens.h2
+  },
+  statLabel: {
+    color: colorTokens.textMuted,
     ...typographyTokens.caption
   }
 });
