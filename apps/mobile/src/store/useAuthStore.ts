@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { httpClient, setAccessToken } from '../api/http';
 import { supabaseClient } from '../api/supabase';
+import { getPasswordResetRedirectUrl } from '../features/auth/PasswordResetScreen';
 import { LEGAL_VERSION } from '../shared/legal';
 import { useUserProfileStore } from './useUserProfileStore';
 import { useVehiclesStore } from './useVehiclesStore';
@@ -278,7 +279,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, error: null, message: null });
 
     try {
-      const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: getPasswordResetRedirectUrl()
+      });
 
       if (error) {
         throw error;

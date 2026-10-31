@@ -205,6 +205,19 @@ async function handleAuth(req, res, url, body) {
     return account ? send(res, 200, toUser(account)) : authError(res, 401, 'Invalid JWT');
   }
 
+  if (route === '/user' && req.method === 'PUT') {
+    const claims = verifyJwt(bearer);
+    const account = claims ? findAccountById(claims.sub) : null;
+    if (!account) return authError(res, 401, 'Invalid JWT');
+    const { password, data } = parseJson(body);
+    if (password) {
+      if (String(password).length < 6) return authError(res, 422, 'Password should be at least 6 characters');
+      account.hash = hashPassword(String(password), account.salt);
+    }
+    if (data) account.meta = { ...account.meta, ...data };
+    return send(res, 200, toUser(account));
+  }
+
   if (route === '/logout' && req.method === 'POST') return send(res, 204);
   if (route === '/recover' && req.method === 'POST') return send(res, 200, {});
 

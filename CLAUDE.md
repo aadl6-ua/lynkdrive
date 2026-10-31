@@ -33,6 +33,15 @@
     - En modo `stripe` se prohíbe al conductor pasar a `paid_confirmed` vía `PUT /bookings/:id/status` (solo en `prototype`).
     - Reembolsos al cancelar desde `paid_confirmed` (antes del inicio, según máquina de estados): cancela propietario → 100%; cancela conductor → política Demo 1 (>=48h 100%, 24-48h 50%, <24h 0%). Se hace con `reverse_transfer` + `refund_application_fee` si fue destination charge y con idempotency key por reserva. Si Stripe falla, la cancelación no se aplica. En `prototype` no hay reembolsos.
     - Mobile: pago real con **PaymentSheet** de `@stripe/stripe-react-native` (versión fijada por Expo SDK, incluida en Expo Go), cargado de forma diferida en `stripeSheet.native.ts`; en web se muestra aviso (pago con tarjeta solo en app iOS/Android). UI nueva aislada en `apps/mobile/src/features/payments/` (`PaymentAction`, `OwnerPayoutsCard`); la tarjeta de cobros de Perfil solo aparece en modo `stripe`.
+- **QA final y salida a mercado (2026-10-31):**
+    - La API aplica también las reglas que antes solo aplicaba la app: `POST /bookings` exige `is_verified = true` (403); `in_progress` exige checklist `check_in` y `completed` exige `check_out` (400). La UI desactiva esas acciones y explica el motivo.
+    - Explorar (`GET /vehicles`) solo lista vehículos `active`, ordena por distancia cuando llegan `lat/lng`, valida enums y rangos (400; `radiusKm` <= 500) y **no devuelve `licensePlate`** (tampoco `GET /vehicles/:id`); el propietario la ve en `mine/list`. No se puede reservar un vehículo inactivo.
+    - Se elimina `GET /users` (permitía enumerar a todos los usuarios).
+    - Referencias `supabase://` enviadas por el cliente (avatar, DNI, carnet, fotos de vehículo, evidencias de checklist) deben estar en el bucket correcto y en la carpeta del propio usuario (`<target>/<userId>/...`); al borrar cuenta solo se eliminan ficheros propios. Fotos de vehículo y avatar admiten también URLs `https`.
+    - `PUT /users/me`: `undefined` conserva, `null` borra. Cambiar o borrar DNI/carnet quita la verificación y borra el fichero anterior del storage.
+    - Legal: textos en `apps/mobile/src/shared/legal.ts` (fuente única). Registro con casilla obligatoria; la aceptación se guarda en los metadatos de Supabase Auth (`terms_accepted_at`, `terms_version`) junto a `first_name`/`last_name`. En web, `?legal=privacidad|terminos|cancelacion` muestra el documento sin sesión (URL pública para las tiendas). Titular y email configurables con `EXPO_PUBLIC_LEGAL_OWNER_NAME` y `EXPO_PUBLIC_LEGAL_CONTACT_EMAIL`.
+    - `scripts/dev/supabase-local-mock.js`: mock local de Supabase Auth + Storage para recorrer la app sin proyecto real (QA, demos y capturas). Solo desarrollo.
+    - Pendientes para producción en `docs/salida-a-produccion.md`.
 
 ---
 
