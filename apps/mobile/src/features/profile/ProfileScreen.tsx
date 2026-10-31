@@ -229,8 +229,9 @@ export function ProfileScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
     setOverviewError(null);
 
     try {
-      const [bookingsResponse, reviewsResponse, vehiclesResponse] = await Promise.all([
+      const [bookingsResponse, ownerBookingsResponse, reviewsResponse, vehiclesResponse] = await Promise.all([
         httpClient.get<BookingItem[]>('/bookings/mine/as-driver'),
+        httpClient.get<BookingItem[]>('/bookings/mine/as-owner'),
         httpClient.get<ReviewItem[]>('/reviews'),
         httpClient.get<VehicleMiniInfo[]>('/vehicles/mine/list')
       ]);
@@ -239,7 +240,10 @@ export function ProfileScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
       const userReceivedReviews = reviewsResponse.data.filter((review) => review.revieweeId === authUserId);
 
       setOverviewStats({
-        tripsCompleted: allDriverBookings.filter((booking) => booking.status === 'completed').length,
+        // Igual que el resumen público: viajes completados como conductor y como propietario.
+        tripsCompleted: [...allDriverBookings, ...ownerBookingsResponse.data].filter(
+          (booking) => booking.status === 'completed'
+        ).length,
         averageRating:
           userReceivedReviews.length > 0
             ? userReceivedReviews.reduce((sum, review) => sum + review.rating, 0) / userReceivedReviews.length
@@ -470,6 +474,8 @@ export function ProfileScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
       await httpClient.delete('/users/me');
       toast.success('Tu cuenta se ha eliminado.');
       await signOut();
+      // No dejamos el email de una cuenta borrada en el formulario de acceso.
+      useAuthStore.getState().setEmailInput('');
     } catch (deleteError: unknown) {
       toast.error(
         getApiErrorMessage(
