@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import axios from 'axios';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { httpClient } from '../../api/http';
@@ -402,9 +403,12 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
 
       setUserById((current) => {
         const next = { ...current };
-        users.forEach((result) => {
+        users.forEach((result, index) => {
           if (result.status === 'fulfilled') {
             next[result.value.id] = result.value;
+          } else if (axios.isAxiosError(result.reason) && result.reason.response?.status === 404) {
+            // La otra parte borró su cuenta (RGPD): la reserva se conserva sin sus datos.
+            next[userIds[index]] = { id: userIds[index], firstName: 'Usuario', lastName: 'eliminado', avatarUrl: null };
           }
         });
         return next;
