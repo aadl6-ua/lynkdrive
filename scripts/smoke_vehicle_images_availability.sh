@@ -43,8 +43,13 @@ request() {
   local method="$1"
   local url="$2"
   local payload="${3-}"
+  local token="${4-$OWNER_TOKEN}"
 
-  local curl_args=(-sS -o "$BODY_FILE" -w "%{http_code}" -X "$method" "$url" -H "Authorization: Bearer $OWNER_TOKEN")
+  local curl_args=(-sS -o "$BODY_FILE" -w "%{http_code}" -X "$method" "$url")
+
+  if [[ -n "$token" ]]; then
+    curl_args+=(-H "Authorization: Bearer $token")
+  fi
 
   if [[ -n "$payload" ]]; then
     curl_args+=(-H "Content-Type: application/json" -d "$payload")
@@ -90,6 +95,11 @@ log "Comprobando health del backend"
 request "GET" "$BASE_URL/health"
 expect_status "200" "GET /health"
 ok "Backend disponible en $BASE_URL"
+
+log "[negativo] Crear vehículo sin token"
+request "POST" "$BASE_URL/vehicles" "{}" ""
+expect_status "401" "POST /vehicles (sin token)"
+ok "La API exige autenticación"
 
 log "Creando vehículo de prueba"
 request "POST" "$BASE_URL/vehicles" "{\"brand\":\"Toyota\",\"model\":\"Corolla\",\"year\":2020,\"licensePlate\":\"$LICENSE_PLATE\",\"description\":\"Vehicle smoke test\",\"pricePerDay\":45,\"locationLat\":40.4168,\"locationLng\":-3.7038,\"locationAddress\":\"Madrid Centro\",\"fuelType\":\"hybrid\",\"transmission\":\"automatic\",\"seats\":5,\"status\":\"active\"}"
@@ -177,6 +187,13 @@ log "[negativo] Crear imagen con vehicleId inexistente"
 request "POST" "$BASE_URL/vehicle-images" "{\"vehicleId\":\"00000000-0000-4000-8000-000000000000\",\"imageUrl\":\"https://picsum.photos/seed/nope/1200/800\",\"isPrimary\":false}"
 expect_status "404" "POST /vehicle-images (missing vehicle)"
 ok "Validación de vehículo inexistente OK"
+
+log "Eliminando vehículo de prueba"
+request "DELETE" "$BASE_URL/vehicles/$VEHICLE_ID"
+if [[ "$HTTP_CODE" != "200" && "$HTTP_CODE" != "204" ]]; then
+  fail "DELETE /vehicles/$VEHICLE_ID devolvió $HTTP_CODE. Body: $BODY"
+fi
+ok "Vehículo de prueba eliminado"
 
 echo
 echo "🎉 Smoke tests completados correctamente"
