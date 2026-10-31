@@ -10,6 +10,7 @@
     "web": "expo start --web",
     "build": "expo export --platform web",
     "lint": "echo \"No linter configured yet for mobile\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo \"No tests configured yet for mobile\""
   },
   "dependencies": {

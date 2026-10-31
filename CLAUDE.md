@@ -279,6 +279,19 @@ Plataforma **peer-to-peer (P2P) de alquiler de vehículos entre particulares**, 
         - Stripe real (`STRIPE_SECRET_KEY` presente),
         - fallback prototipo (`STRIPE_SECRET_KEY` ausente).
 
+### Tests automatizados y CI (2026-10-30)
+
+- Tests unitarios (Jest + `@nestjs/testing`) junto al código: `apps/api/src/**/*.spec.ts`, con repositorios mockeados. Ejecutar con `npm test`.
+- Tests e2e de la API en `apps/api/test/*.e2e-spec.ts` contra Postgres + PostGIS real:
+    - recrean el esquema desde `apps/api/test/e2e/schema.sql` (copia de `script.sql` + stub mínimo de `auth.users`) y aplican después todas las migraciones de `infra/db/migrations`.
+    - la auth se prueba con JWT HS256 firmados con un secreto de test (`SUPABASE_JWT_SECRET` ficticio), sin credenciales reales de Supabase; pagos en modo prototipo.
+    - BD por defecto `postgresql://postgres:postgres@localhost:55432/lynkdrive_test` (sobrescribible con `TEST_DATABASE_URL`). Ejecutar con `npm run test:e2e`. **Destruyen el esquema de esa BD**: nunca apuntar a Supabase.
+- Si se cambia el esquema base, actualizar también `apps/api/test/e2e/schema.sql`.
+- CI en `.github/workflows/ci.yml` (push/PR a `main` y `dev`): `npm ci`, lint, typecheck de todos los workspaces, build de api/shared, tests unitarios y e2e con servicio `postgis/postgis`.
+- Reglas reforzadas en backend tras añadir tests:
+    - al aceptar una reserva se valida que no haya solape con reservas confirmadas y las `pending` solapadas pasan a `rejected`.
+    - `POST /booking-checklists` valida fase: `check_in` solo con booking `paid_confirmed`/`in_progress`/`completed`; `check_out` solo con `in_progress`/`completed`.
+
 ---
 
 ## 4. Base de Datos

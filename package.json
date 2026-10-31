@@ -13,6 +13,8 @@
     "db:migrate:remote": "node scripts/db-migrate-remote.js",
     "build": "npm run build -ws",
     "lint": "npm run lint -ws",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "test:e2e": "npm run test:e2e -w @lynkdrive/api",
     "test": "npm run test -ws"
   },
   "devDependencies": {
