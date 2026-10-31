@@ -1,10 +1,11 @@
 import { BookingStatus } from 'src/bookings/dto/update-booking-status.dto';
+import type { PaymentStatusResponse, PayoutStatus } from '@lynkdrive/shared';
 
-export class PaymentStatusResponseDto {
+export class PaymentStatusResponseDto implements PaymentStatusResponse {
   bookingId!: string;
   bookingStatus!: BookingStatus;
   paymentIntentId!: string | null;
-  payoutStatus!: 'pending' | 'processing' | 'paid' | 'failed';
+  payoutStatus!: PayoutStatus;
   totalPrice!: number;
   currency!: string;
 }

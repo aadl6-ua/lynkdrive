@@ -1,4 +1,6 @@
-export class UserResponseDto {
+import type { PublicUserResponse, UserResponse } from '@lynkdrive/shared';
+
+export class UserResponseDto implements UserResponse<Date> {
   id!: string;
   firstName!: string;
   lastName!: string;
@@ -10,7 +12,7 @@ export class UserResponseDto {
   createdAt!: Date;
 }
 
-export class PublicUserResponseDto {
+export class PublicUserResponseDto implements PublicUserResponse<Date> {
   id!: string;
   firstName!: string;
   lastName!: string;

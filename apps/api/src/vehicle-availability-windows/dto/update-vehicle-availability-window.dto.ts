@@ -1,6 +1,7 @@
 import { IsOptional, IsString, MaxLength } from 'class-validator';
+import type { UpdateVehicleAvailabilityWindowRequest } from '@lynkdrive/shared';
 
-export class UpdateVehicleAvailabilityWindowDto {
+export class UpdateVehicleAvailabilityWindowDto implements UpdateVehicleAvailabilityWindowRequest {
   @IsOptional()
   @IsString()
   @MaxLength(64)

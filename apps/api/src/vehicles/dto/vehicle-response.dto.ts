@@ -1,6 +1,7 @@
 import { FuelType, Transmission, VehicleStatus } from './create-vehicle.dto';
+import type { VehicleResponse } from '@lynkdrive/shared';
 
-export class VehicleResponseDto {
+export class VehicleResponseDto implements VehicleResponse<Date> {
   id!: string;
   ownerId!: string;
   brand!: string;

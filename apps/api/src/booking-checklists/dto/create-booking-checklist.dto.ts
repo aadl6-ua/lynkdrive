@@ -1,8 +1,9 @@
 import { IsIn, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import type { ChecklistType, CreateBookingChecklistRequest } from '@lynkdrive/shared';
 
-export type ChecklistType = 'check_in' | 'check_out';
+export type { ChecklistType };
 
-export class CreateBookingChecklistDto {
+export class CreateBookingChecklistDto implements CreateBookingChecklistRequest {
   @IsUUID()
   bookingId!: string;
 

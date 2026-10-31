@@ -1,6 +1,7 @@
 import { IsNumber, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import type { CreateReviewRequest } from '@lynkdrive/shared';
 
-export class CreateReviewDto {
+export class CreateReviewDto implements CreateReviewRequest {
   @IsUUID()
   bookingId!: string;
 

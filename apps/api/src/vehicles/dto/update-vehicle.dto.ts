@@ -7,8 +7,9 @@ import {
   VEHICLE_STATUSES,
   VehicleStatus
 } from './create-vehicle.dto';
+import type { UpdateVehicleRequest } from '@lynkdrive/shared';
 
-export class UpdateVehicleDto {
+export class UpdateVehicleDto implements UpdateVehicleRequest {
   // Se ignora en el endpoint: el propietario no puede transferirse.
   @IsOptional()
   @IsUUID()
