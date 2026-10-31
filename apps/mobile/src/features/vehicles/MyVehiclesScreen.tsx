@@ -48,6 +48,7 @@ import {
   toast
 } from '../../shared/ui';
 import { useBackHandler } from '../../shared/useBackHandler';
+import { EarningsScreen } from '../earnings/EarningsScreen';
 import { useVehiclePrimaryImages } from '../../shared/useVehiclePrimaryImages';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useVehicleAvailabilityWindowsStore } from '../../store/useVehicleAvailabilityWindowsStore';
@@ -192,6 +193,7 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
   const isCompact = width < 768;
 
   const [screenMode, setScreenMode] = useState<MyVehiclesScreenMode>('list');
+  const [showEarnings, setShowEarnings] = useState(false);
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
   const [form, setForm] = useState<VehicleForm>(EMPTY_FORM);
   const [formErrors, setFormErrors] = useState<VehicleFormErrors>({});
@@ -1167,6 +1169,20 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
     setScreenMode('create');
   };
 
+  if (showEarnings) {
+    return (
+      <EarningsScreen
+        topPadding={topPadding}
+        bottomPadding={bottomPadding}
+        onBack={() => setShowEarnings(false)}
+        onPublishVehicle={() => {
+          setShowEarnings(false);
+          openCreate();
+        }}
+      />
+    );
+  }
+
   return (
     <Screen
       topPadding={topPadding}
@@ -1201,6 +1217,25 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
     >
       {vehiclesError && myVehicles.length > 0 ? (
         <InlineMessage tone="error" message={vehiclesError} actionLabel="Reintentar" onAction={() => void fetchMyVehicles()} />
+      ) : null}
+
+      {!showSkeletons ? (
+        <Card
+          onPress={() => setShowEarnings(true)}
+          padding={spacingTokens.lg}
+          accessibilityLabel="Mis ingresos"
+          accessibilityHint="Abre el panel de ingresos de tus vehículos"
+          style={styles.earningsEntry}
+        >
+          <View style={styles.earningsEntryIcon}>
+            <Ionicons name="wallet-outline" size={20} color={colorTokens.primary} />
+          </View>
+          <View style={styles.flex1}>
+            <Text style={styles.earningsEntryTitle}>Mis ingresos</Text>
+            <Text style={styles.caption}>Resumen por mes, por vehículo y por reserva.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colorTokens.textMuted} />
+        </Card>
       ) : null}
 
       <View style={[styles.grid, { gap: spacingTokens.lg }]}>
@@ -1313,6 +1348,23 @@ function ManageTile({
 }
 
 const styles = StyleSheet.create({
+  earningsEntry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacingTokens.md
+  },
+  earningsEntryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radiusTokens.input,
+    backgroundColor: colorTokens.warningSoft,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  earningsEntryTitle: {
+    color: colorTokens.primary,
+    ...typographyTokens.bodyStrong
+  },
   flex1: {
     flex: 1
   },
