@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { httpClient } from '../../api/http';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
@@ -236,6 +236,7 @@ function getCancellationNote(booking: BookingItem): string {
 export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab }: TripsScreenProps) {
   const { userId: authUserId } = useAuthStore();
   const { profile } = useUserProfileStore();
+  const { width: windowWidth } = useWindowDimensions();
 
   const hasRequiredProfileData = hasMinimumProfileData(profile);
   const canTransact = canUseTransactionalFlows(profile);
@@ -1046,6 +1047,7 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
                 maxItems={MAX_CHECKLIST_PHOTOS}
                 disabled={checklistSaving}
                 addLabel="Añadir fotos"
+                columns={windowWidth < 768 ? 3 : 4}
               />
               {checklistErrors.photos ? <InlineMessage tone="error" message={checklistErrors.photos} /> : null}
             </Card>
@@ -1219,8 +1221,12 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
       : {
           pending: 'Tu solicitud está pendiente de respuesta del propietario.',
           accepted: '¡Aceptada! Realiza el pago para confirmar la reserva.',
-          paid_confirmed: 'Reserva confirmada. Rellena el checklist de entrega al recoger el coche.',
-          in_progress: 'Disfruta del viaje. Al devolver el coche rellena el checklist de devolución.'
+          paid_confirmed: hasChecklist('check_in')
+            ? 'Checklist de entrega enviado. El propietario iniciará el viaje al darte las llaves.'
+            : 'Reserva confirmada. Rellena el checklist de entrega al recoger el coche.',
+          in_progress: hasChecklist('check_out')
+            ? 'Checklist de devolución enviado. El propietario completará la reserva.'
+            : 'Disfruta del viaje. Al devolver el coche rellena el checklist de devolución.'
         };
 
     return (
