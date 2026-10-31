@@ -67,7 +67,7 @@ Qué está listo para publicar LynkDrive como producto real y qué falta, revisa
 ### Producto
 - [ ] La verificación de documentos la hace el backoffice (rama `feat/backoffice`); hasta que esté en producción nadie puede pasar a `is_verified = true` sin acceso a la BD.
 - [ ] Notificaciones push (COULD) para avisar de solicitudes y cambios de estado.
-- [ ] Chat interno (SHOULD): hoy el contacto se comparte al aceptar la reserva.
+- [x] Chat interno (SHOULD) por reserva con polling (`/api/booking-messages`). Si el uso crece, valorar websockets o Supabase Realtime en lugar del polling cada 4 s.
 - [ ] Iniciar el viaje no comprueba la hora de recogida; se puede hacer antes. Decidir si limitarlo.
 
 ## Probar todo en local sin Supabase
