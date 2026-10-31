@@ -190,7 +190,7 @@ export class BookingsService {
   }
 
   async createForDriver(driverId: string, createBookingDto: CreateBookingDto): Promise<BookingResponseDto> {
-    await this.ensureUserExists(driverId);
+    await this.ensureVerifiedDriver(driverId);
 
     const startDatetime = this.parseDateOrThrow(createBookingDto.startDatetime, 'startDatetime');
     const endDatetime = this.parseDateOrThrow(createBookingDto.endDatetime, 'endDatetime');
@@ -396,14 +396,19 @@ export class BookingsService {
     return (rows[0] as BookingRow | undefined) ?? null;
   }
 
-  private async ensureUserExists(userId: string): Promise<void> {
+  // La app ya bloquea la solicitud sin verificación; aquí se aplica la misma regla en servidor.
+  private async ensureVerifiedDriver(userId: string): Promise<void> {
     const user = await this.usersRepository.findOne({
       where: { id: userId, deletedAt: IsNull() },
-      select: { id: true }
+      select: { id: true, isVerified: true }
     });
 
     if (!user) {
       throw new NotFoundException(`User ${userId} not found`);
+    }
+
+    if (!user.isVerified) {
+      throw new ForbiddenException('Tu documentación debe estar verificada para solicitar reservas');
     }
   }
 

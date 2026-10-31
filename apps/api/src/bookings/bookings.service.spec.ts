@@ -132,7 +132,7 @@ describe('BookingsService', () => {
       return [];
     });
 
-    usersRepository.findOne.mockResolvedValue({ id: DRIVER_ID });
+    usersRepository.findOne.mockResolvedValue({ id: DRIVER_ID, isVerified: true });
     vehiclesRepository.findOne.mockResolvedValue({ id: VEHICLE_ID, ownerId: OWNER_ID, pricePerDay: '45.50' });
     availabilityQueryBuilder.getOne.mockResolvedValue({ id: 'window' });
 
@@ -345,7 +345,7 @@ describe('BookingsService', () => {
     });
 
     it('impide al propietario reservar su propio vehiculo', async () => {
-      usersRepository.findOne.mockResolvedValue({ id: OWNER_ID });
+      usersRepository.findOne.mockResolvedValue({ id: OWNER_ID, isVerified: true });
       await expect(service.createForDriver(OWNER_ID, dto(24))).rejects.toThrow(
         'Owner cannot create a booking for their own vehicle'
       );
@@ -359,6 +359,11 @@ describe('BookingsService', () => {
     it('lanza NotFound si el usuario no existe', async () => {
       usersRepository.findOne.mockResolvedValue(null);
       await expect(service.createForDriver(DRIVER_ID, dto(24))).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('impide solicitar reservas sin documentacion verificada', async () => {
+      usersRepository.findOne.mockResolvedValue({ id: DRIVER_ID, isVerified: false });
+      await expect(service.createForDriver(DRIVER_ID, dto(24))).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('rechaza rangos fuera de las ventanas de disponibilidad', async () => {
