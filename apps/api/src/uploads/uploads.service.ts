@@ -1,25 +1,9 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
+import type { UploadImageResponse, UploadTarget } from '@lynkdrive/shared';
 
-type UploadTarget =
-  | 'avatar'
-  | 'id_document'
-  | 'driver_license'
-  | 'vehicle_image'
-  | 'checklist_image';
-
-type UploadResult = {
-  bucket: string;
-  path: string;
-  publicUrl: string | null;
-  signedUrl: string | null;
-  fileUrl: string;
-  persistedValue: string;
-  isPublicBucket: boolean;
-  mimeType: string;
-  sizeBytes: number;
-};
+type UploadResult = UploadImageResponse;
 
 type TargetConfig = {
   bucket: string;

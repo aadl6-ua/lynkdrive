@@ -1,68 +1,21 @@
+import type {
+  CreateVehicleRequest,
+  UpdateVehicleRequest,
+  VehicleResponse,
+  VehicleSearchFilters
+} from '@lynkdrive/shared';
 import { create } from 'zustand';
 import { httpClient } from '../api/http';
 import { getApiErrorMessage } from '../shared/errors';
 
-export interface VehicleItem {
-  id: string;
-  ownerId: string;
-  brand: string;
-  model: string;
-  year: number;
-  licensePlate: string;
-  description: string;
-  pricePerDay: number;
-  locationLat: number;
-  locationLng: number;
-  locationAddress: string;
-  fuelType: 'gasoline' | 'diesel' | 'electric' | 'hybrid' | null;
-  transmission: 'manual' | 'automatic' | null;
-  seats: number | null;
-  status: 'active' | 'inactive';
-  createdAt: string;
-}
+export type VehicleItem = VehicleResponse;
 
-interface VehicleFilters {
-  maxPrice?: number;
-  fuelType?: 'gasoline' | 'diesel' | 'electric' | 'hybrid';
-  transmission?: 'manual' | 'automatic';
-  seats?: number;
-  status?: 'active' | 'inactive';
-  lat?: number;
-  lng?: number;
-  radiusKm?: number;
-}
+type VehicleFilters = VehicleSearchFilters;
 
-interface CreateVehicleInput {
-  brand: string;
-  model: string;
-  year: number;
-  licensePlate: string;
-  description: string;
-  pricePerDay: number;
-  locationLat: number;
-  locationLng: number;
-  locationAddress: string;
-  fuelType: 'gasoline' | 'diesel' | 'electric' | 'hybrid' | null;
-  transmission: 'manual' | 'automatic' | null;
-  seats: number | null;
-  status: 'active' | 'inactive';
-}
+/** El formulario envía siempre todos los campos (null si no se informan). */
+type CreateVehicleInput = Required<CreateVehicleRequest>;
 
-interface UpdateVehicleInput {
-  brand: string;
-  model: string;
-  year: number;
-  licensePlate: string;
-  description: string;
-  pricePerDay: number;
-  locationLat: number;
-  locationLng: number;
-  locationAddress: string;
-  fuelType: 'gasoline' | 'diesel' | 'electric' | 'hybrid' | null;
-  transmission: 'manual' | 'automatic' | null;
-  seats: number | null;
-  status: 'active' | 'inactive';
-}
+type UpdateVehicleInput = Required<UpdateVehicleRequest>;
 
 interface VehiclesState {
   /** Resultados de Explorar (vehículos de otros usuarios). */

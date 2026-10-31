@@ -1,6 +1,7 @@
 import { IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import type { UpdateBookingChecklistRequest } from '@lynkdrive/shared';
 
-export class UpdateBookingChecklistDto {
+export class UpdateBookingChecklistDto implements UpdateBookingChecklistRequest {
   @IsOptional()
   @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(0)

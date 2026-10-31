@@ -1,37 +1,16 @@
+import type {
+  ConnectLinkResponse,
+  ConnectStatusResponse,
+  PaymentConfigResponse,
+  PaymentIntentResponse,
+  PaymentMode
+} from '@lynkdrive/shared';
 import { httpClient } from '../../api/http';
 
-export type PaymentMode = 'stripe' | 'prototype';
-
-export type PaymentConfig = {
-  mode: PaymentMode;
-  publishableKey: string | null;
-  currency: string;
-};
-
-export type PaymentIntentResponse = {
-  bookingId: string;
-  paymentIntentId: string;
-  clientSecret: string | null;
-  amountCents: number;
-  currency: string;
-  mode: PaymentMode;
-  publishableKey?: string | null;
-};
-
-export type ConnectStatus = {
-  mode: PaymentMode;
-  accountId: string | null;
-  detailsSubmitted: boolean;
-  chargesEnabled: boolean;
-  payoutsEnabled: boolean;
-  transfersActive: boolean;
-};
-
-export type ConnectLink = {
-  accountId: string;
-  url: string;
-  expiresAt: number | null;
-};
+export type { PaymentIntentResponse, PaymentMode };
+export type PaymentConfig = PaymentConfigResponse;
+export type ConnectStatus = ConnectStatusResponse;
+export type ConnectLink = ConnectLinkResponse;
 
 const PROTOTYPE_CONFIG: PaymentConfig = { mode: 'prototype', publishableKey: null, currency: 'eur' };
 

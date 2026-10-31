@@ -1,6 +1,7 @@
 import { FuelType, Transmission } from './create-vehicle.dto';
+import type { VehicleSearchFilters } from '@lynkdrive/shared';
 
-export class GetVehiclesFiltersDto {
+export class GetVehiclesFiltersDto implements VehicleSearchFilters {
   maxPrice?: number;
   fuelType?: FuelType;
   transmission?: Transmission;

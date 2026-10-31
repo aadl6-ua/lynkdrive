@@ -1,13 +1,7 @@
+import type { GeocodingSuggestion } from '@lynkdrive/shared';
 import { Injectable, Logger } from '@nestjs/common';
 
-export type GeocodingSuggestionDto = {
-  id: string;
-  label: string;
-  lat: number;
-  lng: number;
-  city: string | null;
-  country: string | null;
-};
+export type GeocodingSuggestionDto = GeocodingSuggestion;
 
 @Injectable()
 export class GeocodingService {

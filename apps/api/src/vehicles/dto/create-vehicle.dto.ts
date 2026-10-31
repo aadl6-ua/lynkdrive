@@ -10,19 +10,18 @@ import {
   MaxLength,
   Min
 } from 'class-validator';
+import type { CreateVehicleRequest, FuelType, Transmission, VehicleStatus } from '@lynkdrive/shared';
 
 /** Tope razonable por día; además evita desbordar NUMERIC(10,2). */
 export const MAX_PRICE_PER_DAY = 10000;
 
-export type FuelType = 'gasoline' | 'diesel' | 'electric' | 'hybrid';
-export type Transmission = 'manual' | 'automatic';
-export type VehicleStatus = 'active' | 'inactive';
+export type { FuelType, Transmission, VehicleStatus };
 
 export const FUEL_TYPES: FuelType[] = ['gasoline', 'diesel', 'electric', 'hybrid'];
 export const TRANSMISSIONS: Transmission[] = ['manual', 'automatic'];
 export const VEHICLE_STATUSES: VehicleStatus[] = ['active', 'inactive'];
 
-export class CreateVehicleDto {
+export class CreateVehicleDto implements CreateVehicleRequest {
   // Se ignora en el endpoint: el propietario siempre es el usuario autenticado.
   @IsOptional()
   @IsUUID()

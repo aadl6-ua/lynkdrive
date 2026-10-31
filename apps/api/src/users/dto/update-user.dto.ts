@@ -1,6 +1,7 @@
 import { IsOptional, IsString, MaxLength } from 'class-validator';
+import type { UpdateMyProfileRequest } from '@lynkdrive/shared';
 
-export class UpdateUserDto {
+export class UpdateUserDto implements UpdateMyProfileRequest {
   @IsOptional()
   @IsString()
   @MaxLength(100)

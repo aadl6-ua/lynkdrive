@@ -1,6 +1,7 @@
 import { IsString, IsUUID, MaxLength } from 'class-validator';
+import type { CreateBookingRequest } from '@lynkdrive/shared';
 
-export class CreateBookingDto {
+export class CreateBookingDto implements CreateBookingRequest {
   @IsUUID()
   vehicleId!: string;
 

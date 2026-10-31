@@ -1,13 +1,7 @@
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import type { BookingStatus, UpdateBookingStatusRequest } from '@lynkdrive/shared';
 
-export type BookingStatus =
-  | 'pending'
-  | 'accepted'
-  | 'rejected'
-  | 'paid_confirmed'
-  | 'in_progress'
-  | 'completed'
-  | 'cancelled';
+export type { BookingStatus };
 
 export const BOOKING_STATUSES: BookingStatus[] = [
   'pending',
@@ -19,7 +13,7 @@ export const BOOKING_STATUSES: BookingStatus[] = [
   'cancelled'
 ];
 
-export class UpdateBookingStatusDto {
+export class UpdateBookingStatusDto implements UpdateBookingStatusRequest {
   @IsIn(BOOKING_STATUSES)
   status!: BookingStatus;
 

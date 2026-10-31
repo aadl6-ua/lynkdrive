@@ -17,15 +17,9 @@ import { AuthUser } from 'src/auth/auth-user.type';
 import { CurrentUser } from 'src/auth/current-user.decorator';
 import { SupabaseJwtAuthGuard } from 'src/auth/supabase-jwt-auth.guard';
 import { UploadsService } from './uploads.service';
+import type { UploadTarget } from '@lynkdrive/shared';
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
-
-type UploadTarget =
-  | 'avatar'
-  | 'id_document'
-  | 'driver_license'
-  | 'vehicle_image'
-  | 'checklist_image';
 
 class UploadImageBodyDto {
   @IsOptional()

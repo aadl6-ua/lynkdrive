@@ -54,6 +54,15 @@
     - Documentos y evidencias se devuelven como URLs firmadas temporales (`resolveFileUrl` en `common/supabase-storage.ts`); sin service role se devuelve `null`.
     - Web `apps/admin`: Vite + React + TypeScript sin librería de UI ni router (router por hash), login con Supabase Auth (sesión en `sessionStorage`), mismos tokens visuales que la app. Variables `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
 
+- **Tests de la app y contratos compartidos (2026-10-31):**
+    - `apps/mobile` usa Jest con preset `jest-expo` (versión fijada por Expo SDK). Tests en `src/**/__tests__/*.test.ts`, solo de lógica pura (helpers de `src/shared`, `src/api`, stores de Zustand con `api/http` y `api/supabase` mockeados). `jest.setup.js` fija `TZ=America/New_York` para garantizar que la presentación en Europe/Madrid no depende del dispositivo. `npm test` de la raíz ejecuta API y app.
+    - La lógica de disponibilidad del calendario vive en `apps/mobile/src/features/explore/calendarAvailability.ts` (funciones puras sin React); `CalendarPicker.tsx` solo la consume.
+    - `packages/shared` (`@lynkdrive/shared`) es la fuente de los contratos de la API: enums (`BookingStatus`, `PayoutStatus`, `ChecklistType`, `FuelType`, `Transmission`, `VehicleStatus`, `UploadTarget`, `PaymentMode`), cuerpos de petición (`*Request`) y respuestas (`*Response`). Las respuestas son genéricas en el tipo de fecha (`VehicleResponse<TDate = IsoDateString>`): la API las implementa con `Date` y la app las usa con string ISO.
+    - API: los DTOs de Nest siguen siendo clases con decoradores de `class-validator` y declaran `implements` del contrato; los alias de tipos (`BookingStatus`, etc.) se reexportan desde el paquete. Las listas en runtime para `@IsIn` siguen en la API y un test (`src/common/shared-contracts.spec.ts`) comprueba que coinciden con las del paquete.
+    - Ambas apps importan el paquete **solo con `import type`** (sin impacto en runtime ni en el bundle). El paquete se compila a `dist/` con su script `prepare` en `npm install`/`npm ci`; si se cambia, ejecutar `npm run build -w @lynkdrive/shared` antes de typecheck/tests. Metro lo resuelve vía el symlink de workspaces (verificado con import en runtime).
+    - Cualquier cambio en la forma de una respuesta o petición de la API debe reflejarse primero en `packages/shared`.
+    - CI se ejecuta también en `integracion` e incluye el export web de mobile (`npm run build -w @lynkdrive/mobile`).
+
 ---
 
 ## 1. Descripción del Proyecto
@@ -322,7 +331,8 @@ Plataforma **peer-to-peer (P2P) de alquiler de vehículos entre particulares**, 
     - la auth se prueba con JWT HS256 firmados con un secreto de test (`SUPABASE_JWT_SECRET` ficticio), sin credenciales reales de Supabase; pagos en modo prototipo.
     - BD por defecto `postgresql://postgres:postgres@localhost:55432/lynkdrive_test` (sobrescribible con `TEST_DATABASE_URL`). Ejecutar con `npm run test:e2e`. **Destruyen el esquema de esa BD**: nunca apuntar a Supabase.
 - Si se cambia el esquema base, actualizar también `apps/api/test/e2e/schema.sql`.
-- CI en `.github/workflows/ci.yml` (push/PR a `main` y `dev`): `npm ci`, lint, typecheck de todos los workspaces, build de api/shared, tests unitarios y e2e con servicio `postgis/postgis`.
+- Tests unitarios de la app mobile (Jest + `jest-expo`) en `apps/mobile/src/**/__tests__/*.test.ts`; se ejecutan con `npm test` junto a los de la API.
+- CI en `.github/workflows/ci.yml` (push/PR a `main`, `dev` e `integracion`): `npm ci`, lint, typecheck de todos los workspaces, build de shared/api y export web de mobile, tests unitarios (api + mobile) y e2e con servicio `postgis/postgis`.
 - Reglas reforzadas en backend tras añadir tests:
     - al aceptar una reserva se valida que no haya solape con reservas confirmadas y las `pending` solapadas pasan a `rejected`.
     - `POST /booking-checklists` valida fase: `check_in` solo con booking `paid_confirmed`/`in_progress`/`completed`; `check_out` solo con `in_progress`/`completed`.
@@ -888,7 +898,7 @@ lynkdrive/
         admin/              # Backoffice web (Vite + React)
         mobile/             # Expo React Native (iOS/Android/Web)
     packages/
-        shared/             # Tipos, DTOs y contratos compartidos
+        shared/             # Contratos de la API (@lynkdrive/shared), usados con import type en api y mobile
     infra/
         docker/             # docker-compose y utilidades locales
         db/

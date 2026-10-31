@@ -202,7 +202,7 @@ Rules enforced by the API:
 
 **Client-side image compression.** Before uploading, the app converts images to JPEG, resizes them (max 1024 px for avatars, 1920 px otherwise) and steps down the quality until the file fits the target (500 KB for avatars, 2 MB for the rest). If it still does not fit, the upload is cancelled before hitting the API. This keeps Supabase's free storage quota and mobile data usage under control.
 
-**Monorepo with shared types.** npm workspaces hold the API, the app and `packages/shared`, which defines the domain contract (`BookingStatus`, `FuelType`, `Transmission`, vehicle DTOs). The API and the client currently mirror these types locally; making both import `@lynkdrive/shared` directly is on the roadmap.
+**Monorepo with shared contracts.** npm workspaces hold the API, the app and `packages/shared` (`@lynkdrive/shared`), which defines the API contract: booking, checklist, vehicle and upload enums plus the request and response shapes of vehicles, bookings, checklists, reviews, payments and users. Response types are generic over the date type, so the API DTOs `implements` them with `Date` and the app consumes them with ISO strings. Both apps use `import type` only, so nothing changes at runtime; the package is compiled to `dist/` by its `prepare` script on `npm install`/`npm ci`.
 
 **Other choices.** UTC everywhere in storage and logic (shown in Europe/Madrid in the UI); soft-delete (`deleted_at`) for users and vehicles; `ON DELETE RESTRICT` from bookings to users and vehicles to protect transaction history; `TYPEORM_SYNCHRONIZE=false` outside local development, with versioned SQL migrations instead.
 
@@ -399,9 +399,9 @@ npm run dev:mobile   # Expo dev server
 
 ```bash
 npm run build   # builds every workspace (nest build, expo export --platform web, tsc)
-npm run lint       # eslint on the API and the admin web (placeholders in the other workspaces)
+npm run lint       # eslint on the API, the app and the admin web
 npm run typecheck  # tsc in every workspace
-npm run test       # jest unit tests on the API, vitest on the admin web
+npm run test       # jest on the API and the app, vitest on the admin web
 npm run test:e2e   # API e2e tests against a local Postgres + PostGIS (see Testing)
 ```
 
@@ -547,7 +547,7 @@ lynkdrive/
 │           ├── app/              # tab bar, theme tokens, shared UI
 │           └── shared/           # hooks and pure helpers
 ├── packages/
-│   └── shared/                   # shared domain types
+│   └── shared/                   # @lynkdrive/shared: API contracts used by api and mobile
 ├── infra/
 │   ├── docker/                   # docker-compose: PostgreSQL 15 + PostGIS 3.3
 │   └── db/
@@ -559,10 +559,13 @@ lynkdrive/
 
 ## Testing
 
-**Unit tests** (Jest, API workspace) cover the booking state machine and pricing, overlap and hand-over buffer rules, automatic rejection of overlapping requests, checklists, reviews, uploads (including real image content checks), the JWT and admin guards, the admin service, Stripe webhooks and the GDPR export/delete flow:
+**API unit tests** (Jest + `@nestjs/testing`, `apps/api/src/**/*.spec.ts`) cover the booking state machine and pricing, overlap and hand-over buffer rules, automatic rejection of overlapping requests, checklists, reviews, uploads (including real image content checks), the JWT and admin guards, the admin service, Stripe webhooks, the GDPR export/delete flow and that the validation enums match `@lynkdrive/shared`.
+
+**App unit tests** (Jest with the `jest-expo` preset, `apps/mobile/src/**/__tests__/*.test.ts`) cover the pure logic of the app: Europe/Madrid date and EUR formatting (including DST changes), billable days, booking status helpers, API error messages, verification gates, client-side image compression (`prepareUploadImage` with `expo-image-manipulator` and `fetch` mocked), storage URL resolution, the calendar availability rules (2 h hand-over buffer, `pending` does not block) and the Zustand stores with the Axios client and Supabase mocked. They run with the device time zone set to `America/New_York` to prove the Madrid presentation does not depend on the device.
 
 ```bash
-npm run test
+npm run test                      # API + app
+npm run test -w @lynkdrive/mobile # app only
 ```
 
 **E2E tests** run the booking flow and the admin back office against a real Postgres + PostGIS (the schema is recreated on every run). Never point them at the Supabase database:
@@ -573,7 +576,7 @@ docker run -d --name lynkdrive-test-pg -e POSTGRES_PASSWORD=postgres \
 TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:55432/lynkdrive_test npm run test:e2e
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) runs lint, typecheck, build, unit and e2e tests on every push and pull request to `integracion`, `dev` and `main`, and builds the admin web.
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, typecheck, build (including the admin web and `expo export --platform web`), API and app unit tests and the e2e tests on every push and pull request to `main`, `dev` and `integracion`.
 
 **Smoke scripts** (bash + curl + node) run against a live API:
 
@@ -601,8 +604,7 @@ The payments smoke test works in both modes: real Stripe (with `STRIPE_SECRET_KE
 ## Roadmap
 
 - "My earnings" panel for owners.
-- Import `@lynkdrive/shared` from both apps instead of mirroring types.
-- In-app chat, transactional emails and push notifications.
+- In-app chat.
 - Strong identity verification (eIDAS / DNIe / Cl@ve) instead of manual document review.
 
 ## License

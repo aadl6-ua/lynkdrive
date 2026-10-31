@@ -1,6 +1,7 @@
 import { IsString, IsUUID, MaxLength } from 'class-validator';
+import type { CreateVehicleAvailabilityWindowRequest } from '@lynkdrive/shared';
 
-export class CreateVehicleAvailabilityWindowDto {
+export class CreateVehicleAvailabilityWindowDto implements CreateVehicleAvailabilityWindowRequest {
   @IsUUID()
   vehicleId!: string;
 

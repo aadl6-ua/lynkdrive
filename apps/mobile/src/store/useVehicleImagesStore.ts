@@ -1,14 +1,9 @@
+import type { UpdateVehicleImageRequest, VehicleImageResponse } from '@lynkdrive/shared';
 import { create } from 'zustand';
 import { httpClient } from '../api/http';
 import { getApiErrorMessage } from '../shared/errors';
 
-interface VehicleImageItem {
-  id: string;
-  vehicleId: string;
-  imageUrl: string;
-  isPrimary: boolean;
-  createdAt: string;
-}
+type VehicleImageItem = VehicleImageResponse;
 
 interface VehicleImagesState {
   items: VehicleImageItem[];
@@ -20,7 +15,7 @@ interface VehicleImagesState {
   vehicleId: string | null;
   fetchByVehicleId: (vehicleId: string) => Promise<void>;
   createForVehicle: (vehicleId: string, imageUrl: string, isPrimary: boolean) => Promise<boolean>;
-  updateById: (imageId: string, vehicleId: string, payload: { isPrimary?: boolean; imageUrl?: string }) => Promise<boolean>;
+  updateById: (imageId: string, vehicleId: string, payload: UpdateVehicleImageRequest) => Promise<boolean>;
   deleteById: (imageId: string, vehicleId: string) => Promise<boolean>;
 }
 

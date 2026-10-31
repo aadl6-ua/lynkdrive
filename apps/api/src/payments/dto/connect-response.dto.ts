@@ -1,5 +1,7 @@
-export class ConnectStatusResponseDto {
-  mode!: 'stripe' | 'prototype';
+import type { ConnectLinkResponse, ConnectStatusResponse, PaymentMode } from '@lynkdrive/shared';
+
+export class ConnectStatusResponseDto implements ConnectStatusResponse {
+  mode!: PaymentMode;
   accountId!: string | null;
   detailsSubmitted!: boolean;
   chargesEnabled!: boolean;
@@ -7,7 +9,7 @@ export class ConnectStatusResponseDto {
   transfersActive!: boolean;
 }
 
-export class ConnectLinkResponseDto {
+export class ConnectLinkResponseDto implements ConnectLinkResponse {
   accountId!: string;
   url!: string;
   expiresAt!: number | null;
