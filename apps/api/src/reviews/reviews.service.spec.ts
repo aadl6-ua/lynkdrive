@@ -58,7 +58,7 @@ describe('ReviewsService', () => {
   it.each(nonCompleted)('no permite reseñar si el booking esta en %s', async (status) => {
     bookingStatus = status;
     await expect(service.createForUser(DRIVER_ID, dto())).rejects.toThrow(
-      'Review can be created only when booking is completed'
+      'Solo puedes valorar reservas completadas'
     );
     expect(reviewsRepository.save).not.toHaveBeenCalled();
   });

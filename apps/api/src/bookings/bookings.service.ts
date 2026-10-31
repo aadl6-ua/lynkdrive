@@ -222,7 +222,7 @@ export class BookingsService {
     }
 
     if (vehicle.ownerId === driverId) {
-      throw new BadRequestException('Owner cannot create a booking for their own vehicle');
+      throw new BadRequestException('No puedes reservar tu propio vehículo');
     }
 
     await this.ensureInsideAvailabilityWindow(vehicle.id, startDatetime, endDatetime);
@@ -374,7 +374,7 @@ export class BookingsService {
       const current = locked[0] as Pick<BookingRow, 'status' | 'start_datetime' | 'end_datetime'> | undefined;
 
       if (!current || current.status !== 'pending') {
-        throw new ConflictException('Booking is no longer pending');
+        throw new ConflictException('La solicitud ya no está pendiente');
       }
 
       await this.ensureNoConflicts(
@@ -491,7 +491,7 @@ export class BookingsService {
       .getOne();
 
     if (!matchingWindow) {
-      throw new BadRequestException('Requested range is outside vehicle availability windows');
+      throw new BadRequestException('Las fechas elegidas no están dentro de la disponibilidad del vehículo');
     }
   }
 
@@ -526,7 +526,7 @@ export class BookingsService {
 
     if (rows[0]?.id) {
       throw new ConflictException(
-        `There is already a booking that overlaps with the requested range (including the ${HANDOVER_BUFFER_HOURS}h hand-over buffer)`
+        `Esas fechas chocan con otra reserva confirmada (incluidas las ${HANDOVER_BUFFER_HOURS} h de entrega y recogida)`
       );
     }
   }
@@ -576,7 +576,7 @@ export class BookingsService {
 
       if (!allowedOwnerTransitions[currentStatus].includes(nextStatus)) {
         throw new BadRequestException(
-          `Invalid status transition for owner: ${currentStatus} -> ${nextStatus}`
+          `La reserva no puede pasar de ${currentStatus} a ${nextStatus}`
         );
       }
     }
@@ -594,7 +594,7 @@ export class BookingsService {
 
       if (!allowedDriverTransitions[currentStatus].includes(nextStatus)) {
         throw new BadRequestException(
-          `Invalid status transition for driver: ${currentStatus} -> ${nextStatus}`
+          `La reserva no puede pasar de ${currentStatus} a ${nextStatus}`
         );
       }
     }
@@ -603,7 +603,7 @@ export class BookingsService {
     const bookingStart = new Date(bookingStartDatetime).getTime();
 
     if (nextStatus === 'cancelled' && bookingStart <= now) {
-      throw new BadRequestException('Cannot cancel booking after start datetime');
+      throw new BadRequestException('No se puede cancelar una reserva que ya ha empezado');
     }
   }
 

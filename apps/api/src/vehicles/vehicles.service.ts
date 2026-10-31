@@ -438,7 +438,7 @@ export class VehiclesService {
     const existingVehicle = await query.getOne();
 
     if (existingVehicle) {
-      throw new ConflictException(`License plate ${licensePlate} already exists`);
+      throw new ConflictException(`Ya hay un vehículo con la matrícula ${licensePlate}`);
     }
   }
 

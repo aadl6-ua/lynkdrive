@@ -94,7 +94,7 @@ export class BookingChecklistsService {
         error.driverError !== null &&
         (error.driverError as { code?: string }).code === '23505'
       ) {
-        throw new ConflictException('Checklist for this booking and type already exists');
+        throw new ConflictException('Ya se ha enviado este checklist para la reserva');
       }
 
       throw error;
@@ -189,7 +189,7 @@ export class BookingChecklistsService {
     }
 
     if (!allowedStatuses.includes(status)) {
-      throw new BadRequestException(`Checklist ${type} is not allowed while booking is ${status}`);
+      throw new BadRequestException(`Este checklist no se puede enviar con la reserva en estado ${status}`);
     }
   }
 

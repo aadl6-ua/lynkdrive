@@ -63,7 +63,7 @@ export class ReviewsService {
     const booking = await this.ensureBookingParticipant(createReviewDto.bookingId, userId);
 
     if (booking.status !== 'completed') {
-      throw new BadRequestException('Review can be created only when booking is completed');
+      throw new BadRequestException('Solo puedes valorar reservas completadas');
     }
 
     if (createReviewDto.revieweeId === userId) {
@@ -96,7 +96,7 @@ export class ReviewsService {
         error.driverError !== null &&
         (error.driverError as { code?: string }).code === '23505'
       ) {
-        throw new ConflictException('This reviewer already created a review for this booking');
+        throw new ConflictException('Ya has valorado esta reserva');
       }
 
       throw error;
