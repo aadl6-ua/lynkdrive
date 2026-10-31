@@ -72,6 +72,7 @@ LynkDrive connects both sides. Owners publish their car with photos, price and a
 - Accepting a request automatically rejects the other overlapping `pending` requests for the same car, in one transaction with row locks; overlaps include a 2 h hand-over buffer.
 - Check-in and check-out checklists (mileage, fuel level, notes, photo evidence stored in a private bucket).
 - Cross reviews (1 to 5 stars + comment) once the trip is completed, one per participant per booking.
+- Push notifications (Expo) to the other participant on every booking change (new request, accepted, rejected, paid, cancelled, started, completed) and when a review can be left; tapping one opens the booking in My Trips.
 
 ## Screenshots
 
@@ -195,6 +196,8 @@ Rules enforced by the API:
 
 **Monorepo with shared types.** npm workspaces hold the API, the app and `packages/shared`, which defines the domain contract (`BookingStatus`, `FuelType`, `Transmission`, vehicle DTOs). The API and the client currently mirror these types locally; making both import `@lynkdrive/shared` directly is on the roadmap.
 
+**Non-blocking push notifications.** Devices register their Expo push token with `POST /api/push-tokens` (and remove it on sign-out with `DELETE /api/push-tokens/:token`). The API sends through the Expo Push API over plain HTTP (no SDK), fire-and-forget after the state change: a failure only logs a warning without personal data, and tokens Expo reports as `DeviceNotRegistered` are deleted. Tokens are included in the GDPR export and deleted with the account.
+
 **Other choices.** UTC everywhere in storage and logic (shown in Europe/Madrid in the UI); soft-delete (`deleted_at`) for users and vehicles; `ON DELETE RESTRICT` from bookings to users and vehicles to protect transaction history; `TYPEORM_SYNCHRONIZE=false` outside local development, with versioned SQL migrations instead.
 
 ## Data model
@@ -210,6 +213,7 @@ erDiagram
     VEHICLES ||--o{ BOOKINGS : "is booked in"
     BOOKINGS ||--o{ BOOKING_CHECKLISTS : "check_in / check_out"
     BOOKING_CHECKLISTS ||--o{ CHECKLIST_IMAGES : "evidence"
+    USERS ||--o{ PUSH_TOKENS : "receives push on"
     BOOKINGS ||--o{ REVIEWS : has
     USERS ||--o{ BOOKING_CHECKLISTS : submits
     USERS ||--o{ REVIEWS : "writes / receives"
@@ -291,6 +295,14 @@ erDiagram
         uuid reviewee_id FK
         int rating "1-5"
         text comment
+    }
+    PUSH_TOKENS {
+        uuid id PK
+        uuid user_id FK
+        string token UK "ExponentPushToken[...]"
+        string platform "ios | android"
+        timestamptz created_at
+        timestamptz updated_at
     }
 ```
 
@@ -397,6 +409,8 @@ npm run test:e2e   # API e2e tests against a local Postgres + PostGIS (see Testi
 | `CORS_ORIGINS` | empty | Comma-separated allowed web origins; empty keeps CORS open (native apps do not use it) |
 | `RATE_LIMIT_PER_MINUTE` | `300` | Global rate limit per client |
 | `TRUST_PROXY` | empty | Set behind a proxy (Render) so rate limiting sees the real client IP |
+| `PUSH_NOTIFICATIONS_ENABLED` | `true` | Set to `false` to stop sending push notifications (tokens are still stored) |
+| `EXPO_ACCESS_TOKEN` | optional | Expo access token, only needed if "Enhanced Security for Push" is enabled in your Expo project |
 | `NOMINATIM_BASE_URL` | `https://nominatim.openstreetmap.org` | Geocoding provider |
 | `NOMINATIM_DEFAULT_COUNTRY_CODES` | `es` | Default country filter |
 | `NOMINATIM_USER_AGENT` | `lynkdrive-tfg/0.1 (contact: ...)` | Required by Nominatim's usage policy |
@@ -415,6 +429,9 @@ npm run test:e2e   # API e2e tests against a local Postgres + PostGIS (see Testi
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | anon key | Supabase client (Auth) |
 | `EXPO_PUBLIC_SUPABASE_STORAGE_URL` | optional | Explicit Storage URL instead of deriving it |
 | `EXPO_PUBLIC_SUPABASE_PUBLIC_BUCKETS` | `vehicles,avatars` | Buckets that can be rendered directly |
+| `EXPO_PUBLIC_EAS_PROJECT_ID` | optional | EAS project id for Expo push tokens (otherwise read from `extra.eas.projectId` in the app config) |
+
+**Push notifications on real devices.** They are optional: without an EAS project id, on web, on simulators or in Expo Go for Android (remote push was removed from Expo Go in SDK 53) the app works exactly the same and the Profile card is hidden. To receive them on a physical iOS/Android device you need a development build or an EAS build (`eas build`) linked to an EAS project, with push credentials configured (APNs key for iOS, FCM V1 service account for Android; `eas credentials`). The permission is only requested when the user taps "Activar notificaciones" in Profile.
 
 ## Project structure
 
@@ -499,7 +516,7 @@ The payments smoke test works in both modes: real Stripe (with `STRIPE_SECRET_KE
 
 - "My earnings" panel for owners.
 - Import `@lynkdrive/shared` from both apps instead of mirroring types.
-- In-app chat, transactional emails, push notifications and an admin back office.
+- In-app chat, transactional emails and an admin back office.
 - Strong identity verification (eIDAS / DNIe / Cl@ve) instead of manual document review.
 
 ## License
