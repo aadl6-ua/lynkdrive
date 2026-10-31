@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import axios from 'axios';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { httpClient } from '../../api/http';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
 import { resolveStoredImageUrl } from '../../api/storage';
@@ -238,6 +239,7 @@ function getCancellationNote(booking: BookingItem): string {
 export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab }: TripsScreenProps) {
   const { userId: authUserId } = useAuthStore();
   const { profile } = useUserProfileStore();
+  const { width: windowWidth } = useWindowDimensions();
 
   const hasRequiredProfileData = hasMinimumProfileData(profile);
   const canTransact = canUseTransactionalFlows(profile);
@@ -414,9 +416,12 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
 
       setUserById((current) => {
         const next = { ...current };
-        users.forEach((result) => {
+        users.forEach((result, index) => {
           if (result.status === 'fulfilled') {
             next[result.value.id] = result.value;
+          } else if (axios.isAxiosError(result.reason) && result.reason.response?.status === 404) {
+            // La otra parte borró su cuenta (RGPD): la reserva se conserva sin sus datos.
+            next[userIds[index]] = { id: userIds[index], firstName: 'Usuario', lastName: 'eliminado', avatarUrl: null };
           }
         });
         return next;
@@ -1071,6 +1076,7 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
                 maxItems={MAX_CHECKLIST_PHOTOS}
                 disabled={checklistSaving}
                 addLabel="Añadir fotos"
+                columns={windowWidth < 768 ? 3 : 4}
               />
               {checklistErrors.photos ? <InlineMessage tone="error" message={checklistErrors.photos} /> : null}
             </Card>
@@ -1266,8 +1272,12 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
       : {
           pending: 'Tu solicitud está pendiente de respuesta del propietario.',
           accepted: '¡Aceptada! Realiza el pago para confirmar la reserva.',
-          paid_confirmed: 'Reserva confirmada. Rellena el checklist de entrega al recoger el coche.',
-          in_progress: 'Disfruta del viaje. Al devolver el coche rellena el checklist de devolución.'
+          paid_confirmed: hasChecklist('check_in')
+            ? 'Checklist de entrega enviado. El propietario iniciará el viaje al darte las llaves.'
+            : 'Reserva confirmada. Rellena el checklist de entrega al recoger el coche.',
+          in_progress: hasChecklist('check_out')
+            ? 'Checklist de devolución enviado. El propietario completará la reserva.'
+            : 'Disfruta del viaje. Al devolver el coche rellena el checklist de devolución.'
         };
 
     return (
@@ -1392,14 +1402,18 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
             <KeyValueRow label="Devolución" value={formatDateTimeMadrid(selectedBooking.endDatetime)} />
             <KeyValueRow label="Duración" value={pluralize(days, 'día', 'días')} />
             <KeyValueRow label="Precio por día" value={formatCurrencyEUR(selectedBooking.pricePerDayAtBooking)} />
-            <KeyValueRow label="Comisión de servicio" value={formatCurrencyEUR(selectedBooking.platformFee)} />
+            {/* Sin comisión guardada en la reserva no se muestra un 0,00 € engañoso (Mis ingresos la estima). */}
+            {Number(selectedBooking.platformFee) > 0 ? (
+              <KeyValueRow label="Comisión de servicio" value={formatCurrencyEUR(selectedBooking.platformFee)} />
+            ) : null}
             {isOwner ? <KeyValueRow label="Cobro al propietario" value={PAYOUT_STATUS_LABEL[selectedBooking.payoutStatus]} /> : null}
             <KeyValueRow label="Total" value={formatCurrencyEUR(selectedBooking.totalPrice)} emphasis last />
           </View>
           <Text style={styles.caption}>Solicitada el {formatDateTimeMadrid(selectedBooking.createdAt)}</Text>
         </Card>
 
-        {selectedBooking.ownerContactMethod ? (
+        {/* Tras cancelar ya no hay entrega que coordinar: el contacto deja de mostrarse. */}
+        {selectedBooking.ownerContactMethod && status !== 'cancelled' ? (
           <Card variant="muted">
             <CardHeader title="Contacto del propietario" icon="call-outline" />
             <Text style={styles.contactValue} selectable>
@@ -1697,7 +1711,7 @@ function Timeline({ status }: { status: BookingStatus }) {
       <View style={styles.closedBanner}>
         <Ionicons name={status === 'rejected' ? 'close-circle' : 'ban-outline'} size={20} color={colorTokens.alertText} />
         <Text style={styles.closedText}>
-          {status === 'rejected' ? 'El propietario rechazó la solicitud.' : 'La reserva fue cancelada.'}
+          {status === 'rejected' ? 'Solicitud no aceptada: el propietario la rechazó o confirmó otra reserva en esas fechas.' : 'La reserva fue cancelada.'}
         </Text>
       </View>
     );

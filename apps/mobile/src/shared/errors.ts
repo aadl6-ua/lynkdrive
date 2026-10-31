@@ -20,7 +20,8 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
     return message.join('. ');
   }
 
-  if (typeof message === 'string' && message.trim()) {
+  // El 500 genérico de NestJS llega en inglés y no aporta nada: mejor el mensaje del contexto.
+  if (typeof message === 'string' && message.trim() && message !== 'Internal server error') {
     return message;
   }
 

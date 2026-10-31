@@ -239,7 +239,7 @@ describe('BookingsService', () => {
       bookingRow = buildRow({ status: 'accepted', start_datetime: new Date(Date.now() - 60_000) });
       await expect(
         service.updateStatus(BOOKING_ID, asUser(DRIVER_ID), { status: 'cancelled' })
-      ).rejects.toThrow('Cannot cancel booking after start datetime');
+      ).rejects.toThrow('No se puede cancelar una reserva que ya ha empezado');
     });
 
     it('exige ownerContactMethod al aceptar si no existe uno previo', async () => {
@@ -371,7 +371,7 @@ describe('BookingsService', () => {
     it('impide al propietario reservar su propio vehiculo', async () => {
       usersRepository.findOne.mockResolvedValue({ id: OWNER_ID, isVerified: true });
       await expect(service.createForDriver(OWNER_ID, dto(24))).rejects.toThrow(
-        'Owner cannot create a booking for their own vehicle'
+        'No puedes reservar tu propio vehículo'
       );
     });
 
@@ -393,7 +393,7 @@ describe('BookingsService', () => {
     it('rechaza rangos fuera de las ventanas de disponibilidad', async () => {
       availabilityQueryBuilder.getOne.mockResolvedValue(null);
       await expect(service.createForDriver(DRIVER_ID, dto(24))).rejects.toThrow(
-        'Requested range is outside vehicle availability windows'
+        'Las fechas elegidas no están dentro de la disponibilidad del vehículo'
       );
     });
 

@@ -75,7 +75,7 @@ export function ToastHost({ bottomOffset = 0 }: { bottomOffset?: number }) {
   const meta = TOAST_ICONS[current.type];
 
   return (
-    <View pointerEvents="box-none" style={[styles.toastLayer, { bottom: bottomOffset + insets.bottom + spacingTokens.md }]}>
+    <View style={[styles.toastLayer, { pointerEvents: 'box-none' }, { bottom: bottomOffset + insets.bottom + spacingTokens.md }]}>
       <Animated.View
         accessibilityLiveRegion="polite"
         accessibilityRole="alert"

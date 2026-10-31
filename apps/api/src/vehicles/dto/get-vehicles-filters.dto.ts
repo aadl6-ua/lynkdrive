@@ -9,4 +9,6 @@ export class GetVehiclesFiltersDto implements VehicleSearchFilters {
   lat?: number;
   lng?: number;
   radiusKm?: number;
+  from?: string;
+  to?: string;
 }

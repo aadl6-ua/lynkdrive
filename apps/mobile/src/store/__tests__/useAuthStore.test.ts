@@ -1,4 +1,5 @@
 import { httpMock, resetHttpMock, setAccessTokenMock } from './httpMock';
+import { toast } from '../../shared/ui/feedback';
 import { useAuthStore } from '../useAuthStore';
 import { useUserProfileStore } from '../useUserProfileStore';
 import { useVehiclesStore } from '../useVehiclesStore';
@@ -154,6 +155,24 @@ describe('useAuthStore', () => {
 
     expect(httpMock.put).toHaveBeenCalledTimes(3);
     expect(useAuthStore.getState().error).toBeNull();
+  });
+
+  it('signUp no reintenta si el teléfono ya está en otra cuenta (409) y avisa', async () => {
+    const toastError = jest.spyOn(toast, 'error').mockImplementation(() => undefined);
+    useAuthStore.setState({ emailInput: 'ana@example.com', passwordInput: 'secreta123' });
+    mockAuth.signUp.mockResolvedValue({ data: { session: session() }, error: null });
+    httpMock.put.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 409, data: { message: 'Ese teléfono ya está asociado a otra cuenta.' } }
+    });
+    httpMock.get.mockResolvedValue({ data: {} });
+
+    await useAuthStore.getState().signUp({ firstName: 'Ana', lastName: 'Pérez', phoneNumber: '600' });
+
+    expect(httpMock.put).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState()).toMatchObject({ userId: 'user-1', loading: false });
+    expect(toastError).toHaveBeenCalledWith(expect.stringContaining('Ese teléfono ya está asociado a otra cuenta.'));
+    toastError.mockRestore();
   });
 
   it('signUp sin sesión (confirmación por email) avisa al usuario', async () => {

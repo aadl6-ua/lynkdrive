@@ -45,7 +45,7 @@ describe('helpers de estado de reserva', () => {
     expect(closed).toEqual(['rejected', 'completed', 'cancelled']);
     // Las activas coinciden con las que bloquean la baja RGPD en la API.
     expect(active).toEqual(['pending', 'accepted', 'paid_confirmed', 'in_progress']);
-    expect(billable).toEqual(['accepted', 'paid_confirmed', 'in_progress', 'completed']);
+    expect(billable).toEqual(['paid_confirmed', 'in_progress', 'completed']);
   });
 
   it('cada estado es activo o cerrado, nunca ambos', () => {

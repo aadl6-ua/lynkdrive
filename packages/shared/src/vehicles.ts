@@ -26,6 +26,8 @@ export interface VehicleResponse<TDate = IsoDateString> {
   seats: number | null;
   status: VehicleStatus;
   createdAt: TDate;
+  /** Solo en `GET /vehicles/mine/list`: retirado desde el backoffice (el propietario no puede reactivarlo). */
+  disabledByAdmin?: boolean;
 }
 
 /** Cuerpo de `POST /vehicles` (el propietario se toma del JWT). */
@@ -57,6 +59,12 @@ export interface VehicleSearchFilters {
   lat?: number;
   lng?: number;
   radiusKm?: number;
+  /**
+   * Fechas del alquiler (ISO, se envían juntas): solo vehículos con una ventana de disponibilidad
+   * que cubra el rango y sin reservas confirmadas que choquen (con el colchón de entrega).
+   */
+  from?: IsoDateString;
+  to?: IsoDateString;
 }
 
 /** Respuesta de `/vehicle-images`. */

@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { QueryFailedError } from 'typeorm';
 import { UsersService } from './users.service';
 
 const removeMock = jest.fn().mockResolvedValue({ error: null });
@@ -57,6 +58,15 @@ describe('UsersService.update', () => {
     expect(result.idDocumentUrl).toBe(baseUser.idDocumentUrl);
     expect(result.isVerified).toBe(true);
     expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it('traduce el teléfono duplicado a 409', async () => {
+    const { service, usersRepository } = buildService(baseUser);
+    usersRepository.save.mockRejectedValueOnce(
+      new QueryFailedError('UPDATE users', [], Object.assign(new Error('duplicate key'), { code: '23505', constraint: 'users_phone_number_key' }))
+    );
+
+    await expect(service.update(USER_ID, { phoneNumber: '+34611111111' })).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('rechaza referencias de storage de otro usuario', async () => {

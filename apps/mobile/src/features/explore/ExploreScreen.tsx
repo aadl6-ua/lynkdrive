@@ -70,6 +70,7 @@ import { useVehicleImagesStore } from '../../store/useVehicleImagesStore';
 import { useVehiclesStore } from '../../store/useVehiclesStore';
 import { ExploreVehiclesMap, VehicleLocationMap, type VehicleMarker } from '../maps';
 import { CalendarPicker } from './CalendarPicker';
+import type { AvailabilityWindowItem, BookingItem } from './calendarAvailability';
 import { AddressSearch } from '../../shared/components/AddressSearch';
 
 type ExploreScreenMode = 'list' | 'detail' | 'map';
@@ -107,7 +108,11 @@ type ExploreVehicle = {
   description: string;
 };
 
+/** Fechas del alquiler tal y como las devuelve el calendario (día local + hora en Madrid). */
+type FilterDates = { startDate: Date; startHour: number; endDate: Date; endHour: number };
+
 type FilterDraft = {
+  dates: FilterDates | null;
   address: string;
   location: { lat: number; lng: number } | null;
   radius: string;
@@ -124,6 +129,7 @@ type ExploreScreenProps = {
 };
 
 const EMPTY_FILTERS: FilterDraft = {
+  dates: null,
   address: '',
   location: null,
   radius: '',
@@ -156,6 +162,9 @@ const SEATS_OPTIONS: Array<{ label: string; value: SeatsFilter }> = [
 ];
 
 const RADIUS_PRESETS = ['5', '10', '25', '50', '100'];
+// El calendario del filtro no pinta disponibilidad: no depende de ningún vehículo.
+const NO_WINDOWS: AvailabilityWindowItem[] = [];
+const NO_BOOKINGS: BookingItem[] = [];
 
 /** Distancia en km entre dos coordenadas (fórmula de Haversine). */
 function getDistanceKm(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }): number {
@@ -172,8 +181,9 @@ function formatDistance(km: number): string {
 }
 
 function countActiveFilters(filters: FilterDraft): number {
-  return [filters.location, filters.maxPrice.trim(), filters.fuelType, filters.transmission, filters.seats].filter(Boolean)
-    .length;
+  return [filters.dates, filters.location, filters.maxPrice.trim(), filters.fuelType, filters.transmission, filters.seats].filter(
+    Boolean
+  ).length;
 }
 
 function ChipGroup<T extends string>({
@@ -308,6 +318,12 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
       ? { latitude: userLocationCoords.latitude, longitude: userLocationCoords.longitude }
       : null;
 
+  // Las distancias se miden desde la ubicación buscada si la hay (es por la que ordena y filtra
+  // la API); si no, desde la ubicación del usuario.
+  const distanceOrigin = appliedFilters.location
+    ? { latitude: appliedFilters.location.lat, longitude: appliedFilters.location.lng }
+    : userPoint;
+
   // Con una ubicación buscada la API ya ordena por cercanía a ese punto; si no, se ordena
   // por cercanía al usuario cuando ha dado permiso de ubicación.
   const listVehicles = useMemo(() => {
@@ -339,7 +355,9 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
       seats: filters.seats ? Number(filters.seats) : undefined,
       lat: filters.location?.lat,
       lng: filters.location?.lng,
-      radiusKm: filters.location && filters.radius.trim() && !Number.isNaN(radius) ? radius : undefined
+      radiusKm: filters.location && filters.radius.trim() && !Number.isNaN(radius) ? radius : undefined,
+      from: filters.dates ? calendarDayHourToIso(filters.dates.startDate, filters.dates.startHour) : undefined,
+      to: filters.dates ? calendarDayHourToIso(filters.dates.endDate, filters.dates.endHour) : undefined
     };
   }, []);
 
@@ -465,6 +483,14 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
 
     if (next.maxPrice.trim() && (Number.isNaN(maxPrice) || maxPrice <= 0)) {
       setFiltersError('El precio máximo debe ser un número mayor que 0.');
+      return false;
+    }
+
+    if (
+      next.dates &&
+      calendarDayHourToIso(next.dates.endDate, next.dates.endHour) <= calendarDayHourToIso(next.dates.startDate, next.dates.startHour)
+    ) {
+      setFiltersError('La fecha de fin debe ser posterior a la de inicio.');
       return false;
     }
 
@@ -612,8 +638,28 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
         setFiltersError(null);
       }}
       title="Filtros"
-      subtitle="Afina la búsqueda por precio y características"
+      subtitle="Afina la búsqueda por fechas, precio y características"
     >
+      <View style={styles.sheetSection}>
+        <Text style={styles.chipGroupLabel}>Fechas</Text>
+        {/* Se monta al abrir la hoja para partir de las fechas aplicadas. */}
+        {filtersOpen ? (
+          <CalendarPicker
+            availabilityWindows={NO_WINDOWS}
+            bookings={NO_BOOKINGS}
+            mode="filter"
+            initialDateRange={appliedFilters.dates ?? undefined}
+            onDateRangeChange={(startDate, startHour, endDate, endHour) =>
+              setDraft((current) => ({
+                ...current,
+                dates: startDate && endDate ? { startDate, startHour, endDate, endHour } : null
+              }))
+            }
+          />
+        ) : null}
+        <Text style={styles.sheetHint}>Solo verás coches con esas fechas libres.</Text>
+      </View>
+
       <View style={styles.sheetSection}>
         <Text style={styles.chipGroupLabel}>Radio de búsqueda</Text>
         <View style={styles.chipGroupRow}>
@@ -766,8 +812,8 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
     const ownerAvatarUrl = resolveStoredImageUrl(owner?.avatarUrl ?? null);
     const fuel = translateFuelType(selectedVehicle.fuelType);
     const transmission = translateTransmission(selectedVehicle.transmission);
-    const distance = userPoint
-      ? getDistanceKm(userPoint, { latitude: selectedVehicle.locationLat, longitude: selectedVehicle.locationLng })
+    const distance = distanceOrigin
+      ? getDistanceKm(distanceOrigin, { latitude: selectedVehicle.locationLat, longitude: selectedVehicle.locationLng })
       : null;
     const billableDays = bookingRange ? getBillableDays(bookingRange.startISO, bookingRange.endISO) : null;
     const upcomingBlocked = vehicleBookings
@@ -876,6 +922,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
             key={calendarKey}
             availabilityWindows={availabilityWindows}
             bookings={vehicleBookings}
+            initialDateRange={appliedFilters.dates ?? undefined}
             onDateRangeChange={(startDate, startHour, endDate, endHour) => {
               setBookingStartDate(startDate);
               setBookingStartHour(startHour);
@@ -988,7 +1035,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
           />
         </View>
 
-        <View pointerEvents="box-none" style={[styles.mapOverlay, { paddingTop: topPadding + spacingTokens.sm }]}>
+        <View style={[styles.mapOverlay, { pointerEvents: 'box-none' }, { paddingTop: topPadding + spacingTokens.sm }]}>
           <View style={[styles.mapControlsCard, { maxWidth: layoutTokens.formMaxWidth }]}>
             {controlsBar(false)}
           </View>
@@ -1061,8 +1108,8 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
               const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
               const fuel = translateFuelType(vehicle.fuelType);
               const transmission = translateTransmission(vehicle.transmission);
-              const distance = userPoint
-                ? getDistanceKm(userPoint, { latitude: vehicle.locationLat, longitude: vehicle.locationLng })
+              const distance = distanceOrigin
+                ? getDistanceKm(distanceOrigin, { latitude: vehicle.locationLat, longitude: vehicle.locationLng })
                 : null;
 
               return (
@@ -1072,6 +1119,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
                   onPress={() => handleOpenVehicleDetails(vehicle.id)}
                   accessibilityLabel={`${vehicle.brand} ${vehicle.model}, ${formatPriceCompact(vehicle.pricePerDay)} por día`}
                   accessibilityHint="Abre la ficha del vehículo"
+                  accessibilityRole="link"
                   style={[styles.vehicleCard, { width: cardWidth }]}
                 >
                   <View>

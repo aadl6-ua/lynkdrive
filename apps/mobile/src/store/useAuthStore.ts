@@ -1,8 +1,11 @@
+import axios from 'axios';
 import { create } from 'zustand';
 import { httpClient, setAccessToken } from '../api/http';
 import { supabaseClient } from '../api/supabase';
 import { getPasswordResetRedirectUrl } from '../features/auth/PasswordResetScreen';
+import { getApiErrorMessage } from '../shared/errors';
 import { LEGAL_VERSION } from '../shared/legal';
+import { toast } from '../shared/ui/feedback';
 import { unregisterPushNotifications } from '../features/notifications/pushNotifications';
 import { useUserProfileStore } from './useUserProfileStore';
 import { useVehiclesStore } from './useVehiclesStore';
@@ -55,7 +58,11 @@ async function updateMinimumProfileWithRetry(payload: RegisterProfileInput): Pro
       });
       return;
     } catch (error: unknown) {
-      if (attempt === maxAttempts) {
+      // Solo se reintenta mientras el trigger crea la fila (404) o por fallos de red; un 400/409
+      // (p. ej. teléfono ya usado en otra cuenta) no se arregla reintentando.
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+
+      if (attempt === maxAttempts || (status !== undefined && status !== 404 && status < 500)) {
         throw error;
       }
 
@@ -220,7 +227,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
 
         if (profileInput) {
-          await updateMinimumProfileWithRetry(profileInput);
+          try {
+            await updateMinimumProfileWithRetry(profileInput);
+          } catch (profileError: unknown) {
+            // La cuenta ya existe y hay sesión: se entra en la app y se avisa para completar el perfil.
+            toast.error(
+              `Tu cuenta se ha creado, pero no se pudo guardar tu perfil: ${getApiErrorMessage(
+                profileError,
+                'error inesperado.'
+              )} Complétalo en Perfil.`
+            );
+          }
           // El listener de sesión ya pudo cargar el perfil vacío creado por el
           // trigger; lo recargamos para reflejar nombre y teléfono recién guardados.
           await useUserProfileStore.getState().fetchMyProfile();

@@ -11,6 +11,8 @@ type CardProps = {
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
   accessibilityHint?: string;
+  /** 'link' cuando la tarjeta contiene otro botón (en web no se puede anidar <button>). */
+  accessibilityRole?: 'button' | 'link';
 };
 
 export function Card({
@@ -20,7 +22,8 @@ export function Card({
   padding = spacingTokens.lg,
   style,
   accessibilityLabel,
-  accessibilityHint
+  accessibilityHint,
+  accessibilityRole = 'button'
 }: CardProps) {
   const variantStyle =
     variant === 'muted' ? styles.muted : variant === 'outlined' ? styles.outlined : styles.elevated;
@@ -29,7 +32,7 @@ export function Card({
     return (
       <Pressable
         onPress={onPress}
-        accessibilityRole="button"
+        accessibilityRole={accessibilityRole}
         accessibilityLabel={accessibilityLabel}
         accessibilityHint={accessibilityHint}
         android_ripple={{ color: 'rgba(13,27,42,0.06)' }}

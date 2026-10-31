@@ -34,9 +34,9 @@ export function isBookingActive(status: BookingStatus): boolean {
   return status === 'pending' || status === 'accepted' || status === 'paid_confirmed' || status === 'in_progress';
 }
 
-/** Estados que cuentan como importe real (excluye rechazadas/canceladas). */
+/** Estados con el pago hecho, que cuentan como importe real (mismo criterio que Mis ingresos). */
 export function isBookingBillable(status: BookingStatus): boolean {
-  return status === 'accepted' || status === 'paid_confirmed' || status === 'in_progress' || status === 'completed';
+  return status === 'paid_confirmed' || status === 'in_progress' || status === 'completed';
 }
 
 export const PAYOUT_STATUS_LABEL: Record<PayoutStatus, string> = {

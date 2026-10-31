@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import axios from 'axios';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
@@ -249,7 +250,15 @@ export function ProfileScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
       );
       setReviewerById(
         Object.fromEntries(
-          reviewerRows.flatMap((result) => (result.status === 'fulfilled' ? [[result.value.id, result.value]] : []))
+          reviewerRows.flatMap((result, index) => {
+            if (result.status === 'fulfilled') {
+              return [[result.value.id, result.value]];
+            }
+            // Autor con la cuenta borrada (RGPD): su reseña se conserva sin datos personales.
+            return axios.isAxiosError(result.reason) && result.reason.response?.status === 404
+              ? [[reviewerIds[index], { id: reviewerIds[index], firstName: 'Usuario', lastName: 'eliminado', avatarUrl: null }]]
+              : [];
+          })
         )
       );
     } catch (fetchError: unknown) {
@@ -416,7 +425,8 @@ export function ProfileScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
         link.href = url;
         link.download = `lynkdrive-mis-datos-${new Date().toISOString().slice(0, 10)}.json`;
         link.click();
-        URL.revokeObjectURL(url);
+        // Revocar en el mismo tick puede cancelar la descarga en Safari y Firefox.
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
         toast.success('Descarga iniciada.');
       } else {
         await Share.share({ title: 'Mis datos de LynkDrive', message: json });

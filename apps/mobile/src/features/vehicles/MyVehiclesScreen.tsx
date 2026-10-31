@@ -289,7 +289,8 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
   }, [form, screenMode, editingVehicle]);
 
   const buildPayload = (status: VehicleItem['status']) => {
-    const seats = parseLocaleNumber(form.seats);
+    // "Sin especificar" es una cadena vacía: Number('') daría 0 plazas.
+    const seats = form.seats.trim() ? parseLocaleNumber(form.seats) : NaN;
 
     return {
       brand: form.brand.trim(),
@@ -1071,6 +1072,7 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
     }
 
     const isActive = editingVehicle.status === 'active';
+    const retiredByAdmin = !!editingVehicle.disabledByAdmin;
 
     return (
       <Screen
@@ -1090,7 +1092,12 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
           <View style={styles.summaryRow}>
             <AppImage uri={primaryImageUrl} style={styles.summaryImage} fallbackLabel="Sin portada" />
             <View style={styles.summaryInfo}>
-              <StatusChip label={isActive ? 'Publicado' : 'Oculto'} tone={isActive ? 'success' : 'neutral'} dot compact />
+              <StatusChip
+                label={retiredByAdmin ? 'Retirado' : isActive ? 'Publicado' : 'Oculto'}
+                tone={retiredByAdmin ? 'danger' : isActive ? 'success' : 'neutral'}
+                dot
+                compact
+              />
               <Text style={styles.summaryPrice}>{formatPriceCompact(editingVehicle.pricePerDay)} / día</Text>
               <Text style={styles.caption} numberOfLines={2}>
                 {editingVehicle.locationAddress}
@@ -1100,12 +1107,16 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
           <View style={styles.switchRow}>
             <View style={styles.flex1}>
               <Text style={styles.switchTitle}>Visible en Explorar</Text>
-              <Text style={styles.caption}>Desactívalo para pausar el anuncio sin borrarlo.</Text>
+              <Text style={styles.caption}>
+                {retiredByAdmin
+                  ? 'La administración ha retirado este anuncio. Contacta con soporte para volver a publicarlo.'
+                  : 'Desactívalo para pausar el anuncio sin borrarlo.'}
+              </Text>
             </View>
             <Switch
               value={isActive}
               onValueChange={(value) => void handleToggleStatus(value)}
-              disabled={statusSaving || vehiclesSaving}
+              disabled={statusSaving || vehiclesSaving || retiredByAdmin}
               trackColor={{ false: colorTokens.borderStrong, true: colorTokens.success }}
               thumbColor={Platform.OS === 'android' ? colorTokens.white : undefined}
               accessibilityLabel="Visible en Explorar"
@@ -1248,6 +1259,7 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
           : myVehicles.map((vehicle) => {
               const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);
               const isActive = vehicle.status === 'active';
+              const statusLabel = vehicle.disabledByAdmin ? 'Retirado' : isActive ? 'Publicado' : 'Oculto';
               const details = [
                 String(vehicle.year),
                 translateFuelType(vehicle.fuelType),
@@ -1261,7 +1273,7 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
                   key={vehicle.id}
                   padding={0}
                   onPress={() => handleOpenVehicleEditor(vehicle.id)}
-                  accessibilityLabel={`${vehicle.brand} ${vehicle.model}, ${isActive ? 'publicado' : 'oculto'}`}
+                  accessibilityLabel={`${vehicle.brand} ${vehicle.model}, ${statusLabel.toLowerCase()}`}
                   accessibilityHint="Abre la edición del vehículo"
                   style={[styles.vehicleCard, { width: cardWidth }]}
                 >
@@ -1273,7 +1285,12 @@ export function MyVehiclesScreen({ topPadding = 0, bottomPadding = 0, onNavigate
                       fallbackLabel="Añade fotos para destacar tu anuncio"
                     />
                     <View style={styles.statusBadge}>
-                      <StatusChip label={isActive ? 'Publicado' : 'Oculto'} tone={isActive ? 'success' : 'neutral'} dot compact />
+                      <StatusChip
+                        label={statusLabel}
+                        tone={vehicle.disabledByAdmin ? 'danger' : isActive ? 'success' : 'neutral'}
+                        dot
+                        compact
+                      />
                     </View>
                   </View>
                   <View style={styles.vehicleBody}>

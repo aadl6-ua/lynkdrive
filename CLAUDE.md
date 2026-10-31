@@ -93,6 +93,16 @@
     - Mobile: en el detalle de reserva de Mis Viajes, tarjeta "Mensajes" con contador de no leídos (también aviso en la tarjeta de la lista) que abre la pantalla secundaria full-view `apps/mobile/src/features/trips/BookingChatScreen.tsx` (volver + back de Android gestionado por `TripsScreen`). Polling cada 4 s con `after` solo con la pantalla abierta y la app en primer plano; marca como leídos al abrir y al llegar mensajes. Envío optimista con estado (enviando, enviado, leído, fallido con Reintentar/Descartar), separadores de día y horas en Europe/Madrid, botón "Ver mensajes anteriores" con `before`. Teclado: en iOS el compositor sube con la altura del teclado; en Android se detecta si la ventana se redimensiona (`adjustResize`) y si no se usa la altura del teclado; en web Intro envía y Mayús+Intro hace salto de línea. Helpers puros y testeados en `chatMessages.ts`; cliente HTTP en `messagesApi.ts`.
     - Tocar una notificación `booking_message` abre directamente la conversación (`usePushNotificationsStore.pendingBooking = { bookingId, openMessages }`).
 
+- **QA de extremo a extremo en navegador (2026-10-31):**
+    - Explorar filtra por fechas: `GET /api/vehicles?from=...&to=...` (ISO, ambas o ninguna, `from < to`; si no, 400) devuelve solo vehículos con una ventana de disponibilidad que cubra el rango y sin reservas `accepted`, `paid_confirmed`, `in_progress` o `completed` que choquen con el colchón de 2 h (`HANDOVER_BUFFER_HOURS`, ahora en `apps/api/src/common/booking-rules.ts`); las `pending` no bloquean. En la app, sección "Fechas" en la hoja de filtros (`CalendarPicker` en modo `filter`, sin colores de disponibilidad) y la ficha del vehículo precarga esas fechas en "Solicitar reserva".
+    - `GET /api/geocoding/search` responde 503 si Nominatim no contesta (antes `[]`); la app distingue error y "Sin resultados".
+    - `PUT /api/vehicles/:id`: en `fuelType`, `transmission` y `seats`, `undefined` conserva y `null` borra (misma regla que `PUT /users/me`); `seats` mínimo 1.
+    - `PUT /api/users/me` con un teléfono ya usado en otra cuenta → 409 con mensaje. En el registro la app no reintenta los 4xx (solo 404 mientras el trigger crea la fila, red y 5xx) y avisa con un toast si no pudo guardar el perfil.
+    - Cuenta bloqueada: un interceptor de axios detecta el 403 `Cuenta bloqueada por la administración` y la app muestra una pantalla única con "Cerrar sesión" (`AccountBlockedScreen`).
+    - `VehicleResponse.disabledByAdmin` (solo en `mine/list`): Mis Vehículos muestra "Retirado" y no deja reactivarlo.
+    - Mis Viajes: "Gastado"/"Ingresos" solo cuentan reservas pagadas (`paid_confirmed`, `in_progress`, `completed`), como Mis ingresos; si la otra parte borró su cuenta se muestra "Usuario eliminado".
+    - Recorrido reproducible en `scripts/e2e-web/` (`recorrido.mjs` con Playwright y `nominatim-mock.js`); instrucciones en su `README.md`.
+
 ---
 
 ## 1. Descripción del Proyecto

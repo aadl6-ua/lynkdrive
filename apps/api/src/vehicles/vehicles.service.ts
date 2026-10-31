@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { HANDOVER_BUFFER_HOURS } from '../common/booking-rules';
 import { UserEntity } from '../users/entities/user.entity';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { GetVehiclesFiltersDto } from './dto/get-vehicles-filters.dto';
@@ -97,6 +98,30 @@ export class VehiclesService {
       whereParts.push(
         `ST_DWithin(location::geography, ST_SetSRID(ST_MakePoint($${lngParamIndex}, $${latParamIndex}), 4326)::geography, $${radiusParamIndex})`
       );
+    }
+
+    if (filters.from && filters.to) {
+      params.push(filters.from);
+      const fromIndex = params.length;
+      params.push(filters.to);
+      const toIndex = params.length;
+      params.push(HANDOVER_BUFFER_HOURS);
+      const bufferIndex = params.length;
+      // Mismas reglas que al crear la reserva: el rango cabe en una ventana de disponibilidad y no
+      // choca con reservas confirmadas (colchón de entrega a ambos lados). Las pending no bloquean.
+      whereParts.push(`EXISTS (
+        SELECT 1 FROM vehicle_availability_windows w
+        WHERE w.vehicle_id = vehicles.id
+          AND w.start_datetime <= $${fromIndex}::timestamptz
+          AND w.end_datetime >= $${toIndex}::timestamptz
+      )`);
+      whereParts.push(`NOT EXISTS (
+        SELECT 1 FROM bookings b
+        WHERE b.vehicle_id = vehicles.id
+          AND b.status IN ('accepted', 'paid_confirmed', 'in_progress', 'completed')
+          AND b.start_datetime < $${toIndex}::timestamptz + make_interval(hours => $${bufferIndex})
+          AND b.end_datetime + make_interval(hours => $${bufferIndex}) > $${fromIndex}::timestamptz
+      )`);
     }
 
     const query = `
@@ -287,9 +312,11 @@ export class VehiclesService {
     const nextLocationLat = updateVehicleDto.locationLat ?? current.locationLat;
     const nextLocationLng = updateVehicleDto.locationLng ?? current.locationLng;
     const nextLocationAddress = updateVehicleDto.locationAddress ?? current.locationAddress;
-    const nextFuelType = updateVehicleDto.fuelType ?? current.fuelType;
-    const nextTransmission = updateVehicleDto.transmission ?? current.transmission;
-    const nextSeats = updateVehicleDto.seats ?? current.seats;
+    // En los campos opcionales `undefined` conserva y `null` borra (misma regla que PUT /users/me).
+    const nextFuelType = updateVehicleDto.fuelType === undefined ? current.fuelType : updateVehicleDto.fuelType;
+    const nextTransmission =
+      updateVehicleDto.transmission === undefined ? current.transmission : updateVehicleDto.transmission;
+    const nextSeats = updateVehicleDto.seats === undefined ? current.seats : updateVehicleDto.seats;
     const nextStatus = updateVehicleDto.status ?? current.status;
 
     await this.vehiclesRepository.query(
@@ -411,7 +438,7 @@ export class VehiclesService {
     const existingVehicle = await query.getOne();
 
     if (existingVehicle) {
-      throw new ConflictException(`License plate ${licensePlate} already exists`);
+      throw new ConflictException(`Ya hay un vehículo con la matrícula ${licensePlate}`);
     }
   }
 

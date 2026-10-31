@@ -83,17 +83,17 @@ export class UpdateVehicleDto implements UpdateVehicleRequest {
 
   @IsOptional()
   @IsIn(FUEL_TYPES)
-  fuelType?: FuelType;
+  fuelType?: FuelType | null;
 
   @IsOptional()
   @IsIn(TRANSMISSIONS)
-  transmission?: Transmission;
+  transmission?: Transmission | null;
 
   @IsOptional()
   @IsInt()
-  @Min(0)
+  @Min(1)
   @Max(100)
-  seats?: number;
+  seats?: number | null;
 
   @IsOptional()
   @IsIn(VEHICLE_STATUSES)

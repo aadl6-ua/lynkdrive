@@ -11,6 +11,11 @@ describe('getApiErrorMessage', () => {
     expect(getApiErrorMessage(error, 'fallback')).toBe('year must be an integer. seats must be positive');
   });
 
+  it('no muestra el 500 genérico de NestJS en inglés', () => {
+    const error = { response: { status: 500, data: { message: 'Internal server error' } } };
+    expect(getApiErrorMessage(error, 'No se pudo guardar.')).toBe('No se pudo guardar.');
+  });
+
   it('ignora mensajes vacíos y usa el fallback', () => {
     expect(getApiErrorMessage({ response: { data: { message: '   ' } } }, 'fallback')).toBe('fallback');
     expect(getApiErrorMessage({ response: { data: { message: [] } } }, 'fallback')).toBe('fallback');

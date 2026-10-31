@@ -95,7 +95,7 @@ export function PhotoGrid({
                 </Pressable>
 
                 {busy ? (
-                  <View style={styles.overlay} pointerEvents="none">
+                  <View style={[styles.overlay, { pointerEvents: 'none' }]}>
                     <ActivityIndicator color={colorTokens.white} />
                     <Text style={styles.overlayText}>
                       {item.status === 'processing'

@@ -46,6 +46,22 @@ function parseOptionalEnum<T extends string>(value: string | undefined, allowed:
   return value as T;
 }
 
+/** Rango de fechas del alquiler: ambas o ninguna, ISO válidas y `from` anterior a `to`. */
+function parseOptionalRange(from?: string, to?: string): { from?: string; to?: string } {
+  if (!from && !to) {
+    return {};
+  }
+
+  const start = from ? new Date(from) : null;
+  const end = to ? new Date(to) : null;
+
+  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
+    throw new BadRequestException('from y to deben ser fechas válidas y from anterior a to');
+  }
+
+  return { from: start.toISOString(), to: end.toISOString() };
+}
+
 @Controller('vehicles')
 export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}
@@ -72,7 +88,8 @@ export class VehiclesController {
       seats: parseOptionalNumber(query.seats),
       lat,
       lng,
-      radiusKm
+      radiusKm,
+      ...parseOptionalRange(query.from, query.to)
     };
 
     return this.vehiclesService.findAll(filters);

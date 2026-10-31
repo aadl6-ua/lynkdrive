@@ -2,6 +2,7 @@ import {
   AvailabilityWindowItem,
   BookingItem,
   getDayStatus,
+  getFilterDayStatus,
   getMadridDayBounds,
   getOwnerDayStatus,
   hasOwnerWindow
@@ -153,5 +154,11 @@ describe('modo propietario', () => {
     expect(getOwnerDayStatus(DAY, [FULL_DAY])).toBe('available');
     expect(getOwnerDayStatus(DAY, [])).toBe('unavailable');
     expect(getOwnerDayStatus(new Date(2026, 5, 30), [FULL_DAY])).toBe('past');
+  });
+
+  it('getFilterDayStatus solo bloquea los días pasados (el filtro no depende de un vehículo)', () => {
+    expect(getFilterDayStatus(DAY)).toBe('available');
+    expect(getFilterDayStatus(new Date(2026, 6, 1))).toBe('available');
+    expect(getFilterDayStatus(new Date(2026, 5, 30))).toBe('past');
   });
 });

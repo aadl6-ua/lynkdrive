@@ -322,7 +322,8 @@ async function main() {
          RETURNING id`,
         [vehicleIds[vehicleKey], userIds[driverKey], start, end, vehicle.price, total, status,
           paid ? `pi_prototype_demo_${index}` : null, status === 'completed' ? 'paid' : 'pending', contact,
-          new Date(start.getTime() - 6 * DAY)]
+          // Solicitada 6 días antes del inicio, pero nunca en el futuro.
+          new Date(Math.min(start.getTime() - 6 * DAY, Date.now() - 2 * HOUR))]
       );
       const bookingId = booking.rows[0].id;
       const baseMileage = 30000 + index * 4100;
