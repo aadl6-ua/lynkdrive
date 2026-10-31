@@ -33,6 +33,7 @@ const DEMO_PASSWORD = process.env.DEMO_PASSWORD;
 const EMAIL_DOMAIN = process.env.DEMO_EMAIL_DOMAIN || 'demo.lynkdrive.es';
 const IMAGES_DIR = process.env.DEMO_IMAGES_DIR;
 const VEHICLES_BUCKET = process.env.SUPABASE_STORAGE_VEHICLES_BUCKET || 'vehicles';
+const DOCUMENTS_BUCKET = process.env.SUPABASE_STORAGE_DOCUMENTS_BUCKET || 'documents';
 const RESET = process.argv.includes('--reset');
 
 const HOUR = 3600 * 1000;
@@ -239,9 +240,13 @@ async function main() {
         fail(`no se encontró el usuario ${email}`);
       }
 
+      // Referencias de documentos para que el perfil aparezca completo; los ficheros no se suben.
       await db.query(
-        `UPDATE users SET first_name = $2, last_name = $3, phone_number = $4, is_verified = TRUE, deleted_at = NULL WHERE id = $1`,
-        [id, user.first, user.last, user.phone]
+        `UPDATE users SET first_name = $2, last_name = $3, phone_number = $4, is_verified = TRUE, deleted_at = NULL,
+                id_document_url = $5, driver_license_url = $6
+         WHERE id = $1`,
+        [id, user.first, user.last, user.phone, `supabase://${DOCUMENTS_BUCKET}/id_document/${id}/demo.jpg`,
+          `supabase://${DOCUMENTS_BUCKET}/driver_license/${id}/demo.jpg`]
       );
       userIds[user.key] = id;
       console.log(`Usuario ${email}`);
