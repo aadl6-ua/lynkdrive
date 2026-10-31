@@ -49,6 +49,7 @@ describe('BookingsService', () => {
   let service: BookingsService;
   let bookingRow: Row | null;
   let conflictRows: Row[];
+  let checklistRows: Row[];
   let executedSql: Array<{ sql: string; params: unknown[] }>;
 
   const bookingsQuery = jest.fn();
@@ -78,6 +79,7 @@ describe('BookingsService', () => {
     jest.clearAllMocks();
     bookingRow = buildRow();
     conflictRows = [];
+    checklistRows = [{ exists: 1 }];
     executedSql = [];
 
     bookingsRepository.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
@@ -94,6 +96,10 @@ describe('BookingsService', () => {
           total_price: String(params[6])
         });
         return [{ id: BOOKING_ID }];
+      }
+
+      if (sql.includes('FROM booking_checklists')) {
+        return checklistRows;
       }
 
       if (sql.includes('FOR UPDATE')) {
@@ -132,8 +138,8 @@ describe('BookingsService', () => {
       return [];
     });
 
-    usersRepository.findOne.mockResolvedValue({ id: DRIVER_ID });
-    vehiclesRepository.findOne.mockResolvedValue({ id: VEHICLE_ID, ownerId: OWNER_ID, pricePerDay: '45.50' });
+    usersRepository.findOne.mockResolvedValue({ id: DRIVER_ID, isVerified: true });
+    vehiclesRepository.findOne.mockResolvedValue({ id: VEHICLE_ID, ownerId: OWNER_ID, pricePerDay: '45.50', status: 'active' });
     availabilityQueryBuilder.getOne.mockResolvedValue({ id: 'window' });
 
     const moduleRef = await Test.createTestingModule({
@@ -253,6 +259,24 @@ describe('BookingsService', () => {
     });
   });
 
+  describe('updateStatus: checklists obligatorios', () => {
+    it('no inicia el viaje sin checklist de entrega', async () => {
+      bookingRow = buildRow({ status: 'paid_confirmed', owner_contact_method: 'tel' });
+      checklistRows = [];
+      await expect(service.updateStatus(BOOKING_ID, asUser(OWNER_ID), { status: 'in_progress' })).rejects.toThrow(
+        'check-in'
+      );
+    });
+
+    it('no completa el viaje sin checklist de devolucion', async () => {
+      bookingRow = buildRow({ status: 'in_progress', owner_contact_method: 'tel' });
+      checklistRows = [];
+      await expect(service.updateStatus(BOOKING_ID, asUser(OWNER_ID), { status: 'completed' })).rejects.toThrow(
+        'check-out'
+      );
+    });
+  });
+
   describe('updateStatus: aceptacion con solicitudes solapadas', () => {
     it('rechaza automaticamente las solicitudes pending solapadas del mismo vehiculo', async () => {
       await service.updateStatus(BOOKING_ID, asUser(OWNER_ID), {
@@ -345,7 +369,7 @@ describe('BookingsService', () => {
     });
 
     it('impide al propietario reservar su propio vehiculo', async () => {
-      usersRepository.findOne.mockResolvedValue({ id: OWNER_ID });
+      usersRepository.findOne.mockResolvedValue({ id: OWNER_ID, isVerified: true });
       await expect(service.createForDriver(OWNER_ID, dto(24))).rejects.toThrow(
         'Owner cannot create a booking for their own vehicle'
       );
@@ -359,6 +383,11 @@ describe('BookingsService', () => {
     it('lanza NotFound si el usuario no existe', async () => {
       usersRepository.findOne.mockResolvedValue(null);
       await expect(service.createForDriver(DRIVER_ID, dto(24))).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('impide solicitar reservas sin documentacion verificada', async () => {
+      usersRepository.findOne.mockResolvedValue({ id: DRIVER_ID, isVerified: false });
+      await expect(service.createForDriver(DRIVER_ID, dto(24))).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('rechaza rangos fuera de las ventanas de disponibilidad', async () => {

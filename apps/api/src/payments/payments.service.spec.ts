@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import Stripe from 'stripe';
 import { DataSource } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
@@ -137,7 +137,20 @@ describe('PaymentsService', () => {
       });
     });
 
-    it('falls back to a platform charge when owner is not onboarded', async () => {
+    it('does not charge while the owner has not finished onboarding', async () => {
+      const stripe = createStripeMock();
+      const { dataSource } = createDataSource([
+        { match: /FROM bookings b/, result: [bookingRow()] },
+        { match: /SELECT stripe_account_id FROM users/, result: [{ stripe_account_id: null }] }
+      ]);
+      const service = new PaymentsService(dataSource, stripe as unknown as Stripe);
+
+      await expect(service.createPaymentIntentForBooking(DRIVER, 'booking-1')).rejects.toBeInstanceOf(ConflictException);
+      expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a platform charge when STRIPE_ALLOW_PLATFORM_ONLY_CHARGES=true', async () => {
+      process.env.STRIPE_ALLOW_PLATFORM_ONLY_CHARGES = 'true';
       const stripe = createStripeMock();
       stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_456', client_secret: 's', status: 'requires_payment_method' });
       const { dataSource } = createDataSource([
@@ -146,7 +159,11 @@ describe('PaymentsService', () => {
       ]);
       const service = new PaymentsService(dataSource, stripe as unknown as Stripe);
 
-      await service.createPaymentIntentForBooking(DRIVER, 'booking-1');
+      try {
+        await service.createPaymentIntentForBooking(DRIVER, 'booking-1');
+      } finally {
+        delete process.env.STRIPE_ALLOW_PLATFORM_ONLY_CHARGES;
+      }
 
       const params = stripe.paymentIntents.create.mock.calls[0][0];
       expect(params.transfer_data).toBeUndefined();

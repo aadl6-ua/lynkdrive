@@ -190,7 +190,7 @@ export class BookingsService {
   }
 
   async createForDriver(driverId: string, createBookingDto: CreateBookingDto): Promise<BookingResponseDto> {
-    await this.ensureUserExists(driverId);
+    await this.ensureVerifiedDriver(driverId);
 
     const startDatetime = this.parseDateOrThrow(createBookingDto.startDatetime, 'startDatetime');
     const endDatetime = this.parseDateOrThrow(createBookingDto.endDatetime, 'endDatetime');
@@ -199,11 +199,15 @@ export class BookingsService {
 
     const vehicle = await this.vehiclesRepository.findOne({
       where: { id: createBookingDto.vehicleId, deletedAt: IsNull() },
-      select: { id: true, ownerId: true, pricePerDay: true }
+      select: { id: true, ownerId: true, pricePerDay: true, status: true }
     });
 
     if (!vehicle) {
       throw new NotFoundException(`Vehicle ${createBookingDto.vehicleId} not found`);
+    }
+
+    if (vehicle.status !== 'active') {
+      throw new BadRequestException('Este vehículo no admite reservas ahora mismo');
     }
 
     if (vehicle.ownerId === driverId) {
@@ -280,6 +284,25 @@ export class BookingsService {
     if (role === 'driver' && updateStatusDto.status === 'paid_confirmed' && this.paymentsService.isStripeMode()) {
       // Con Stripe activo el pago solo se confirma vía /payments (webhook o confirm verificado).
       throw new BadRequestException('Payment must be completed through Stripe (/payments) in stripe mode');
+    }
+
+    // Máquina de estados: el viaje empieza tras el check-in y termina tras el check-out.
+    const requiredChecklist =
+      updateStatusDto.status === 'in_progress' ? 'check_in' : updateStatusDto.status === 'completed' ? 'check_out' : null;
+
+    if (requiredChecklist) {
+      const checklistRows = await this.bookingsRepository.query(
+        `SELECT 1 FROM booking_checklists WHERE booking_id = $1 AND type = $2 LIMIT 1`,
+        [id, requiredChecklist]
+      );
+
+      if (!checklistRows[0]) {
+        throw new BadRequestException(
+          requiredChecklist === 'check_in'
+            ? 'Falta el checklist de entrega (check-in) para iniciar el viaje'
+            : 'Falta el checklist de devolución (check-out) para completar el viaje'
+        );
+      }
     }
 
     if (updateStatusDto.status === 'cancelled' && row.status === 'paid_confirmed') {
@@ -396,14 +419,19 @@ export class BookingsService {
     return (rows[0] as BookingRow | undefined) ?? null;
   }
 
-  private async ensureUserExists(userId: string): Promise<void> {
+  // La app ya bloquea la solicitud sin verificación; aquí se aplica la misma regla en servidor.
+  private async ensureVerifiedDriver(userId: string): Promise<void> {
     const user = await this.usersRepository.findOne({
       where: { id: userId, deletedAt: IsNull() },
-      select: { id: true }
+      select: { id: true, isVerified: true }
     });
 
     if (!user) {
       throw new NotFoundException(`User ${userId} not found`);
+    }
+
+    if (!user.isVerified) {
+      throw new ForbiddenException('Tu documentación debe estar verificada para solicitar reservas');
     }
   }
 

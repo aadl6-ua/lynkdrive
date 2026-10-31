@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { httpClient } from '../../api/http';
 import { prepareUploadImage } from '../../api/prepareUploadImage';
@@ -251,6 +251,8 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
   const [driverBookings, setDriverBookings] = useState<BookingItem[]>([]);
   const [ownerBookings, setOwnerBookings] = useState<BookingItem[]>([]);
   const [roleView, setRoleView] = useState<TripsRoleView>('driver');
+  /** La vista inicial se elige una sola vez; después manda la elección del usuario. */
+  const roleViewChosenRef = useRef(false);
   const [userById, setUserById] = useState<Record<string, UserMiniProfile>>({});
   const [vehicleById, setVehicleById] = useState<Record<string, VehicleMiniInfo>>({});
 
@@ -300,6 +302,17 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
       setDriverBookings(driverResponse.data);
       setOwnerBookings(ownerResponse.data);
       setLoaded(true);
+
+      if (!roleViewChosenRef.current) {
+        roleViewChosenRef.current = true;
+        // Abre en Propietario si ahí hay solicitudes por responder y como conductor no hay nada pendiente.
+        const ownerHasPending = ownerResponse.data.some((booking) => booking.status === 'pending');
+        const driverHasAction = driverResponse.data.some((booking) => booking.status === 'accepted');
+
+        if ((ownerHasPending && !driverHasAction) || (driverResponse.data.length === 0 && ownerResponse.data.length > 0)) {
+          setRoleView('owner');
+        }
+      }
     } catch (loadError: unknown) {
       setError(getApiErrorMessage(loadError, 'No se pudieron cargar tus reservas.'));
     } finally {
@@ -579,7 +592,8 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
       },
       paid_confirmed: {
         title: 'Confirmar pago',
-        message: `Se cargará ${formatCurrencyEUR(selectedBooking.totalPrice)} y la reserva quedará confirmada.`,
+        // Este camino solo se usa en modo prototipo (con Stripe paga el PaymentSheet).
+        message: `Modo demostración: no se hará ningún cargo real. La reserva de ${formatCurrencyEUR(selectedBooking.totalPrice)} quedará confirmada.`,
         confirmLabel: 'Pagar'
       },
       in_progress: {
@@ -1121,7 +1135,9 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     const busy = statusUpdating !== null;
     const isClosed = status === 'rejected' || status === 'cancelled';
 
-    const actionButtons: Array<{ status: BookingStatus; label: string; variant?: 'primary' | 'accent' | 'dangerGhost' | 'secondary'; icon?: keyof typeof Ionicons.glyphMap }> = [];
+    const actionButtons: Array<{ status: BookingStatus; label: string; variant?: 'primary' | 'accent' | 'dangerGhost' | 'secondary'; icon?: keyof typeof Ionicons.glyphMap; blockedReason?: string }> = [];
+    // La API exige el checklist correspondiente antes de iniciar o completar el viaje.
+    const hasChecklist = (type: BookingChecklistType) => checklists.some((item) => item.type === type);
 
     if (isOwner && status === 'pending') {
       actionButtons.push(
@@ -1135,18 +1151,31 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
     }
     if (isOwner && status === 'paid_confirmed') {
       actionButtons.push(
-        { status: 'in_progress', label: 'Iniciar viaje', icon: 'key-outline' },
+        {
+          status: 'in_progress',
+          label: 'Iniciar viaje',
+          icon: 'key-outline',
+          blockedReason: hasChecklist('check_in') ? undefined : 'Podrás iniciar el viaje cuando el conductor envíe el checklist de entrega.'
+        },
         { status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' }
       );
     }
     if (isOwner && status === 'in_progress') {
-      actionButtons.push({ status: 'completed', label: 'Marcar como completada', icon: 'flag-outline' });
+      actionButtons.push({
+        status: 'completed',
+        label: 'Marcar como completada',
+        icon: 'flag-outline',
+        blockedReason: hasChecklist('check_out')
+          ? undefined
+          : 'Podrás completarla cuando el conductor envíe el checklist de devolución.'
+      });
     }
     if (!isOwner && status === 'pending') {
       actionButtons.push({ status: 'cancelled', label: 'Cancelar solicitud', variant: 'dangerGhost' });
     }
     if (!isOwner && status === 'accepted') {
       actionButtons.push({ status: 'paid_confirmed', label: `Pagar ${formatCurrencyEUR(selectedBooking.totalPrice)}`, variant: 'accent', icon: 'card-outline' });
+      actionButtons.push({ status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' });
     }
     if (!isOwner && status === 'paid_confirmed') {
       actionButtons.push({ status: 'cancelled', label: 'Cancelar reserva', variant: 'dangerGhost' });
@@ -1230,16 +1259,18 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
                     onPaid={refreshAll}
                   />
                 ) : (
-                  <Button
-                    key={action.status}
-                    label={action.label}
-                    icon={action.icon}
-                    variant={action.variant ?? 'primary'}
-                    onPress={() => void handleUpdateBookingStatus(action.status)}
-                    loading={statusUpdating === action.status}
-                    disabled={busy || !canTransact}
-                    fullWidth
-                  />
+                  <View key={action.status} style={styles.actionWithHint}>
+                    <Button
+                      label={action.label}
+                      icon={action.icon}
+                      variant={action.variant ?? 'primary'}
+                      onPress={() => void handleUpdateBookingStatus(action.status)}
+                      loading={statusUpdating === action.status}
+                      disabled={busy || !canTransact || !!action.blockedReason}
+                      fullWidth
+                    />
+                    {action.blockedReason ? <Text style={styles.caption}>{action.blockedReason}</Text> : null}
+                  </View>
                 )
               )}
               {['accepted', 'paid_confirmed'].includes(status) ? (
@@ -1461,7 +1492,10 @@ export function TripsScreen({ topPadding = 0, bottomPadding = 0, onNavigateToTab
             { value: 'owner', label: 'Propietario', icon: 'key-outline', badge: ownerPendingCount || undefined }
           ]}
           value={roleView}
-          onChange={setRoleView}
+          onChange={(value) => {
+            roleViewChosenRef.current = true;
+            setRoleView(value);
+          }}
         />
       }
     >
@@ -1543,6 +1577,11 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 /** Línea de tiempo del estado de la reserva (flujo feliz o cierre). */
+// Etiquetas cortas para que quepan en una línea en móviles estrechos.
+const TIMELINE_STEP_LABEL: Partial<Record<BookingStatus, string>> = {
+  paid_confirmed: 'Pagada'
+};
+
 function Timeline({ status }: { status: BookingStatus }) {
   if (status === 'rejected' || status === 'cancelled') {
     return (
@@ -1578,8 +1617,8 @@ function Timeline({ status }: { status: BookingStatus }) {
                 ]}
               />
             </View>
-            <Text style={[styles.timelineLabel, current ? styles.timelineLabelCurrent : null]} numberOfLines={2}>
-              {BOOKING_STATUS_LABEL[step]}
+            <Text style={[styles.timelineLabel, current ? styles.timelineLabelCurrent : null]} numberOfLines={1}>
+              {TIMELINE_STEP_LABEL[step] ?? BOOKING_STATUS_LABEL[step]}
             </Text>
           </View>
         );
@@ -1765,6 +1804,9 @@ const styles = StyleSheet.create({
   timeline: {
     flexDirection: 'row'
   },
+  actionWithHint: {
+    gap: spacingTokens.xs
+  },
   timelineStep: {
     flex: 1,
     alignItems: 'center',
@@ -1802,9 +1844,11 @@ const styles = StyleSheet.create({
     borderWidth: 6
   },
   timelineLabel: {
-    // Se deja desbordar un poco la columna para que "Completada" no se parta.
-    alignSelf: 'stretch',
-    marginHorizontal: -8,
+    // Ancho fijo centrado mayor que la columna para que "Completada" quepa en una línea.
+    width: 84,
+    minWidth: 84,
+    flexShrink: 0,
+    alignSelf: 'center',
     textAlign: 'center',
     color: colorTokens.textMuted,
     ...typographyTokens.caption,
@@ -1812,8 +1856,6 @@ const styles = StyleSheet.create({
     lineHeight: 14
   },
   timelineLabelCurrent: {
-    alignSelf: 'stretch',
-    marginHorizontal: -8,
     color: colorTokens.primary,
     ...typographyTokens.captionStrong,
     fontSize: 11,

@@ -150,16 +150,18 @@ export function ImageCarousel({ images, height = 240, emptyLabel = 'Sin fotos to
     scrollRef.current?.scrollTo({ x: 0, animated: false });
   }, [images.length]);
 
+  // Las claves distintas fuerzan un nodo nuevo: en web, si se reutiliza el del
+  // estado de carga, onLayout no vuelve a dispararse y el carrusel queda vacío.
   if (loading) {
     return (
-      <View style={[styles.carouselEmpty, { height }]}>
+      <View key="carousel-loading" style={[styles.carouselEmpty, { height }]}>
         <ActivityIndicator color={colorTokens.primary} />
       </View>
     );
   }
 
   if (images.length === 0) {
-    return <AppImage uri={null} style={[styles.carouselEmpty, { height }]} fallbackLabel={emptyLabel} />;
+    return <AppImage key="carousel-empty" uri={null} style={[styles.carouselEmpty, { height }]} fallbackLabel={emptyLabel} />;
   }
 
   const handleScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -178,7 +180,7 @@ export function ImageCarousel({ images, height = 240, emptyLabel = 'Sin fotos to
   };
 
   return (
-    <View style={[styles.carousel, { height }]} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
+    <View key="carousel" style={[styles.carousel, { height }]} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
       {width > 0 ? (
         <ScrollView
           ref={scrollRef}

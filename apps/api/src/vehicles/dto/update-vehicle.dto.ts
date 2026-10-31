@@ -1,6 +1,18 @@
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min
+} from 'class-validator';
 import {
   FUEL_TYPES,
+  MAX_PRICE_PER_DAY,
   FuelType,
   Transmission,
   TRANSMISSIONS,
@@ -16,11 +28,13 @@ export class UpdateVehicleDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(100)
   brand?: string;
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(100)
   model?: string;
 
@@ -32,17 +46,20 @@ export class UpdateVehicleDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(20)
   licensePlate?: string;
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(5000)
   description?: string;
 
   @IsOptional()
   @IsNumber({ allowNaN: false, allowInfinity: false })
-  @Min(0)
+  @Min(1)
+  @Max(MAX_PRICE_PER_DAY)
   pricePerDay?: number;
 
   @IsOptional()
@@ -59,6 +76,7 @@ export class UpdateVehicleDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(255)
   locationAddress?: string;
 

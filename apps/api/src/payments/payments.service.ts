@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -102,9 +103,16 @@ export class PaymentsService {
         // descontando la comisión de plataforma (application fee).
         params.transfer_data = { destination };
         params.application_fee_amount = this.computeApplicationFeeCents(amountCents);
-      } else {
+      } else if (process.env.STRIPE_ALLOW_PLATFORM_ONLY_CHARGES === 'true') {
+        // Opción heredada: se cobra solo en la plataforma y la transferencia queda pendiente manual.
         this.logger.warn(
           `Owner ${booking.owner_id} has no active Connect account; charging booking ${booking.booking_id} to platform only`
+        );
+      } else {
+        // Por defecto no se cobra si el dinero no puede llegar al propietario: evita custodiar
+        // fondos de terceros en la cuenta de la plataforma y transferencias manuales.
+        throw new ConflictException(
+          'El propietario todavía no ha activado sus cobros. Podrás pagar en cuanto lo haga.'
         );
       }
 

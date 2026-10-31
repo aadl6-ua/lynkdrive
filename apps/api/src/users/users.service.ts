@@ -1,6 +1,15 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import {
+  getStorageBuckets,
+  getSupabaseAdminClient,
+  isAcceptableImageValue,
+  isStorageReferenceOwnedBy,
+  parseStorageReference,
+  removeStorageReferences,
+  StorageReference
+} from '../common/supabase-storage';
 import { BookingEntity } from '../bookings/entities/booking.entity';
 import { ReviewEntity } from '../reviews/entities/review.entity';
 import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
@@ -12,6 +21,8 @@ import { UserEntity } from './entities/user.entity';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(UserEntity)
     private readonly usersRepository: Repository<UserEntity>,
@@ -20,21 +31,6 @@ export class UsersService {
     @InjectRepository(ReviewEntity)
     private readonly reviewsRepository: Repository<ReviewEntity>
   ) {}
-
-  async findAll(): Promise<UserResponseDto[]> {
-    const users = await this.usersRepository.find({
-      where: { deletedAt: IsNull() },
-      order: { createdAt: 'DESC' }
-    });
-
-    return users.map((user) => this.toResponseDto(user));
-  }
-
-  async findAllPublic(): Promise<PublicUserResponseDto[]> {
-    const users = await this.findAll();
-
-    return users.map((user) => this.toPublicDto(user));
-  }
 
   async findPublicById(id: string): Promise<PublicUserResponseDto> {
     return this.toPublicDto(await this.findById(id));
@@ -87,18 +83,76 @@ export class UsersService {
       throw new NotFoundException(`User ${id} not found`);
     }
 
-    const updatedUser = this.usersRepository.merge(user, {
-      firstName: updateUserDto.firstName ?? user.firstName,
-      lastName: updateUserDto.lastName ?? user.lastName,
-      phoneNumber: updateUserDto.phoneNumber ?? user.phoneNumber,
-      avatarUrl: updateUserDto.avatarUrl ?? user.avatarUrl,
-      idDocumentUrl: updateUserDto.idDocumentUrl ?? user.idDocumentUrl,
-      driverLicenseUrl: updateUserDto.driverLicenseUrl ?? user.driverLicenseUrl
+    const buckets = getStorageBuckets();
+    this.ensureImageValue(updateUserDto.avatarUrl, id, 'avatarUrl', { buckets: [buckets.avatars], allowExternal: true });
+    this.ensureImageValue(updateUserDto.idDocumentUrl, id, 'idDocumentUrl', { buckets: [buckets.documents], allowExternal: false });
+    this.ensureImageValue(updateUserDto.driverLicenseUrl, id, 'driverLicenseUrl', {
+      buckets: [buckets.documents],
+      allowExternal: false
     });
+
+    // undefined conserva el valor actual; null lo borra (p. ej. eliminar un documento o el avatar).
+    const pick = <T>(value: T | undefined, current: T): T => (value === undefined ? current : value);
+    const previous = { ...user };
+
+    const updatedUser = this.usersRepository.merge(user, {
+      firstName: updateUserDto.firstName?.trim() || user.firstName,
+      lastName: updateUserDto.lastName?.trim() || user.lastName,
+      phoneNumber: pick(updateUserDto.phoneNumber, user.phoneNumber),
+      avatarUrl: pick(updateUserDto.avatarUrl, user.avatarUrl),
+      idDocumentUrl: pick(updateUserDto.idDocumentUrl, user.idDocumentUrl),
+      driverLicenseUrl: pick(updateUserDto.driverLicenseUrl, user.driverLicenseUrl)
+    });
+
+    // Si cambia la documentación, la verificación anterior deja de ser válida.
+    if (
+      updatedUser.idDocumentUrl !== previous.idDocumentUrl ||
+      updatedUser.driverLicenseUrl !== previous.driverLicenseUrl
+    ) {
+      updatedUser.isVerified = false;
+    }
 
     const savedUser = await this.usersRepository.save(updatedUser);
 
+    await this.removeReplacedFiles(id, [
+      [previous.avatarUrl, savedUser.avatarUrl],
+      [previous.idDocumentUrl, savedUser.idDocumentUrl],
+      [previous.driverLicenseUrl, savedUser.driverLicenseUrl]
+    ]);
+
     return this.toResponseDto(savedUser);
+  }
+
+  private ensureImageValue(
+    value: string | null | undefined,
+    userId: string,
+    field: string,
+    options: { buckets: string[]; allowExternal: boolean }
+  ): void {
+    if (value && !isAcceptableImageValue(value, userId, options)) {
+      throw new BadRequestException(`${field} no es una imagen subida por ti`);
+    }
+  }
+
+  // Borrado best-effort de ficheros sustituidos o eliminados para no dejar documentos huérfanos.
+  private async removeReplacedFiles(userId: string, pairs: Array<[string | null, string | null]>): Promise<void> {
+    const references = pairs
+      .filter(([before, after]) => before && before !== after)
+      .map(([before]) => parseStorageReference(before))
+      .filter(
+        (reference): reference is StorageReference =>
+          reference !== null && isStorageReferenceOwnedBy(reference, userId)
+      );
+
+    try {
+      const failed = await removeStorageReferences(getSupabaseAdminClient(), references);
+
+      if (failed.length > 0) {
+        this.logger.warn(`No se pudieron borrar ficheros sustituidos en ${failed.join(', ')}`);
+      }
+    } catch {
+      this.logger.warn('No se pudieron borrar ficheros sustituidos');
+    }
   }
 
   async softDelete(id: string): Promise<void> {

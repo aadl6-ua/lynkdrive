@@ -39,6 +39,19 @@ const shortDateTimeFormatter = new Intl.DateTimeFormat(LOCALE, {
   timeZone: TIME_ZONE
 });
 
+// Igual que el anterior pero con año, para fechas fuera del año en curso.
+const shortDateTimeWithYearFormatter = new Intl.DateTimeFormat(LOCALE, {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  timeZone: TIME_ZONE
+});
+
+const yearFormatter = new Intl.DateTimeFormat(LOCALE, { year: 'numeric', timeZone: TIME_ZONE });
+
 const dateFormatter = new Intl.DateTimeFormat(LOCALE, {
   day: 'numeric',
   month: 'short',
@@ -86,7 +99,13 @@ export function formatDateTimeMadrid(value: string | Date): string {
 
 export function formatShortDateTimeMadrid(value: string | Date): string {
   const date = toDate(value);
-  return date ? cleanDot(shortDateTimeFormatter.format(date)) : '—';
+
+  if (!date) {
+    return '—';
+  }
+
+  const sameYear = yearFormatter.format(date) === yearFormatter.format(new Date());
+  return cleanDot((sameYear ? shortDateTimeFormatter : shortDateTimeWithYearFormatter).format(date));
 }
 
 export function formatDateMadrid(value: string | Date): string {

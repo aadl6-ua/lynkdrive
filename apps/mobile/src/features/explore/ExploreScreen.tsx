@@ -308,6 +308,21 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
       ? { latitude: userLocationCoords.latitude, longitude: userLocationCoords.longitude }
       : null;
 
+  // Con una ubicación buscada la API ya ordena por cercanía a ese punto; si no, se ordena
+  // por cercanía al usuario cuando ha dado permiso de ubicación.
+  const listVehicles = useMemo(() => {
+    if (appliedFilters.location || !userPoint) {
+      return exploreVehicles;
+    }
+
+    const distanceTo = (vehicle: ExploreVehicle) =>
+      getDistanceKm(userPoint, { latitude: vehicle.locationLat, longitude: vehicle.locationLng });
+
+    return [...exploreVehicles].sort((a, b) => distanceTo(a) - distanceTo(b));
+    // userPoint se recrea en cada render; dependemos de sus coordenadas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exploreVehicles, appliedFilters.location, userPoint?.latitude, userPoint?.longitude]);
+
   // Columnas de la rejilla según el ancho disponible (centrado con ancho máximo).
   const contentWidth = Math.min(width - spacingTokens.lg * 2, layoutTokens.contentMaxWidth);
   const columns = contentWidth >= 960 ? 3 : contentWidth >= 600 ? 2 : 1;
@@ -792,7 +807,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
           <SpecTile icon="calendar-outline" label="Año" value={String(selectedVehicle.year)} />
           <SpecTile icon="flash-outline" label="Combustible" value={fuel ?? 'No indicado'} />
           <SpecTile icon="cog-outline" label="Cambio" value={transmission ?? 'No indicado'} />
-          <SpecTile icon="people-outline" label="Plazas" value={selectedVehicle.seats ? String(selectedVehicle.seats) : '—'} />
+          <SpecTile icon="people-outline" label="Plazas" value={selectedVehicle.seats ? String(selectedVehicle.seats) : 'No indicado'} />
         </View>
 
         <Card>
@@ -1040,7 +1055,7 @@ export function ExploreScreen({ topPadding = 0, bottomPadding = 0, onNavigateToT
           ? Array.from({ length: columns * 2 }).map((_, index) => (
               <VehicleCardSkeleton key={index} style={{ width: cardWidth }} />
             ))
-          : exploreVehicles.map((vehicle) => {
+          : listVehicles.map((vehicle) => {
               const owner = ownerById[vehicle.ownerId];
               const ownerName = owner ? getDisplayName(owner.firstName, owner.lastName) : 'Propietario';
               const primaryImageUrl = resolveStoredImageUrl(imageByVehicleId[vehicle.id] ?? null);

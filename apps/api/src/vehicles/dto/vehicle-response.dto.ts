@@ -18,3 +18,6 @@ export class VehicleResponseDto {
   status!: VehicleStatus;
   createdAt!: Date;
 }
+
+/** Vista pública (Explorar, ficha): sin la matrícula, que solo ve el propietario. */
+export type PublicVehicleResponseDto = Omit<VehicleResponseDto, 'licensePlate'>;
