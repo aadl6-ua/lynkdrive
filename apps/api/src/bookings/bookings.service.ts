@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, IsNull, Repository } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
+import { PaymentsService } from '../payments/payments.service';
 import { UserEntity } from '../users/entities/user.entity';
 import { VehicleAvailabilityWindowEntity } from '../vehicle-availability-windows/entities/vehicle-availability-window.entity';
 import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
@@ -55,7 +56,8 @@ export class BookingsService {
     @InjectRepository(UserEntity)
     private readonly usersRepository: Repository<UserEntity>,
     @InjectRepository(VehicleAvailabilityWindowEntity)
-    private readonly availabilityRepository: Repository<VehicleAvailabilityWindowEntity>
+    private readonly availabilityRepository: Repository<VehicleAvailabilityWindowEntity>,
+    private readonly paymentsService: PaymentsService
   ) {}
 
   async findMineAsDriver(userId: string): Promise<BookingResponseDto[]> {
@@ -273,6 +275,16 @@ export class BookingsService {
 
     if (role === 'owner' && updateStatusDto.status === 'accepted' && shouldKeepOwnerContact && !row.owner_contact_method) {
       throw new BadRequestException('ownerContactMethod is required when accepting a booking');
+    }
+
+    if (role === 'driver' && updateStatusDto.status === 'paid_confirmed' && this.paymentsService.isStripeMode()) {
+      // Con Stripe activo el pago solo se confirma vía /payments (webhook o confirm verificado).
+      throw new BadRequestException('Payment must be completed through Stripe (/payments) in stripe mode');
+    }
+
+    if (updateStatusDto.status === 'cancelled' && row.status === 'paid_confirmed') {
+      // Reembolso antes de cancelar: si Stripe falla, la reserva no se cancela.
+      await this.paymentsService.refundBookingOnCancellation(id, role);
     }
 
     const nextOwnerContactMethod = shouldSetOwnerContact

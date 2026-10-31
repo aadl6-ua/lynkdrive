@@ -10,6 +10,26 @@ import { PaymentsService } from './payments.service';
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
+  @Get('config')
+  getConfig() {
+    return this.paymentsService.getConfig();
+  }
+
+  @Get('connect/status')
+  async getConnectStatus(@CurrentUser() user: AuthUser) {
+    return this.paymentsService.getConnectStatus(user);
+  }
+
+  @Post('connect/onboarding-link')
+  async createConnectOnboardingLink(@CurrentUser() user: AuthUser) {
+    return this.paymentsService.createConnectOnboardingLink(user);
+  }
+
+  @Post('connect/dashboard-link')
+  async createConnectDashboardLink(@CurrentUser() user: AuthUser) {
+    return this.paymentsService.createConnectDashboardLink(user);
+  }
+
   @Get('bookings/:bookingId')
   async getBookingPaymentStatus(
     @CurrentUser() user: AuthUser,

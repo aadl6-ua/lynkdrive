@@ -2,11 +2,12 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { Request, Response, NextFunction, json, urlencoded } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  // rawBody: necesario para verificar la firma de los webhooks de Stripe.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false, rawBody: true });
   const logger = new Logger('HTTP');
 
   app.use((req: Request, res: Response, next: NextFunction) => {
@@ -27,8 +28,8 @@ async function bootstrap() {
   }
 
   app.use(helmet());
-  app.use(json({ limit: '100kb' }));
-  app.use(urlencoded({ extended: false, limit: '100kb' }));
+  app.useBodyParser('json', { limit: '100kb' });
+  app.useBodyParser('urlencoded', { extended: false, limit: '100kb' });
 
   app.useGlobalPipes(
     new ValidationPipe({

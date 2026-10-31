@@ -24,6 +24,15 @@
 - **Mis Viajes UX operacional (2026-04-21):** checklists operan en subpantalla dedicada y permiten subida/borrado de evidencias fotográficas mediante `uploads -> checklist-images` sobre bucket privado `checklists`. Se muestra aviso legal/recomendación de evidencia en editor de checklist.
 - **Reglas de visibilidad por estado (2026-04-21):** acciones no válidas se ocultan cuando aplica y se muestran motivos explícitos de bloqueo (ej. checklists fuera de fase o reseña antes de `completed`).
 - **Reseñas en reservas (2026-04-21):** en Mis Viajes no se listan reseñas; solo se permite acción de emitir reseña cuando procede y el contenido queda consultable desde Perfil.
+- **Pagos con Stripe Connect en modo test (2026-10-30):**
+    - Doble modo según backend: con `STRIPE_SECRET_KEY` → modo `stripe`; sin ella → modo `prototype` (comportamiento demo intacto: botón `Pagar` que pasa la reserva a `paid_confirmed` sin pasarela). La app consulta `GET /api/payments/config` para saber el modo; si falla asume `prototype`.
+    - Propietarios: cuentas **Connect Express** (`country` = `STRIPE_CONNECT_COUNTRY`, por defecto `ES`). El id `acct_...` se guarda en `users.stripe_account_id` (migración `202610301200_stripe_connect_accounts.sql`). El estado de onboarding **no se persiste**: se consulta en vivo a Stripe (`GET /api/payments/connect/status`).
+    - Cobro al conductor: **destination charge** (`transfer_data.destination` = cuenta del propietario) con `application_fee_amount` = `STRIPE_APPLICATION_FEE_PERCENT` % del total (por defecto 10). Si el propietario no tiene la capability `transfers` activa, se cobra solo a la plataforma (sin destino) y se registra aviso; la transferencia queda pendiente manual.
+    - PaymentIntents con `automatic_payment_methods.allow_redirects = 'never'` (sin métodos con redirección; no hace falta `returnURL` en la app).
+    - Confirmación `accepted -> paid_confirmed`: por webhook `payment_intent.succeeded` (fuente de verdad) y, como respaldo, por `POST /payments/bookings/:id/confirm` que verifica el intent en Stripe. Ambos son idempotentes (`UPDATE ... WHERE status = 'accepted'`).
+    - En modo `stripe` se prohíbe al conductor pasar a `paid_confirmed` vía `PUT /bookings/:id/status` (solo en `prototype`).
+    - Reembolsos al cancelar desde `paid_confirmed` (antes del inicio, según máquina de estados): cancela propietario → 100%; cancela conductor → política Demo 1 (>=48h 100%, 24-48h 50%, <24h 0%). Se hace con `reverse_transfer` + `refund_application_fee` si fue destination charge y con idempotency key por reserva. Si Stripe falla, la cancelación no se aplica. En `prototype` no hay reembolsos.
+    - Mobile: pago real con **PaymentSheet** de `@stripe/stripe-react-native` (versión fijada por Expo SDK, incluida en Expo Go), cargado de forma diferida en `stripeSheet.native.ts`; en web se muestra aviso (pago con tarjeta solo en app iOS/Android). UI nueva aislada en `apps/mobile/src/features/payments/` (`PaymentAction`, `OwnerPayoutsCard`); la tarjeta de cobros de Perfil solo aparece en modo `stripe`.
 
 ---
 
@@ -183,8 +192,14 @@ Plataforma **peer-to-peer (P2P) de alquiler de vehículos entre particulares**, 
         - Modo de ejecución actual:
             - con `STRIPE_SECRET_KEY`: usa Stripe PaymentIntents reales.
             - sin `STRIPE_SECRET_KEY`: fallback de prototipo (`mode: prototype`) para no bloquear pruebas de flujo.
-        - Nota de alcance:
-            - webhooks, payouts automáticos y política completa de reembolsos quedan pendientes para iteración posterior.
+        - Stripe Connect (2026-10-30):
+            - `GET /api/payments/config` (modo `stripe`/`prototype` + `publishableKey`)
+            - `GET /api/payments/connect/status` (estado de la cuenta Express del usuario)
+            - `POST /api/payments/connect/onboarding-link` (crea cuenta Express si no existe + Account Link)
+            - `POST /api/payments/connect/dashboard-link` (login link al panel Express)
+            - `POST /api/payments/webhook` (público, sin JWT; firma verificada con `STRIPE_WEBHOOK_SECRET` sobre raw body)
+            - `GET /api/payments/connect/return` y `/refresh` (páginas públicas de retorno del onboarding)
+            - Reembolsos automáticos al cancelar desde `paid_confirmed` (ver Decisiones Cerradas).
 - Frontend mobile:
     - Cliente Supabase (`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`).
     - Gestión de sesión: `hydrateSession`, `signIn`, `signUp`, `signOut`.
@@ -820,6 +835,15 @@ SUPABASE_JWT_SECRET=<tu_jwt_secret_de_supabase>
 STRIPE_SECRET_KEY=<tu_stripe_secret_key>
 SUPABASE_STORAGE_URL=<url_del_storage>
 ```
+
+### Variables de entorno para pagos (backend, todas opcionales)
+- `STRIPE_SECRET_KEY` (`sk_test_...`; sin ella → modo prototipo)
+- `STRIPE_PUBLISHABLE_KEY` (`pk_test_...`; la app la recibe vía `/payments/config`)
+- `STRIPE_WEBHOOK_SECRET` (`whsec_...`; `stripe listen --forward-to localhost:3000/api/payments/webhook`)
+- `STRIPE_APPLICATION_FEE_PERCENT` (por defecto `10`)
+- `STRIPE_CONNECT_COUNTRY` (por defecto `ES`)
+- `API_PUBLIC_URL` (por defecto `http://localhost:3000/api`; base de return/refresh del onboarding)
+- `STRIPE_CONNECT_RETURN_URL` / `STRIPE_CONNECT_REFRESH_URL` (opcionales, sobrescriben las anteriores)
 
 ---
 

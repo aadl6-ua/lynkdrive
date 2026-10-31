@@ -49,7 +49,7 @@ function buildService(opts: { lockedStatus?: string; conflict?: boolean; initial
       })
     }
   };
-  const service = new BookingsService(repo as never, {} as never, {} as never, {} as never);
+  const service = new BookingsService(repo as never, {} as never, {} as never, {} as never, {} as never);
   return { service, calls, repo, transactions: () => transactionRuns };
 }
 

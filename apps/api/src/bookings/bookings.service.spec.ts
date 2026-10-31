@@ -8,6 +8,7 @@ import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
 import { BookingsService, HANDOVER_BUFFER_HOURS } from './bookings.service';
 import { BookingStatus } from './dto/update-booking-status.dto';
 import { BookingEntity } from './entities/booking.entity';
+import { PaymentsService } from '../payments/payments.service';
 
 const OWNER_ID = '11111111-1111-4111-8111-111111111111';
 const DRIVER_ID = '22222222-2222-4222-8222-222222222222';
@@ -66,6 +67,10 @@ describe('BookingsService', () => {
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     getOne: jest.fn()
+  };
+  const paymentsService = {
+    isStripeMode: jest.fn(() => false),
+    refundBookingOnCancellation: jest.fn(async () => undefined)
   };
   const availabilityRepository = { createQueryBuilder: jest.fn(() => availabilityQueryBuilder) };
 
@@ -137,7 +142,8 @@ describe('BookingsService', () => {
         { provide: getRepositoryToken(BookingEntity), useValue: bookingsRepository },
         { provide: getRepositoryToken(VehicleEntity), useValue: vehiclesRepository },
         { provide: getRepositoryToken(UserEntity), useValue: usersRepository },
-        { provide: getRepositoryToken(VehicleAvailabilityWindowEntity), useValue: availabilityRepository }
+        { provide: getRepositoryToken(VehicleAvailabilityWindowEntity), useValue: availabilityRepository },
+        { provide: PaymentsService, useValue: paymentsService }
       ]
     }).compile();
 
