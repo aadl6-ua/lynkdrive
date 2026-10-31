@@ -25,6 +25,7 @@ type VehicleRow = {
   seats: number | null;
   status: 'active' | 'inactive';
   created_at: Date;
+  disabled_by_admin_at?: Date | null;
 };
 
 @Injectable()
@@ -133,7 +134,8 @@ export class VehiclesService {
           transmission,
           seats,
           status,
-          created_at
+          created_at,
+          disabled_by_admin_at
         FROM vehicles
         WHERE owner_id = $1 AND deleted_at IS NULL
         ORDER BY created_at DESC
@@ -418,7 +420,9 @@ export class VehiclesService {
       transmission: row.transmission,
       seats: row.seats,
       status: row.status,
-      createdAt: new Date(row.created_at)
+      createdAt: new Date(row.created_at),
+      // Solo en el listado del propietario (mine/list): anuncio retirado por la administración.
+      ...(row.disabled_by_admin_at !== undefined ? { disabledByAdmin: !!row.disabled_by_admin_at } : {})
     };
   }
 }

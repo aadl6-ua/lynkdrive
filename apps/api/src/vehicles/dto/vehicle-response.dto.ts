@@ -17,4 +17,5 @@ export class VehicleResponseDto {
   seats!: number | null;
   status!: VehicleStatus;
   createdAt!: Date;
+  disabledByAdmin?: boolean;
 }

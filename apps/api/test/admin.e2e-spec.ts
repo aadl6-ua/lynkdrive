@@ -137,6 +137,10 @@ describe('Backoffice admin e2e', () => {
       .send({ status: 'active' })
       .expect(403);
 
+    // La app del propietario lo sabe por mine/list para explicarlo en lugar de mostrar un error.
+    const mine = await api().get('/api/vehicles/mine/list').set('Authorization', `Bearer ${ownerToken}`).expect(200);
+    expect(mine.body.find((v: { id: string }) => v.id === VEHICLE_ID)).toMatchObject({ disabledByAdmin: true });
+
     const reactivated = await asAdmin(api().put(`/api/admin/vehicles/${VEHICLE_ID}/status`))
       .send({ status: 'active' })
       .expect(200);
