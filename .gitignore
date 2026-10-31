@@ -29,3 +29,4 @@ pnpm-debug.log*
 agents.md
 
 *.tsbuildinfo
+e2e-web-output/
