@@ -126,19 +126,6 @@ export class AccountService {
     const profile = await this.findUserRow(user.sub);
 
     if (profile && !profile.deleted_at) {
-      const activeBookings = await this.dataSource.query(
-        `SELECT b.id FROM bookings b INNER JOIN vehicles v ON v.id = b.vehicle_id
-         WHERE (b.driver_id = $1 OR v.owner_id = $1) AND b.status = ANY($2::booking_status_enum[])
-         LIMIT 1`,
-        [user.sub, ACTIVE_BOOKING_STATUSES]
-      );
-
-      if (activeBookings[0]?.id) {
-        throw new ConflictException(
-          'No puedes eliminar la cuenta con reservas activas. Cancela o finaliza tus reservas primero.'
-        );
-      }
-
       const vehicleImageRows: Array<{ image_url: string }> = await this.dataSource.query(
         `SELECT vi.image_url FROM vehicle_images vi INNER JOIN vehicles v ON v.id = vi.vehicle_id
          WHERE v.owner_id = $1`,
@@ -163,6 +150,20 @@ export class AccountService {
         .filter((reference): reference is StorageReference => reference !== null);
 
       await this.dataSource.transaction(async (manager) => {
+        // Se bloquean las reservas del usuario para que no cambien de estado durante la baja.
+        const activeBookings = await manager.query(
+          `SELECT b.id FROM bookings b INNER JOIN vehicles v ON v.id = b.vehicle_id
+           WHERE (b.driver_id = $1 OR v.owner_id = $1) AND b.status = ANY($2::booking_status_enum[])
+           LIMIT 1 FOR UPDATE OF b`,
+          [user.sub, ACTIVE_BOOKING_STATUSES]
+        );
+
+        if (activeBookings[0]?.id) {
+          throw new ConflictException(
+            'No puedes eliminar la cuenta con reservas activas. Cancela o finaliza tus reservas primero.'
+          );
+        }
+
         await manager.query(
           `UPDATE vehicles SET status = 'inactive', deleted_at = COALESCE(deleted_at, NOW())
            WHERE owner_id = $1`,

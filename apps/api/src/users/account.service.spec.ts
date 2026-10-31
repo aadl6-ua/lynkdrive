@@ -44,14 +44,15 @@ describe('AccountService', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('rechaza la baja si hay reservas activas y no toca nada', async () => {
-    const { service, dataSource } = buildService((sql) => {
+    const { service, queries } = buildService((sql) => {
       if (sql.includes('FROM users')) return [profileRow];
       if (sql.includes('FROM bookings')) return [{ id: 'b1' }];
       return [];
     });
 
     await expect(service.deleteAccount(user)).rejects.toBeInstanceOf(ConflictException);
-    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(queries.some((q) => q.includes('UPDATE users') || q.includes('DELETE FROM'))).toBe(false);
+    expect(removeMock).not.toHaveBeenCalled();
     expect(deleteUserMock).not.toHaveBeenCalled();
   });
 
