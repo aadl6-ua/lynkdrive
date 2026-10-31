@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, NotFoundExc
 import { AuthUser } from '../auth/auth-user.type';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { QueryFailedError } from 'typeorm';
 import { UserEntity } from '../users/entities/user.entity';
 import { VehicleAvailabilityWindowEntity } from '../vehicle-availability-windows/entities/vehicle-availability-window.entity';
 import { VehicleEntity } from '../vehicles/entities/vehicle.entity';
@@ -316,6 +317,33 @@ describe('BookingsService', () => {
 
       expect(executedSql.some((call) => call.sql.includes('UPDATE bookings'))).toBe(false);
     });
+
+    const failAcceptWith = (error: Error) => {
+      const base = bookingsQuery.getMockImplementation()!;
+      bookingsQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
+        if (sql.includes('UPDATE bookings') && sql.includes("status = 'accepted'")) {
+          throw error;
+        }
+        return base(sql, params);
+      });
+    };
+
+    it('traduce la violacion de excl_bookings_no_overlap a Conflict', async () => {
+      failAcceptWith(new QueryFailedError('UPDATE bookings', [], Object.assign(new Error('excl'), { code: '23P01' })));
+
+      await expect(
+        service.updateStatus(BOOKING_ID, asUser(OWNER_ID), { status: 'accepted', ownerContactMethod: 'tel' })
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('no oculta otros errores de BD al aceptar', async () => {
+      const other = new QueryFailedError('UPDATE bookings', [], Object.assign(new Error('boom'), { code: '40001' }));
+      failAcceptWith(other);
+
+      await expect(
+        service.updateStatus(BOOKING_ID, asUser(OWNER_ID), { status: 'accepted', ownerContactMethod: 'tel' })
+      ).rejects.toBe(other);
+    });
   });
 
   describe('createForDriver', () => {
@@ -378,6 +406,12 @@ describe('BookingsService', () => {
     it('lanza NotFound si el vehiculo no existe', async () => {
       vehiclesRepository.findOne.mockResolvedValue(null);
       await expect(service.createForDriver(DRIVER_ID, dto(24))).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rechaza reservar un vehiculo inactivo', async () => {
+      vehiclesRepository.findOne.mockResolvedValue({ id: VEHICLE_ID, ownerId: OWNER_ID, pricePerDay: '45.50', status: 'inactive' });
+      await expect(service.createForDriver(DRIVER_ID, dto(24))).rejects.toBeInstanceOf(BadRequestException);
+      expect(executedSql.some((call) => call.sql.includes('INSERT INTO bookings'))).toBe(false);
     });
 
     it('lanza NotFound si el usuario no existe', async () => {

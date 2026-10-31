@@ -7,7 +7,7 @@ import {
   Optional
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, IsNull, Repository } from 'typeorm';
+import { EntityManager, IsNull, QueryFailedError, Repository } from 'typeorm';
 import { AuthUser } from 'src/auth/auth-user.type';
 import { HANDOVER_BUFFER_HOURS } from '../common/booking-rules';
 import { BookingEmailEvent, BookingNotificationsService } from '../notifications/booking-notifications.service';
@@ -22,7 +22,11 @@ import { BookingStatus, UpdateBookingStatusDto } from './dto/update-booking-stat
 import { BookingEntity } from './entities/booking.entity';
 
 // Colchon operativo (entrega/recogida) que cada reserva bloquea tras su fin real.
+// Debe coincidir con public.booking_blocked_range (migracion 202610310000_bookings_no_overlap_constraint).
 export { HANDOVER_BUFFER_HOURS };
+
+// SQLSTATE de violacion de restriccion EXCLUDE (excl_bookings_no_overlap).
+const EXCLUSION_VIOLATION = '23P01';
 
 const BLOCKING_STATUSES_SQL = `'accepted', 'paid_confirmed', 'in_progress', 'completed'`;
 
@@ -362,8 +366,28 @@ export class BookingsService {
 
   // Acepta una solicitud y rechaza las pending solapadas del mismo vehiculo en una unica transaccion.
   // Se bloquea la fila del vehiculo para serializar aceptaciones concurrentes sobre el mismo coche.
-  // Devuelve los ids de las solicitudes pending rechazadas automáticamente.
   private async acceptAtomically(row: BookingRow, ownerContactMethod: string | null): Promise<string[]> {
+    try {
+      return await this.acceptInTransaction(row, ownerContactMethod);
+    } catch (error) {
+      // Ultima barrera: la restriccion de BD detecta un solape que la comprobacion previa no vio.
+      if (
+        error instanceof QueryFailedError &&
+        typeof error.driverError === 'object' &&
+        error.driverError !== null &&
+        (error.driverError as { code?: string }).code === EXCLUSION_VIOLATION
+      ) {
+        throw new ConflictException(
+          `Ya hay una reserva que se solapa con esas fechas (incluido el margen de ${HANDOVER_BUFFER_HOURS} h para la entrega)`
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  // Devuelve los ids de las solicitudes pending rechazadas automáticamente.
+  private async acceptInTransaction(row: BookingRow, ownerContactMethod: string | null): Promise<string[]> {
     return this.bookingsRepository.manager.transaction(async (manager: EntityManager) => {
       await manager.query(`SELECT id FROM vehicles WHERE id = $1 FOR UPDATE`, [row.vehicle_id]);
 
